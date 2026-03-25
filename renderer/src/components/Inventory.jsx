@@ -1,18 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 const Inventory = () => {
+  const [categories, setCategories] = useState([]);
   const [form, setForm] = useState({
     name: "", category_id: "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: ""
   });
+
+  const loadCategories = async () => {
+    if (window.api && window.api.getCategories) {
+      const cats = await window.api.getCategories();
+      setCategories(cats);
+      if (cats.length > 0) {
+        setForm(prev => ({ ...prev, category_id: cats[0].id }));
+      }
+    }
+  };
+
+  useEffect(() => { loadCategories(); }, []);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   const addProduct = async (e) => {
     e.preventDefault();
     if (window.api && window.api.addProduct) {
-      await window.api.addProduct({ ...form, price: Number(form.price), quantity: Number(form.quantity) });
+      await window.api.addProduct({ ...form, price: Number(form.price), quantity: Number(form.quantity), category_id: Number(form.category_id) });
       alert("Product registered in database!");
-      setForm({ name: "", category_id: "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "" });
+      setForm({ name: "", category_id: categories.length > 0 ? categories[0].id : "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "" });
     }
   };
 
@@ -22,10 +35,16 @@ const Inventory = () => {
         <div className="admin-card-header">Add New Product details</div>
         <div className="admin-card-body">
           <form onSubmit={addProduct}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', marginBottom: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '25px', marginBottom: '20px' }}>
               <div className="form-group">
                 <label className="form-label">Product Name</label>
                 <input className="form-input" name="name" value={form.name} onChange={handleChange} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Category (GST)</label>
+                <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange}>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Barcode / SKU</label>

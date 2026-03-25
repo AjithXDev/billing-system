@@ -4,8 +4,8 @@ const ProductList = () => {
   const [products, setProducts] = useState([]);
   
   const load = async () => {
-    if (window.api && window.api.getProducts) {
-      setProducts(await window.api.getProducts());
+    if (window.api && window.api.getProductsFull) {
+      setProducts(await window.api.getProductsFull());
     }
   };
   

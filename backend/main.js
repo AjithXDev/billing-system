@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const db = require("./database/db");
+const db = require("../database/db");
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -17,6 +17,11 @@ function createWindow() {
 app.whenReady().then(createWindow);
 
 
+// 🟢 GET CATEGORIES
+ipcMain.handle("get-categories", async () => {
+  return db.prepare("SELECT * FROM categories").all();
+});
+
 // 🟢 ADD PRODUCT
 ipcMain.handle("add-product", async (event, product) => {
   const {
@@ -26,23 +31,22 @@ ipcMain.handle("add-product", async (event, product) => {
     cost_price,
     quantity,
     unit,
-    barcode,
-    gst
+    barcode
   } = product;
 
+  // We ensure GST is null/0 when inserting but schema doesn't care actually if removed
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, price, cost_price, quantity, unit, barcode, gst)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, price, cost_price, quantity, unit, barcode)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
     price,
-    cost_price,
+    cost_price || 0,
     quantity,
     unit,
-    barcode,
-    gst || 0
+    barcode ? String(barcode) : null
   );
 
   return { message: "Product added" };
@@ -54,32 +58,26 @@ ipcMain.handle("get-products-full", () => {
   return db.prepare(`
     SELECT 
       p.*,
-      c.gst as category_gst
+      c.gst as category_gst,
+      c.name as category_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
   `).all();
 });
 
 
-// 🟢 GET PRODUCTS (BASIC)
-ipcMain.handle("get-products", async () => {
-  return db.prepare("SELECT * FROM products").all();
-});
-
-
-// 🟢 BULK UPDATE (STOCK + GST)
+// 🟢 BULK UPDATE (STOCK ONLY)
 ipcMain.handle("bulkUpdateProducts", async (event, updates) => {
   const stmt = db.prepare(`
     UPDATE products 
     SET 
-      quantity = quantity + ?, 
-      gst = ?
+      quantity = quantity + ?
     WHERE id = ?
   `);
 
   const transaction = db.transaction((items) => {
     for (const item of items) {
-      stmt.run(item.addQty, item.gst, item.id);
+      stmt.run(item.addQty, item.id);
     }
   });
 
@@ -89,18 +87,48 @@ ipcMain.handle("bulkUpdateProducts", async (event, updates) => {
 });
 
 
-// 🟢 CREATE INVOICE (WITH GST SAVE)
-ipcMain.handle("create-invoice", async (event, cart) => {
+// 🟢 SEARCH CUSTOMER BY PHONE
+ipcMain.handle("search-customer", async (event, phone) => {
+  return db.prepare("SELECT * FROM customers WHERE phone = ?").get(phone);
+});
+
+// 🟢 CREATE INVOICE (CUSTOMER + PAYMENT)
+ipcMain.handle("create-invoice", async (event, data) => {
+  const { cart, customer, paymentMode } = data;
   let total = 0;
 
   cart.forEach(item => {
     total += (item.total + item.gstAmt);
   });
 
+  // Handle Customer Save/Update
+  let customerId = null;
+  if (customer && customer.phone) {
+    const existing = db.prepare("SELECT * FROM customers WHERE phone = ?").get(customer.phone);
+    if (!existing) {
+      const res = db.prepare("INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)").run(
+        customer.name || "", customer.phone, customer.address || ""
+      );
+      customerId = res.lastInsertRowid;
+    } else {
+      db.prepare("UPDATE customers SET name = ?, address = ? WHERE phone = ?").run(
+        customer.name || existing.name, customer.address || existing.address, customer.phone
+      );
+      customerId = existing.id;
+    }
+  }
+
   const result = db.prepare(`
-    INSERT INTO invoices (total_amount)
-    VALUES (?)
-  `).run(total);
+    INSERT INTO invoices (customer_name, customer_phone, customer_address, customer_id, payment_mode, total_amount)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    customer?.name || "",
+    customer?.phone || "",
+    customer?.address || "",
+    customerId,
+    paymentMode || "Cash",
+    total
+  );
 
   const invoiceId = result.lastInsertRowid;
 
@@ -118,7 +146,6 @@ ipcMain.handle("create-invoice", async (event, cart) => {
 
   const transaction = db.transaction((items) => {
     for (const item of items) {
-
       insertItem.run(
         invoiceId,
         item.id,
@@ -134,5 +161,5 @@ ipcMain.handle("create-invoice", async (event, cart) => {
 
   transaction(cart);
 
-  return { message: "Invoice created 🔥", invoiceId };
+  return { message: "Invoice created successfully! 🔥", invoiceId };
 });

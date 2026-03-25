@@ -7,8 +7,8 @@ const BulkUpdate = () => {
   const [updates, setUpdates] = useState({}); // store per product changes
 
   const load = async () => {
-    if (window.api && window.api.getProducts) {
-      const data = await window.api.getProducts();
+    if (window.api && window.api.getProductsFull) {
+      const data = await window.api.getProductsFull();
       setProducts(data);
     }
   };
@@ -27,8 +27,8 @@ const BulkUpdate = () => {
     }
 
     const filtered = products.filter(p =>
-      p.name.toLowerCase().includes(value.toLowerCase()) ||
-      (p.barcode && p.barcode.includes(value))
+      (p.name && String(p.name).toLowerCase().includes(value.toLowerCase())) ||
+      (p.barcode && String(p.barcode).trim() === value.trim())
     );
 
     setSuggestions(filtered);
@@ -49,13 +49,12 @@ const BulkUpdate = () => {
   const processUpdate = async () => {
     const payload = Object.keys(updates).map(id => ({
       id: Number(id),
-      addQty: Number(updates[id]?.qty || 0),
-      gst: Number(updates[id]?.gst || 0)
+      addQty: Number(updates[id]?.qty || 0)
     }));
 
     if (window.api && window.api.bulkUpdateProducts) {
       await window.api.bulkUpdateProducts(payload);
-      alert("Stock + GST Updated Successfully!");
+      alert("Stock Updated Successfully!");
       setUpdates({});
       load();
     }
@@ -66,7 +65,7 @@ const BulkUpdate = () => {
       <div className="admin-card" style={{ maxWidth: "1100px" }}>
         
         <div className="admin-card-header">
-          Smart Bulk Stock + GST Update
+          Smart Bulk Stock Update
         </div>
 
         <div className="admin-card-body">
@@ -107,23 +106,27 @@ const BulkUpdate = () => {
               <thead>
                 <tr>
                   <th>Product</th>
+                  <th style={{ textAlign: "center" }}>Category GST %</th>
                   <th style={{ textAlign: "center" }}>Current</th>
                   <th style={{ textAlign: "center" }}>Add Qty</th>
                   <th style={{ textAlign: "center" }}>Final</th>
-                  <th style={{ textAlign: "center" }}>GST %</th>
                 </tr>
               </thead>
 
               <tbody>
                 {products
-                  .filter(p => p.name.toLowerCase().includes(filter.toLowerCase()))
+                  .filter(p => !filter || (p.name && String(p.name).toLowerCase().includes(filter.toLowerCase())))
                   .map(p => {
                     const add = Number(updates[p.id]?.qty || 0);
-                    const gst = updates[p.id]?.gst || "";
+                    const catGst = p.category_gst || 0;
 
                     return (
                       <tr key={p.id}>
                         <td style={{ fontWeight: 600 }}>{p.name}</td>
+
+                        <td style={{ textAlign: "center", color: '#444' }}>
+                          {catGst}%
+                        </td>
 
                         <td style={{ textAlign: "center" }}>
                           {p.quantity}
@@ -143,19 +146,6 @@ const BulkUpdate = () => {
 
                         <td style={{ textAlign: "center", fontWeight: "bold" }}>
                           {p.quantity + add}
-                        </td>
-
-                        <td style={{ textAlign: "center" }}>
-                          <input
-                            type="number"
-                            className="form-input"
-                            style={{ width: "80px", textAlign: "center" }}
-                            placeholder="GST %"
-                            value={gst}
-                            onChange={(e) =>
-                              handleChange(p.id, "gst", e.target.value)
-                            }
-                          />
                         </td>
                       </tr>
                     );

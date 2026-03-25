@@ -5,11 +5,37 @@ import ProductList from "./components/ProductList";
 import BulkUpdate from "./components/BulkUpdate";
 import "./App.css";
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorInfo: error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("UI Crash Intercepted:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '50px', color: 'red', fontFamily: 'monospace' }}>
+          <h2>Application Crash Detected!</h2>
+          <p>{this.state.errorInfo && this.state.errorInfo.toString()}</p>
+          <button onClick={() => window.location.reload()} style={{ padding: '10px' }}>Reload App</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [currentView, setCurrentView] = useState('pos');
 
   return (
-    <div className="app-container">
+    <ErrorBoundary>
+      <div className="app-container">
       {/* VERTICAL ICON-ONLY SIDEBAR - HIDDEN ONLY ON POS SCREEN */}
       {currentView !== 'pos' && (
         <nav className="sidebar-vertical">
@@ -90,6 +116,7 @@ function App() {
         </div>
       </main>
     </div>
+    </ErrorBoundary>
   );
 }
 
