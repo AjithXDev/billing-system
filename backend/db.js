@@ -1,7 +1,13 @@
 const Database = require("better-sqlite3");
 const path = require("path");
 
-const db = new Database(path.join(__dirname, "billing.db"));
+const { app } = require("electron");
+const isDev = !app.isPackaged;
+const dbPath = isDev 
+  ? path.join(__dirname, "billing.db") 
+  : path.join(app.getPath("userData"), "billing.db");
+
+const db = new Database(dbPath);
 
 
 // 🟢 CATEGORIES TABLE (GST BASE)

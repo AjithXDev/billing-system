@@ -3,21 +3,39 @@
   "version": "1.0.0",
   "main": "backend/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build:frontend": "cd Frontend && npm run build",
+    "build": "npm run build:frontend && electron-builder"
+  },
+  "build": {
+    "appId": "com.smart.billing",
+    "productName": "Smart Billing",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "backend/**/*",
+      "Frontend/dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    }
   },
   "keywords": [],
-  "author": "",
+  "author": "Developer",
   "license": "ISC",
-  "description": "",
+  "description": "Smart Billing Desktop Application",
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "electron": "^41.0.4",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "vite": "^8.0.2"
+    "better-sqlite3": "^12.8.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",
-    "electron-rebuild": "^3.2.9"
+    "electron": "^41.0.4",
+    "electron-builder": "^26.8.1",
+    "electron-rebuild": "^3.2.9",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^8.0.2"
   }
 }

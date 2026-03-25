@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const db = require("../database/db");
+const db = require("./db");
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -11,7 +11,11 @@ function createWindow() {
     },
   });
 
-  win.loadURL("http://localhost:5173");
+  if (app.isPackaged) {
+    win.loadFile(path.join(__dirname, "..", "Frontend", "dist", "index.html"));
+  } else {
+    win.loadURL("http://localhost:5173");
+  }
 }
 
 app.whenReady().then(createWindow);
