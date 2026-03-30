@@ -7,4 +7,7 @@ contextBridge.exposeInMainWorld("api", {
   bulkUpdateProducts: (data) => ipcRenderer.invoke("bulkUpdateProducts", data),
   getCategories: () => ipcRenderer.invoke("get-categories"),
   searchCustomer: (phone) => ipcRenderer.invoke("search-customer", phone),
+  editProduct: (data) => ipcRenderer.invoke("edit-product", data),
+  deleteProduct: (id) => ipcRenderer.invoke("delete-product", id),
+  sendWhatsapp: (phone, text) => ipcRenderer.invoke("send-whatsapp", phone, text),
 });

@@ -152,7 +152,7 @@ const POS = () => {
     const validItems = billItems.filter(i => i.qty > 0 && i.id);
     if (validItems.length === 0) return;
 
-    if (paymentMode === "Cash" && Number(amountReceived) < Number(grandTotal)) {
+    if (paymentMode === "Cash" && Math.round(Number(amountReceived) * 100) < Math.round(Number(grandTotal) * 100)) {
       alert(`Insufficient Cash! Need ₹${(Number(grandTotal) - Number(amountReceived)).toFixed(2)} more.`);
       return;
     }
@@ -166,6 +166,11 @@ const POS = () => {
       const res = await window.api.createInvoice(payload);
       setLastInvoiceId(res.invoiceId);
       setInvoiceSuccess(true);
+      
+      // Send WhatsApp Msg
+      if (customer && customer.phone && customer.phone.length >= 10 && window.api.sendWhatsapp) {
+        window.api.sendWhatsapp(customer.phone, `Thanks for purchasing this product, come again later! Your total bill amount is ₹${grandTotal}. Have a great day!`);
+      }
     }
   };
 
@@ -426,9 +431,9 @@ const POS = () => {
       </div>
 
       {/* ROWS */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: "100px" }}>
         {billItems.map((item, idx) => (
-          <div key={item.tempId} className="pos-row">
+          <div key={item.tempId} className="pos-row" style={{ position: 'relative', zIndex: currentRow === idx ? 100 : 1 }}>
             <div className="pos-cell" style={{ justifyContent: "center" }}>
               {idx + 1}
             </div>

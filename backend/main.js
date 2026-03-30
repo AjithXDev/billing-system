@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const db = require("./db");
 
@@ -14,7 +14,7 @@ function createWindow() {
   if (app.isPackaged) {
     win.loadFile(path.join(__dirname, "..", "Frontend", "dist", "index.html"));
   } else {
-    win.loadURL("http://localhost:5173");
+    win.loadURL("http://localhost:5174");
   }
 }
 
@@ -54,6 +54,30 @@ ipcMain.handle("add-product", async (event, product) => {
   );
 
   return { message: "Product added" };
+});
+
+// 🟢 EDIT PRODUCT
+ipcMain.handle("edit-product", async (event, product) => {
+  const { id, name, category_id, price, cost_price, quantity, unit, barcode } = product;
+  db.prepare(`
+    UPDATE products 
+    SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?
+    WHERE id=?
+  `).run(name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, id);
+  return { message: "Product updated" };
+});
+
+// 🟢 DELETE PRODUCT
+ipcMain.handle("delete-product", async (event, id) => {
+  db.prepare("DELETE FROM products WHERE id=?").run(id);
+  return { message: "Product deleted" };
+});
+
+// 🟢 SEND WHATSAPP
+ipcMain.handle("send-whatsapp", async (event, phone, text) => {
+  const encodedText = encodeURIComponent(text);
+  shell.openExternal(`whatsapp://send?phone=91${phone}&text=${encodedText}`);
+  return { message: "WhatsApp opened" };
 });
 
 
