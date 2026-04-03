@@ -1,32 +1,53 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const db = require("./db");
+const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
+const { startDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
+
+let mainWindow = null;
 
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1000,
-    height: 700,
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
   });
 
   if (app.isPackaged) {
-    win.loadFile(path.join(__dirname, "..", "Frontend", "dist", "index.html"));
+    mainWindow.loadFile(path.join(__dirname, "..", "Frontend", "dist", "index.html"));
   } else {
-    win.loadURL("http://localhost:5174");
+    mainWindow.loadURL("http://localhost:5174");
   }
+
+  // Start WhatsApp client AFTER the window has loaded so QR events reach the renderer
+  mainWindow.webContents.once("did-finish-load", () => {
+    initWhatsApp(mainWindow);
+    // Start owner mobile dashboard HTTP server
+    startDashboardServer(mainWindow);
+  });
 }
 
 app.whenReady().then(createWindow);
 
+
+// 🟢 GET DASHBOARD URL (local)
+ipcMain.handle("get-dashboard-url", async () => {
+  return getDashboardURL();
+});
+
+// 🟢 GET TUNNEL URL (internet)
+ipcMain.handle("get-tunnel-url", async () => {
+  return getTunnelURL();
+});
 
 // 🟢 GET CATEGORIES
 ipcMain.handle("get-categories", async () => {
   return db.prepare("SELECT * FROM categories").all();
 });
 
-// 🟢 ADD PRODUCT
+// 🟢 ADD PRODUCT (with expiry_date)
 ipcMain.handle("add-product", async (event, product) => {
   const {
     name,
@@ -35,14 +56,14 @@ ipcMain.handle("add-product", async (event, product) => {
     cost_price,
     quantity,
     unit,
-    barcode
+    barcode,
+    expiry_date
   } = product;
 
-  // We ensure GST is null/0 when inserting but schema doesn't care actually if removed
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, price, cost_price, quantity, unit, barcode)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
@@ -50,20 +71,21 @@ ipcMain.handle("add-product", async (event, product) => {
     cost_price || 0,
     quantity,
     unit,
-    barcode ? String(barcode) : null
+    barcode ? String(barcode) : null,
+    expiry_date || null
   );
 
   return { message: "Product added" };
 });
 
-// 🟢 EDIT PRODUCT
+// 🟢 EDIT PRODUCT (with expiry_date)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, price, cost_price, quantity, unit, barcode } = product;
+  const { id, name, category_id, price, cost_price, quantity, unit, barcode, expiry_date } = product;
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?
+    SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?
     WHERE id=?
-  `).run(name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, id);
+  `).run(name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, id);
   return { message: "Product updated" };
 });
 
@@ -73,11 +95,14 @@ ipcMain.handle("delete-product", async (event, id) => {
   return { message: "Product deleted" };
 });
 
-// 🟢 SEND WHATSAPP
-ipcMain.handle("send-whatsapp", async (event, phone, text) => {
-  const encodedText = encodeURIComponent(text);
-  shell.openExternal(`whatsapp://send?phone=91${phone}&text=${encodedText}`);
-  return { message: "WhatsApp opened" };
+// 🟢 SEND WHATSAPP — AUTOMATIC (via whatsapp-web.js)
+ipcMain.handle("send-whatsapp", async (event, phone, message) => {
+  return sendMessage(phone, message);
+});
+
+// 🟢 GET WHATSAPP STATUS
+ipcMain.handle("whatsapp-status", async () => {
+  return getStatus();
 });
 
 
@@ -190,4 +215,135 @@ ipcMain.handle("create-invoice", async (event, data) => {
   transaction(cart);
 
   return { message: "Invoice created successfully! 🔥", invoiceId };
+});
+
+// ============================================================
+// 🔥 HOLD / RESUME BILL HANDLERS
+// ============================================================
+
+// Hold current bill
+ipcMain.handle("hold-bill", async (event, { cart, customer, label }) => {
+  db.prepare(`
+    INSERT INTO held_bills (label, cart_json, customer_json)
+    VALUES (?, ?, ?)
+  `).run(
+    label || `Held ${new Date().toLocaleTimeString('en-IN')}`,
+    JSON.stringify(cart),
+    JSON.stringify(customer || {})
+  );
+  return { message: "Bill held" };
+});
+
+// Get all held bills
+ipcMain.handle("get-held-bills", async () => {
+  const rows = db.prepare("SELECT * FROM held_bills ORDER BY created_at DESC").all();
+  return rows.map(r => ({
+    ...r,
+    cart: JSON.parse(r.cart_json),
+    customer: JSON.parse(r.customer_json || '{}')
+  }));
+});
+
+// Delete (discard) a held bill
+ipcMain.handle("delete-held-bill", async (event, id) => {
+  db.prepare("DELETE FROM held_bills WHERE id=?").run(id);
+  return { message: "Held bill removed" };
+});
+
+// ============================================================
+// 🔥 EXPIRY & STOCK DASHBOARD REPORTS
+// ============================================================
+
+// Get expiry alerts (expired + near-expiry within 7 days)
+ipcMain.handle("get-expiry-alerts", async () => {
+  const today = new Date().toISOString().split('T')[0];
+  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+
+  const expired = db.prepare(`
+    SELECT p.*, c.name as category_name, c.gst as category_gst
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.expiry_date IS NOT NULL AND p.expiry_date < ?
+    ORDER BY p.expiry_date ASC
+  `).all(today);
+
+  const nearExpiry = db.prepare(`
+    SELECT p.*, c.name as category_name, c.gst as category_gst
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.expiry_date IS NOT NULL AND p.expiry_date >= ? AND p.expiry_date <= ?
+    ORDER BY p.expiry_date ASC
+  `).all(today, in7);
+
+  return { expired, nearExpiry };
+});
+
+// Get low-stock and dead-stock products
+ipcMain.handle("get-stock-alerts", async () => {
+  const lowStock = db.prepare(`
+    SELECT p.*, c.name as category_name
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.quantity > 0 AND p.quantity <= 5
+    ORDER BY p.quantity ASC
+  `).all();
+
+  // Dead stock = quantity > 0 but not sold in last 30 days
+  const deadStock = db.prepare(`
+    SELECT p.*, c.name as category_name
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.quantity > 0
+    AND p.id NOT IN (
+      SELECT DISTINCT ii.product_id FROM invoice_items ii
+      INNER JOIN invoices inv ON ii.invoice_id = inv.id
+      WHERE inv.created_at >= datetime('now', '-30 days')
+    )
+    ORDER BY p.quantity DESC
+  `).all();
+
+  return { lowStock, deadStock };
+});
+
+// Get dashboard summary stats
+ipcMain.handle("get-dashboard-stats", async () => {
+  const today = new Date().toISOString().split('T')[0];
+  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+
+  const totalProducts = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
+  const totalCategories = db.prepare("SELECT COUNT(*) as cnt FROM categories").get().cnt;
+  const todaySales = db.prepare(`
+    SELECT COALESCE(SUM(total_amount), 0) as total FROM invoices
+    WHERE date(created_at) = date('now', 'localtime')
+  `).get().total;
+  const todayBills = db.prepare(`
+    SELECT COUNT(*) as cnt FROM invoices
+    WHERE date(created_at) = date('now', 'localtime')
+  `).get().cnt;
+  const expiredCount = db.prepare(`
+    SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ?
+  `).get(today).cnt;
+  const nearExpiryCount = db.prepare(`
+    SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ?
+  `).get(today, in7).cnt;
+  const lowStockCount = db.prepare(`
+    SELECT COUNT(*) as cnt FROM products WHERE quantity > 0 AND quantity <= 5
+  `).get().cnt;
+  const outOfStock = db.prepare(`
+    SELECT COUNT(*) as cnt FROM products WHERE quantity <= 0
+  `).get().cnt;
+
+  // Top 5 products sold this month
+  const topProducts = db.prepare(`
+    SELECT p.name, SUM(ii.quantity) as sold
+    FROM invoice_items ii
+    JOIN products p ON ii.product_id = p.id
+    JOIN invoices inv ON ii.invoice_id = inv.id
+    WHERE inv.created_at >= datetime('now', '-30 days')
+    GROUP BY ii.product_id
+    ORDER BY sold DESC
+    LIMIT 5
+  `).all();
+
+  return {
+    totalProducts, totalCategories, todaySales, todayBills,
+    expiredCount, nearExpiryCount, lowStockCount, outOfStock,
+    topProducts
+  };
 });

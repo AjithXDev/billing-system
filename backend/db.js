@@ -1,13 +1,21 @@
 const Database = require("better-sqlite3");
 const path = require("path");
 
-const { app } = require("electron");
-const isDev = !app.isPackaged;
-const dbPath = isDev 
-  ? path.join(__dirname, "billing.db") 
+// Safe Electron app reference — works even if loaded before app.whenReady()
+let app;
+try {
+  app = require("electron").app;
+} catch (e) {
+  app = null;
+}
+
+const isDev = !app || !app.isPackaged;
+const dbPath = (isDev || !app)
+  ? path.join(__dirname, "billing.db")
   : path.join(app.getPath("userData"), "billing.db");
 
 const db = new Database(dbPath);
+
 
 
 // 🟢 CATEGORIES TABLE (GST BASE)
@@ -47,6 +55,21 @@ CREATE TABLE IF NOT EXISTS products (
   quantity INTEGER DEFAULT 0,
   unit TEXT,
   barcode TEXT UNIQUE,
+  expiry_date TEXT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
+// Safe migration: add expiry_date if missing
+try { db.prepare("ALTER TABLE products ADD COLUMN expiry_date TEXT DEFAULT NULL").run(); } catch(e) {}
+
+// 🟢 HELD BILLS TABLE (Hold/Resume Feature)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS held_bills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT,
+  cart_json TEXT NOT NULL,
+  customer_json TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 `).run();

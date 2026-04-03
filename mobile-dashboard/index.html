@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>iVA Smart Billing — Owner Dashboard</title>
+  <meta name="description" content="Owner mobile dashboard for iVA Smart Billing — track sales, stock, profit and expiry alerts in real-time." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #20243a;
+      --surface3: #252940;
+      --border: rgba(255,255,255,.08);
+      --border2: rgba(255,255,255,.13);
+      --text1: #f1f5f9;
+      --text2: #94a3b8;
+      --text3: #64748b;
+      --primary: #6366f1;
+      --primary-glow: rgba(99,102,241,.25);
+      --green: #10b981;
+      --green-glow: rgba(16,185,129,.2);
+      --orange: #f59e0b;
+      --orange-glow: rgba(245,158,11,.2);
+      --red: #ef4444;
+      --red-glow: rgba(239,68,68,.2);
+      --cyan: #06b6d4;
+      --cyan-glow: rgba(6,182,212,.2);
+      --r: 16px;
+      --r-sm: 10px;
+      --nav-h: 64px;
+    }
+
+    html, body { height: 100%; background: var(--bg); font-family: 'Inter', sans-serif; color: var(--text1); overflow: hidden; }
+
+    /* ── App Shell ── */
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    /* ── Top Bar ── */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px 10px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .topbar-title { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
+    .topbar-title span { color: var(--primary); }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    .refresh-btn {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: var(--surface2); border: 1px solid var(--border2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; cursor: pointer; transition: transform .3s;
+    }
+    .refresh-btn.spinning { animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .store-name { font-size: 11px; color: var(--text3); font-weight: 500; }
+
+    /* ── Scroll Area ── */
+    #scroll-area {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: calc(var(--nav-h) + 12px);
+    }
+    #scroll-area::-webkit-scrollbar { display: none; }
+
+    /* ── Bottom Nav ── */
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: var(--nav-h);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex; align-items: stretch;
+      z-index: 100;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .nav-item {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 3px;
+      cursor: pointer; transition: background .15s;
+      border: none; background: transparent; color: var(--text3);
+      padding: 6px 0;
+      position: relative;
+    }
+    .nav-item.active { color: var(--primary); }
+    .nav-item.active::after {
+      content: ''; position: absolute; top: 0; left: 20%; right: 20%;
+      height: 2px; background: var(--primary);
+      border-radius: 0 0 4px 4px;
+    }
+    .nav-icon { font-size: 20px; }
+    .nav-label { font-size: 9px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+    .nav-badge {
+      position: absolute; top: 5px; right: calc(50% - 12px);
+      min-width: 16px; height: 16px; border-radius: 8px;
+      background: var(--red); color: #fff;
+      font-size: 9px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 4px;
+    }
+
+    /* ── Section Wrapper ── */
+    .section { display: none; padding: 16px 14px; }
+    .section.active { display: block; }
+
+    /* ── Page Title ── */
+    .page-title {
+      font-size: 18px; font-weight: 800; letter-spacing: -.02em;
+      margin-bottom: 14px; color: var(--text1);
+    }
+    .page-title span { color: var(--primary); }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 16px;
+      margin-bottom: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,.02) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .card-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text3); margin-bottom: 6px;
+    }
+    .card-value {
+      font-size: 26px; font-weight: 900; letter-spacing: -.03em; color: var(--text1);
+    }
+    .card-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+    /* ── Stat Grid ── */
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 14px 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card .glow {
+      position: absolute; width: 60px; height: 60px;
+      border-radius: 50%; right: -15px; top: -15px;
+      opacity: .4; filter: blur(20px);
+    }
+    .stat-icon { font-size: 22px; margin-bottom: 8px; }
+    .stat-value { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+    .stat-label { font-size: 10px; color: var(--text3); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; margin-top: 3px; }
+    .stat-trend { font-size: 10px; margin-top: 4px; font-weight: 600; }
+    .stat-trend.up { color: var(--green); }
+    .stat-trend.warn { color: var(--orange); }
+    .stat-trend.danger { color: var(--red); }
+
+    /* ── Alert Badge ── */
+    .alert-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 20px; font-size: 10px;
+      font-weight: 700; letter-spacing: .03em;
+    }
+    .badge-red { background: var(--red-glow); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+    .badge-orange { background: var(--orange-glow); color: var(--orange); border: 1px solid rgba(245,158,11,.3); }
+    .badge-green { background: var(--green-glow); color: var(--green); border: 1px solid rgba(16,185,129,.3); }
+    .badge-purple { background: var(--primary-glow); color: var(--primary); border: 1px solid rgba(99,102,241,.3); }
+    .badge-cyan { background: var(--cyan-glow); color: var(--cyan); border: 1px solid rgba(6,182,212,.3); }
+
+    /* ── Chart Card ── */
+    .chart-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 16px; margin-bottom: 14px;
+    }
+    .chart-title {
+      font-size: 12px; font-weight: 700; color: var(--text2);
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .chart-wrap { position: relative; height: 180px; }
+    .chart-wrap canvas { width: 100% !important; }
+
+    /* ── Top Products List ── */
+    .top-list { list-style: none; }
+    .top-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+    }
+    .top-item:last-child { border-bottom: none; }
+    .top-rank {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; flex-shrink: 0;
+    }
+    .rank-1 { background: #f59e0b20; color: #f59e0b; }
+    .rank-2 { background: #94a3b820; color: #94a3b8; }
+    .rank-3 { background: #92400e20; color: #b45309; }
+    .rank-other { background: var(--surface2); color: var(--text3); }
+    .top-name { flex: 1; font-size: 13px; font-weight: 600; color: var(--text1); }
+    .top-sold {
+      font-size: 11px; font-weight: 700; color: var(--primary);
+      background: var(--primary-glow); border-radius: 12px; padding: 2px 8px;
+    }
+
+    /* ── Alert List ── */
+    .alert-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px; background: var(--surface2);
+      border-radius: var(--r-sm); margin-bottom: 8px;
+      border: 1px solid var(--border);
+    }
+    .alert-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .alert-title { font-size: 12.5px; font-weight: 700; color: var(--text1); margin-bottom: 2px; }
+    .alert-desc { font-size: 11px; color: var(--text3); line-height: 1.5; }
+    .alert-date { font-size: 10px; color: var(--red); font-weight: 600; margin-top: 3px; }
+
+    /* ── Stock Item ── */
+    .stock-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; background: var(--surface2);
+      border-radius: var(--r-sm); margin-bottom: 8px;
+      border: 1px solid var(--border);
+    }
+    .stock-left .name { font-size: 13px; font-weight: 600; color: var(--text1); }
+    .stock-left .cat { font-size: 10px; color: var(--text3); margin-top: 2px; }
+    .stock-qty {
+      font-size: 20px; font-weight: 900; color: var(--orange);
+    }
+    .stock-unit { font-size: 10px; color: var(--text3); text-align: right; }
+
+    /* ── Dead Stock item ── */
+    .dead-item {
+      padding: 12px; background: var(--surface2);
+      border-radius: var(--r-sm); margin-bottom: 8px;
+      border: 1px solid var(--border);
+    }
+    .dead-item .dname { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 4px; }
+    .dead-item .dinfo { display: flex; gap: 8px; align-items: center; }
+    .dead-item .dqty { font-size: 11px; color: var(--text3); }
+    .dead-tag {
+      font-size: 9.5px; font-weight: 700; padding: 2px 7px;
+      border-radius: 10px; background: rgba(100,116,139,.15);
+      color: #94a3b8; border: 1px solid rgba(100,116,139,.2);
+    }
+
+    /* ── Chatbot ── */
+    #chat-section {
+      display: none; flex-direction: column;
+      padding: 0; height: 100%;
+    }
+    #chat-section.active { display: flex; }
+    .chat-messages {
+      flex: 1; overflow-y: auto; padding: 14px 14px 0;
+    }
+    .chat-messages::-webkit-scrollbar { display: none; }
+    .chat-bubble {
+      display: flex; gap: 8px; margin-bottom: 12px;
+      align-items: flex-start;
+    }
+    .chat-bubble.user { flex-direction: row-reverse; }
+    .chat-avatar {
+      width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    .bot-avatar { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+    .user-avatar { background: linear-gradient(135deg, #10b981, #06b6d4); }
+    .chat-content {
+      max-width: 78%; padding: 10px 13px;
+      border-radius: 4px 14px 14px 14px;
+      font-size: 12.5px; line-height: 1.55; color: var(--text1);
+    }
+    .bot-content { background: var(--surface); border: 1px solid var(--border); }
+    .user-content {
+      background: linear-gradient(135deg, #6366f1, #7c3aed);
+      border-radius: 14px 4px 14px 14px; color: #fff;
+    }
+    .chat-time { font-size: 9.5px; color: var(--text3); margin-top: 4px; }
+    .bot-content .chat-time { color: var(--text3); }
+    .user-content .chat-time { color: rgba(255,255,255,.6); }
+
+    /* Quick questions */
+    .quick-questions {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 14px;
+    }
+    .quick-q {
+      padding: 6px 12px; border-radius: 20px;
+      background: var(--surface2); border: 1px solid var(--border2);
+      font-size: 11px; font-weight: 600; color: var(--text2);
+      cursor: pointer; transition: all .15s;
+    }
+    .quick-q:hover { background: var(--primary-glow); color: var(--primary); border-color: rgba(99,102,241,.4); }
+
+    /* Chat input */
+    .chat-input-area {
+      display: flex; gap: 8px; padding: 10px 14px 14px;
+      background: var(--surface); border-top: 1px solid var(--border);
+    }
+    .chat-input {
+      flex: 1; height: 42px; border-radius: 22px;
+      background: var(--surface2); border: 1px solid var(--border2);
+      padding: 0 16px; font-size: 13px; color: var(--text1);
+      outline: none; font-family: inherit;
+    }
+    .chat-input::placeholder { color: var(--text3); }
+    .chat-input:focus { border-color: var(--primary); }
+    .chat-send {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: var(--primary); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; color: white; transition: transform .1s;
+    }
+    .chat-send:hover { transform: scale(1.08); }
+
+    /* ── Section title ── */
+    .sec-head {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700; color: var(--text2);
+      text-transform: uppercase; letter-spacing: .08em;
+      margin-bottom: 10px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sec-head .count {
+      margin-left: auto; font-size: 10px; padding: 2px 8px;
+      border-radius: 12px; font-weight: 700;
+    }
+
+    /* ── Shimmer Loading ── */
+    .shimmer {
+      background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.2s infinite;
+      border-radius: 8px;
+    }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+    .shimmer-line { height: 14px; margin-bottom: 8px; }
+    .shimmer-box { height: 80px; margin-bottom: 10px; }
+
+    /* ── Empty State ── */
+    .empty-state {
+      text-align: center; padding: 32px 16px;
+      color: var(--text3); font-size: 13px;
+    }
+    .empty-state .emoji { font-size: 36px; margin-bottom: 10px; }
+
+    /* ── Expiry Badge ── */
+    .exp-badge {
+      display: inline-block; padding: 2px 7px; border-radius: 10px;
+      font-size: 10px; font-weight: 700;
+    }
+    .exp-expired { background: var(--red-glow); color: var(--red); }
+    .exp-critical { background: var(--orange-glow); color: var(--orange); }
+    .exp-warning { background: #fef9c320; color: #eab308; }
+
+    /* ── Profit card special ── */
+    .profit-banner {
+      background: linear-gradient(135deg, #065f46, #047857);
+      border: 1px solid rgba(16,185,129,.3);
+      border-radius: var(--r); padding: 18px 16px; margin-bottom: 14px;
+      position: relative; overflow: hidden;
+    }
+    .profit-banner::after {
+      content: '₹'; position: absolute; right: 16px; top: 50%;
+      transform: translateY(-50%); font-size: 80px; font-weight: 900;
+      color: rgba(255,255,255,.06); line-height: 1;
+    }
+    .profit-banner .pb-label { font-size: 10px; font-weight: 700; color: rgba(255,255,255,.6); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 6px; }
+    .profit-banner .pb-value { font-size: 32px; font-weight: 900; color: #fff; letter-spacing: -.03em; }
+    .profit-banner .pb-sub { font-size: 11px; color: rgba(255,255,255,.6); margin-top: 4px; }
+
+    /* ── Pill tabs ── */
+    .pill-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+    .pill-tab {
+      padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 600;
+      cursor: pointer; transition: all .15s; border: 1px solid var(--border2);
+      background: transparent; color: var(--text3);
+    }
+    .pill-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* ── Typing indicator ── */
+    .typing { display: flex; gap: 4px; padding: 10px 14px; align-items: center; }
+    .typing-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--primary);
+      animation: bounce .8s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: .15s; }
+    .typing-dot:nth-child(3) { animation-delay: .3s; }
+    @keyframes bounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+    /* ── Responsive ── */
+    @media (min-width: 400px) {
+      .stat-value { font-size: 24px; }
+      .card-value { font-size: 30px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">iVA <span>SmartBill</span></div>
+      <div class="store-name" id="store-label">Loading store info…</div>
+    </div>
+    <div class="topbar-right">
+      <div class="refresh-btn" id="refresh-btn" onclick="refreshAll()" title="Refresh">🔄</div>
+    </div>
+  </div>
+
+  <!-- SCROLL AREA -->
+  <div id="scroll-area">
+
+    <!-- ── OVERVIEW ───────────────────────── -->
+    <div id="sec-overview" class="section active">
+      <div id="overview-content">
+        <div class="shimmer shimmer-box"></div>
+        <div class="shimmer shimmer-line"></div>
+        <div class="shimmer shimmer-line"></div>
+      </div>
+    </div>
+
+    <!-- ── STOCK & ALERTS ─────────────────── -->
+    <div id="sec-stock" class="section">
+      <div id="stock-content">
+        <div class="shimmer shimmer-box"></div>
+      </div>
+    </div>
+
+    <!-- ── EXPIRY ─────────────────────────── -->
+    <div id="sec-expiry" class="section">
+      <div id="expiry-content">
+        <div class="shimmer shimmer-box"></div>
+      </div>
+    </div>
+
+    <!-- ── AI CHAT ────────────────────────── -->
+    <div id="sec-chat" class="section" id="chat-section" style="padding:0; height: calc(100vh - 64px - var(--nav-h));">
+      <div id="chat-messages-wrap" style="flex:1; overflow-y:auto; padding:14px 14px 0;" id="chat-messages">
+      </div>
+      <div class="quick-questions" id="quick-qs">
+        <div class="quick-q" onclick="askBot('Today sales')">💰 Today Sales</div>
+        <div class="quick-q" onclick="askBot('What is my profit today?')">📈 Today Profit</div>
+        <div class="quick-q" onclick="askBot('Show low stock')">📦 Low Stock</div>
+        <div class="quick-q" onclick="askBot('Dead stock')">💀 Dead Stock</div>
+        <div class="quick-q" onclick="askBot('Expiry alerts')">⚠️ Expiry</div>
+        <div class="quick-q" onclick="askBot('Top selling products')">🏆 Top Products</div>
+        <div class="quick-q" onclick="askBot('Weekly sales')">📆 Weekly Sales</div>
+        <div class="quick-q" onclick="askBot('Monthly summary')">📊 Monthly</div>
+      </div>
+      <div class="chat-input-area">
+        <input class="chat-input" id="chat-input" type="text" placeholder="Ask anything about your store…" autocomplete="off" />
+        <button class="chat-send" onclick="sendChat()">➤</button>
+      </div>
+    </div>
+
+  </div><!-- /scroll-area -->
+
+  <!-- BOTTOM NAV -->
+  <div class="bottom-nav">
+    <button class="nav-item active" id="nav-overview" onclick="switchTab('overview')">
+      <div class="nav-icon">📊</div>
+      <div class="nav-label">Overview</div>
+    </button>
+    <button class="nav-item" id="nav-stock" onclick="switchTab('stock')">
+      <div class="nav-icon">📦</div>
+      <div class="nav-label">Stock</div>
+      <div class="nav-badge" id="stock-badge" style="display:none">0</div>
+    </button>
+    <button class="nav-item" id="nav-expiry" onclick="switchTab('expiry')">
+      <div class="nav-icon">⚠️</div>
+      <div class="nav-label">Expiry</div>
+      <div class="nav-badge" id="expiry-badge" style="display:none">0</div>
+    </button>
+    <button class="nav-item" id="nav-chat" onclick="switchTab('chat')">
+      <div class="nav-icon">💬</div>
+      <div class="nav-label">AI Chat</div>
+    </button>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+/* ═══════════════════════════════════════════════
+   iVA Owner Dashboard — Mobile JS Engine
+═══════════════════════════════════════════════ */
+
+const API = '';  // same origin
+let DATA = { stats: null, expiry: null, stock: null };
+let salesChart = null, payChart = null;
+let activeTab = 'overview';
+let botContext = {};
+
+/* ── Format currency ── */
+const fmt = n => '₹' + Number(n||0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const pct = (a,b) => b > 0 ? ((a/b)*100).toFixed(1)+'%' : '—';
+
+/* ── Time ── */
+function timeStr() {
+  return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening';
+}
+
+/* ── Tab switching ── */
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('sec-'+tab).classList.add('active');
+  document.getElementById('nav-'+tab).classList.add('active');
+  if (tab === 'chat') initChat();
+}
+
+/* ── Refresh All ── */
+async function refreshAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+  try {
+    await Promise.all([fetchStats(), fetchExpiry(), fetchStock()]);
+  } catch(e) { console.error(e); }
+  btn.classList.remove('spinning');
+}
+
+/* ── Fetch Stats ── */
+async function fetchStats() {
+  try {
+    const r = await fetch(API + '/api/stats');
+    DATA.stats = await r.json();
+    renderOverview();
+  } catch(e) {
+    document.getElementById('overview-content').innerHTML = `
+      <div class="empty-state"><div class="emoji">📡</div>Cannot reach billing server.<br>Make sure you are on the same WiFi.</div>`;
+  }
+}
+
+/* ── Fetch Expiry ── */
+async function fetchExpiry() {
+  try {
+    const r = await fetch(API + '/api/expiry');
+    DATA.expiry = await r.json();
+    renderExpiry();
+    updateBadge('expiry-badge', (DATA.expiry.expired?.length||0) + (DATA.expiry.nearExpiry?.length||0));
+  } catch(e) {}
+}
+
+/* ── Fetch Stock ── */
+async function fetchStock() {
+  try {
+    const r = await fetch(API + '/api/stock');
+    DATA.stock = await r.json();
+    renderStock();
+    updateBadge('stock-badge', (DATA.stock.lowStock?.length||0));
+  } catch(e) {}
+}
+
+function updateBadge(id, count) {
+  const el = document.getElementById(id);
+  if (count > 0) { el.style.display = 'flex'; el.textContent = count > 99 ? '99+' : count; }
+  else { el.style.display = 'none'; }
+}
+
+/* ═══════════════════════════════════════════
+   RENDER: OVERVIEW
+══════════════════════════════════════════ */
+function renderOverview() {
+  const s = DATA.stats;
+  if (!s) return;
+
+  // Bot context update
+  botContext = s;
+
+  document.getElementById('store-label').textContent = 'iVA Smart Billing Store';
+
+  const profit = (s.todayProfit !== undefined) ? s.todayProfit : null;
+  const profitCard = profit !== null
+    ? `<div class="profit-banner">
+        <div class="pb-label">Today's Profit</div>
+        <div class="pb-value">${fmt(profit)}</div>
+        <div class="pb-sub">Margin: ${s.todaySales > 0 ? ((profit/s.todaySales)*100).toFixed(1) : 0}% &nbsp;·&nbsp; ${s.todayBills} bills</div>
+       </div>`
+    : '';
+
+  const html = `
+    ${profitCard}
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="glow" style="background:var(--green)"></div>
+        <div class="stat-icon">💰</div>
+        <div class="stat-value" style="color:var(--green)">${fmt(s.todaySales)}</div>
+        <div class="stat-label">Today's Sales</div>
+        <div class="stat-trend up">↑ ${s.todayBills} bills today</div>
+      </div>
+      <div class="stat-card">
+        <div class="glow" style="background:var(--cyan)"></div>
+        <div class="stat-icon">📆</div>
+        <div class="stat-value" style="color:var(--cyan)">${fmt(s.weeklySales)}</div>
+        <div class="stat-label">Weekly Sales</div>
+        <div class="stat-trend up">Last 7 days</div>
+      </div>
+      <div class="stat-card">
+        <div class="glow" style="background:var(--primary)"></div>
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" style="color:var(--primary)">${fmt(s.monthlySales)}</div>
+        <div class="stat-label">Monthly Sales</div>
+        <div class="stat-trend up">Last 30 days</div>
+      </div>
+      <div class="stat-card">
+        <div class="glow" style="background:var(--orange)"></div>
+        <div class="stat-icon">🏷️</div>
+        <div class="stat-value" style="color:var(--orange)">${s.totalProducts}</div>
+        <div class="stat-label">Products</div>
+        <div class="stat-trend">${s.totalCategories} categories</div>
+      </div>
+    </div>
+
+    <!-- Alert strip -->
+    ${buildAlertStrip(s)}
+
+    <!-- Sales Chart -->
+    <div class="chart-card">
+      <div class="chart-title">
+        📈 Sales — Last 7 Days
+        <span class="alert-badge badge-cyan">${s.dailySales?.length||0} days</span>
+      </div>
+      <div class="chart-wrap"><canvas id="sales-chart"></canvas></div>
+    </div>
+
+    <!-- Top Products -->
+    ${s.topProducts?.length > 0 ? `
+    <div class="card">
+      <div class="sec-head">
+        🏆 Top Sellers This Month
+        <span class="count badge-purple">${s.topProducts.length} items</span>
+      </div>
+      <ul class="top-list">
+        ${s.topProducts.map((p,i) => `
+          <li class="top-item">
+            <div class="top-rank rank-${i < 3 ? i+1 : 'other'}">${i+1}</div>
+            <div class="top-name">${p.name}</div>
+            <div class="top-sold">${p.sold} sold</div>
+          </li>`).join('')}
+      </ul>
+    </div>` : ''}
+  `;
+
+  document.getElementById('overview-content').innerHTML = html;
+  buildSalesChart(s.dailySales || []);
+}
+
+function buildAlertStrip(s) {
+  const items = [];
+  if (s.expiredCount > 0)    items.push(`<span class="alert-badge badge-red">🚫 ${s.expiredCount} Expired</span>`);
+  if (s.nearExpiryCount > 0) items.push(`<span class="alert-badge badge-orange">⌛ ${s.nearExpiryCount} Near Expiry</span>`);
+  if (s.lowStockCount > 0)   items.push(`<span class="alert-badge badge-orange">📉 ${s.lowStockCount} Low Stock</span>`);
+  if (s.outOfStock > 0)      items.push(`<span class="alert-badge badge-red">❌ ${s.outOfStock} Out of Stock</span>`);
+  if (items.length === 0)    items.push(`<span class="alert-badge badge-green">✅ All Clear</span>`);
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">${items.join('')}</div>`;
+}
+
+/* ── Sales Bar Chart ── */
+function buildSalesChart(daily) {
+  const ctx = document.getElementById('sales-chart');
+  if (!ctx) return;
+  if (salesChart) salesChart.destroy();
+
+  const labels = daily.map(d => {
+    const dt = new Date(d.day);
+    return dt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' });
+  });
+  const values = daily.map(d => d.total);
+
+  salesChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Sales (₹)',
+        data: values,
+        backgroundColor: 'rgba(99,102,241,.7)',
+        borderRadius: 8,
+        borderSkipped: false,
+        hoverBackgroundColor: 'rgba(139,92,246,.9)',
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => '₹' + Number(ctx.parsed.y).toLocaleString('en-IN')
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#64748b', font: { size: 9 } }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,.04)' },
+          ticks: {
+            color: '#64748b', font: { size: 9 },
+            callback: v => v >= 1000 ? (v/1000).toFixed(0)+'k' : v
+          }
+        }
+      }
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════
+   RENDER: EXPIRY
+══════════════════════════════════════════ */
+function renderExpiry() {
+  const e = DATA.expiry;
+  if (!e) return;
+
+  function daysLeft(ds) {
+    if (!ds) return null;
+    return Math.ceil((new Date(ds) - new Date()) / 86400000);
+  }
+  function badge(ds) {
+    const d = daysLeft(ds);
+    if (d === null) return '';
+    if (d < 0) return `<span class="exp-badge exp-expired">EXPIRED ${Math.abs(d)}d ago</span>`;
+    if (d === 0) return `<span class="exp-badge exp-critical">Expires TODAY!</span>`;
+    if (d <= 3) return `<span class="exp-badge exp-critical">${d}d left</span>`;
+    return `<span class="exp-badge exp-warning">${d}d left</span>`;
+  }
+
+  let html = '';
+
+  // Expired
+  html += `<div class="card" style="border-color:rgba(239,68,68,.4)">
+    <div class="sec-head">🚫 Expired Products
+      <span class="count badge-red">${e.expired?.length||0}</span>
+    </div>`;
+  if (!e.expired?.length) {
+    html += `<div class="empty-state"><div class="emoji">✅</div>No expired products!</div>`;
+  } else {
+    html += e.expired.map(p => `
+      <div class="alert-item">
+        <div class="alert-icon">🚫</div>
+        <div>
+          <div class="alert-title">${p.name}</div>
+          <div class="alert-desc">${p.category_name||''} · ${p.quantity} ${p.unit||'units'} in stock</div>
+          <div class="alert-date">Expired: ${p.expiry_date} ${badge(p.expiry_date)}</div>
+        </div>
+      </div>`).join('');
+  }
+  html += `</div>`;
+
+  // Near Expiry
+  html += `<div class="card" style="border-color:rgba(245,158,11,.4)">
+    <div class="sec-head">⌛ Expiring This Week
+      <span class="count badge-orange">${e.nearExpiry?.length||0}</span>
+    </div>`;
+  if (!e.nearExpiry?.length) {
+    html += `<div class="empty-state"><div class="emoji">✅</div>Nothing expiring soon!</div>`;
+  } else {
+    html += e.nearExpiry.map(p => `
+      <div class="alert-item" style="border-color:rgba(245,158,11,.3)">
+        <div class="alert-icon">⚠️</div>
+        <div>
+          <div class="alert-title">${p.name}</div>
+          <div class="alert-desc">${p.category_name||''} · ${p.quantity} ${p.unit||'units'} in stock</div>
+          <div style="display:flex;gap:6px;margin-top:4px;align-items:center;">
+            <span style="font-size:10px;color:var(--text3)">Expiry: ${p.expiry_date}</span>
+            ${badge(p.expiry_date)}
+          </div>
+        </div>
+      </div>`).join('');
+  }
+  html += `</div>`;
+
+  document.getElementById('expiry-content').innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════
+   RENDER: STOCK
+══════════════════════════════════════════ */
+function renderStock() {
+  const st = DATA.stock;
+  if (!st) return;
+
+  const tabs = `
+    <div class="pill-tabs">
+      <div class="pill-tab active" id="stab-low" onclick="showStockTab('low')">📉 Low Stock (${st.lowStock?.length||0})</div>
+      <div class="pill-tab" id="stab-dead" onclick="showStockTab('dead')">💀 Dead Stock (${st.deadStock?.length||0})</div>
+      <div class="pill-tab" id="stab-out" onclick="showStockTab('out')">❌ Out of Stock (${st.outOfStock?.length||0})</div>
+    </div>
+    <div id="stock-tab-content"></div>
+  `;
+  document.getElementById('stock-content').innerHTML = tabs;
+  showStockTab('low');
+}
+
+function showStockTab(tab) {
+  ['low','dead','out'].forEach(t => {
+    const el = document.getElementById('stab-'+t);
+    if (el) el.classList.toggle('active', t === tab);
+  });
+  const st = DATA.stock;
+  let html = '';
+  const el = document.getElementById('stock-tab-content');
+
+  if (tab === 'low') {
+    if (!st.lowStock?.length) {
+      html = `<div class="empty-state"><div class="emoji">✅</div>All products have sufficient stock!</div>`;
+    } else {
+      html = st.lowStock.map(p => `
+        <div class="stock-item" style="border-color:rgba(245,158,11,.3)">
+          <div class="stock-left">
+            <div class="name">${p.name}</div>
+            <div class="cat">${p.category_name||''}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="stock-qty">${p.quantity}</div>
+            <div class="stock-unit">${p.unit||'units'}</div>
+            <div style="font-size:9px;color:var(--orange);font-weight:700;margin-top:2px">⚠️ Restock!</div>
+          </div>
+        </div>`).join('');
+    }
+  } else if (tab === 'dead') {
+    if (!st.deadStock?.length) {
+      html = `<div class="empty-state"><div class="emoji">✅</div>No dead stock. Products are moving well!</div>`;
+    } else {
+      html = st.deadStock.map(p => `
+        <div class="dead-item">
+          <div class="dname">${p.name}</div>
+          <div class="dinfo">
+            <span class="dqty">Stock: ${p.quantity} ${p.unit||'units'}</span>
+            <span class="dqty">Value: ₹${((p.cost_price||0)*p.quantity).toLocaleString('en-IN')}</span>
+            <span class="dead-tag">Offer / Return</span>
+          </div>
+        </div>`).join('');
+    }
+  } else if (tab === 'out') {
+    if (!st.outOfStock?.length) {
+      html = `<div class="empty-state"><div class="emoji">✅</div>No out-of-stock products!</div>`;
+    } else {
+      html = st.outOfStock.map(p => `
+        <div class="stock-item" style="border-color:rgba(239,68,68,.3)">
+          <div class="stock-left">
+            <div class="name">${p.name}</div>
+            <div class="cat">${p.category_name||''}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="stock-qty" style="color:var(--red)">0</div>
+            <div class="stock-unit">${p.unit||'units'}</div>
+            <div style="font-size:9px;color:var(--red);font-weight:700;margin-top:2px">❌ OUT</div>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════
+   AI CHATBOT
+══════════════════════════════════════════ */
+let chatInited = false;
+
+function initChat() {
+  const wrap = document.getElementById('chat-messages-wrap');
+  if (!chatInited) {
+    chatInited = true;
+    addBotMessage(`👋 <b>${greeting()}!</b> I'm your store AI assistant.<br>
+      I can answer questions about:<br>
+      • Sales & Profit<br>
+      • Stock levels & dead stock<br>
+      • Product expiry alerts<br>
+      • Top selling products<br><br>
+      <i>Try asking me something using the quick buttons or type below!</i>`);
+  }
+  // Auto-inject alerts
+  const s = DATA.stats;
+  const e = DATA.expiry;
+  const st = DATA.stock;
+  if (s && e && st && !chatInited._alerted) {
+    chatInited._alerted = true;
+    if ((e.expired?.length||0) > 0) {
+      setTimeout(() => addAlertMessage(`🚫 <b>Alert!</b> ${e.expired.length} product(s) are <b>EXPIRED</b>. Block them from billing immediately!<br>${e.expired.slice(0,3).map(p=>`• ${p.name} (${p.expiry_date})`).join('<br>')}`), 800);
+    }
+    if ((st.lowStock?.length||0) > 0) {
+      setTimeout(() => addAlertMessage(`📦 <b>Low Stock!</b> ${st.lowStock.length} item(s) need restocking:<br>${st.lowStock.slice(0,3).map(p=>`• ${p.name}: only <b>${p.quantity}</b> left`).join('<br>')}`), 1400);
+    }
+  }
+  scrollChat();
+  document.getElementById('chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendChat();
+  });
+}
+
+function addBotMessage(html) {
+  const wrap = document.getElementById('chat-messages-wrap');
+  wrap.innerHTML += `
+    <div class="chat-bubble">
+      <div class="chat-avatar bot-avatar">🤖</div>
+      <div>
+        <div class="chat-content bot-content">${html}<div class="chat-time">${timeStr()}</div></div>
+      </div>
+    </div>`;
+  scrollChat();
+}
+
+function addAlertMessage(html) {
+  const wrap = document.getElementById('chat-messages-wrap');
+  wrap.innerHTML += `
+    <div class="chat-bubble">
+      <div class="chat-avatar" style="background:linear-gradient(135deg,#f97316,#ef4444)">🔔</div>
+      <div>
+        <div class="chat-content bot-content" style="border-color:rgba(249,115,22,.4);background:rgba(249,115,22,.06)">${html}<div class="chat-time">${timeStr()}</div></div>
+      </div>
+    </div>`;
+  scrollChat();
+}
+
+function addUserMessage(text) {
+  const wrap = document.getElementById('chat-messages-wrap');
+  wrap.innerHTML += `
+    <div class="chat-bubble user">
+      <div class="chat-avatar user-avatar">👤</div>
+      <div>
+        <div class="chat-content user-content">${text}<div class="chat-time">${timeStr()}</div></div>
+      </div>
+    </div>`;
+  scrollChat();
+}
+
+function showTyping() {
+  const wrap = document.getElementById('chat-messages-wrap');
+  const div = document.createElement('div');
+  div.id = 'typing-indicator';
+  div.className = 'chat-bubble';
+  div.innerHTML = `
+    <div class="chat-avatar bot-avatar">🤖</div>
+    <div class="chat-content bot-content" style="padding:10px 14px;">
+      <div class="typing">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      </div>
+    </div>`;
+  wrap.appendChild(div);
+  scrollChat();
+}
+
+function hideTyping() {
+  const el = document.getElementById('typing-indicator');
+  if (el) el.remove();
+}
+
+function scrollChat() {
+  const wrap = document.getElementById('chat-messages-wrap');
+  setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 50);
+}
+
+function askBot(q) {
+  document.getElementById('chat-input').value = q;
+  sendChat();
+}
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+  addUserMessage(q);
+  showTyping();
+  setTimeout(() => {
+    hideTyping();
+    const reply = getBotReply(q.toLowerCase());
+    addBotMessage(reply);
+  }, 600 + Math.random()*400);
+}
+
+function getBotReply(q) {
+  const s = DATA.stats || {};
+  const e = DATA.expiry || {};
+  const st = DATA.stock || {};
+
+  // Sales
+  if (q.match(/today.*(sale|revenue|earn)|sale.*today/)) {
+    return `💰 Today's Revenue: <b>${fmt(s.todaySales)}</b> from <b>${s.todayBills}</b> bills.<br>${s.todayProfit !== undefined ? `📈 Profit: <b>${fmt(s.todayProfit)}</b>` : ''}`;
+  }
+  // Profit
+  if (q.match(/profit|margin|earn/)) {
+    if (s.todayProfit !== undefined) {
+      const margin = s.todaySales > 0 ? ((s.todayProfit/s.todaySales)*100).toFixed(1) : 0;
+      return `📈 <b>Today's Profit: ${fmt(s.todayProfit)}</b><br>Margin: <b>${margin}%</b><br>Revenue: ${fmt(s.todaySales)}`;
+    }
+    return `📊 Profit data will be available once cost prices are set for your products.`;
+  }
+  // Weekly
+  if (q.match(/week|7 day/)) {
+    return `📆 <b>Weekly Sales: ${fmt(s.weeklySales)}</b> (last 7 days).`;
+  }
+  // Monthly
+  if (q.match(/month|30 day/)) {
+    return `📊 <b>Monthly Sales: ${fmt(s.monthlySales)}</b> (last 30 days). Total products: <b>${s.totalProducts}</b>.`;
+  }
+  // Low stock
+  if (q.match(/low stock|low.*stock|restock/)) {
+    if (!st.lowStock?.length) return `✅ All products are well-stocked! No low stock alerts.`;
+    return `📦 <b>${st.lowStock.length} low-stock items:</b><br>${st.lowStock.slice(0,6).map(p=>`• ${p.name}: <b>${p.quantity} ${p.unit||'units'}</b>`).join('<br>')}`;
+  }
+  // Dead stock
+  if (q.match(/dead stock|dead|not sell|not selling/)) {
+    if (!st.deadStock?.length) return `✅ No dead stock detected! Great turnover rate.`;
+    return `💀 <b>${st.deadStock.length} dead-stock items</b> (no sales in 30 days):<br>${st.deadStock.slice(0,6).map(p=>`• ${p.name}: ${p.quantity} ${p.unit||'units'} idle`).join('<br>')}`;
+  }
+  // Out of stock
+  if (q.match(/out of stock|out.*stock|zero stock|empty/)) {
+    return `❌ <b>${s.outOfStock||0} products</b> are currently out of stock.`;
+  }
+  // Expiry
+  if (q.match(/expir|expiry|expire/)) {
+    const total = (e.expired?.length||0) + (e.nearExpiry?.length||0);
+    if (!total) return `✅ No expiry concerns! All products are within expiry dates.`;
+    let reply = `⚠️ <b>Expiry Summary:</b><br>`;
+    if (e.expired?.length) reply += `🚫 <b>${e.expired.length} EXPIRED:</b> ${e.expired.slice(0,3).map(p=>p.name).join(', ')}<br>`;
+    if (e.nearExpiry?.length) reply += `⌛ <b>${e.nearExpiry.length} near expiry:</b> ${e.nearExpiry.slice(0,3).map(p=>`${p.name} (${p.expiry_date})`).join('<br>')}`;
+    return reply;
+  }
+  // Top products
+  if (q.match(/top|best sell|best product|popular/)) {
+    if (!s.topProducts?.length) return `📊 Not enough sales data yet to show top products.`;
+    return `🏆 <b>Top ${s.topProducts.length} products this month:</b><br>${s.topProducts.map((p,i)=>`${i+1}. ${p.name} — <b>${p.sold} sold</b>`).join('<br>')}`;
+  }
+  // Summary
+  if (q.match(/summary|overview|status|report/)) {
+    return `📊 <b>Store Summary:</b><br>
+      💰 Today: <b>${fmt(s.todaySales)}</b> · ${s.todayBills} bills<br>
+      📆 Week: <b>${fmt(s.weeklySales)}</b><br>
+      📦 Products: <b>${s.totalProducts}</b><br>
+      🚫 Expired: <b>${s.expiredCount||0}</b> · ⌛ Near Expiry: <b>${s.nearExpiryCount||0}</b><br>
+      📉 Low Stock: <b>${s.lowStockCount||0}</b> · ❌ Out of Stock: <b>${s.outOfStock||0}</b>`;
+  }
+  // Help
+  return `🤖 I can help you with:<br>
+    • <i>"today sales"</i> — revenue overview<br>
+    • <i>"profit"</i> — margin & earnings<br>
+    • <i>"low stock"</i> — items running low<br>
+    • <i>"dead stock"</i> — items not selling<br>
+    • <i>"expiry"</i> — near/expired products<br>
+    • <i>"top products"</i> — best sellers<br>
+    • <i>"monthly summary"</i> — full report`;
+}
+
+/* ── Init ── */
+window.addEventListener('DOMContentLoaded', async () => {
+  await refreshAll();
+
+  // Auto refresh every 2 minutes
+  setInterval(refreshAll, 2 * 60 * 1000);
+});
+</script>
+</body>
+</html>

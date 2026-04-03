@@ -27,7 +27,12 @@
   "license": "ISC",
   "description": "Smart Billing Desktop Application",
   "dependencies": {
-    "better-sqlite3": "^12.8.0"
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "localtunnel": "^2.0.2",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.6"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",

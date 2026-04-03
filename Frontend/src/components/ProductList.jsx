@@ -87,9 +87,16 @@ const ProductList = () => {
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-              <button className="btn-action" style={{ background: '#cbd5e1', color: '#333' }} onClick={() => setEditModalOpen(false)}>Cancel</button>
-              <button className="btn-action" onClick={saveEdit}>Save Changes</button>
+            <div className="form-group">
+              <label className="form-label">Expiry Date 🗓️</label>
+              <input type="date" className="form-input" value={editingProduct.expiry_date || ""}
+                onChange={e => setEditingProduct({...editingProduct, expiry_date: e.target.value || null})}
+                style={{ colorScheme: 'light' }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '30px' }}>
+              <button className="btn-outline" onClick={() => setEditModalOpen(false)}>Cancel</button>
+              <button className="btn-primary" onClick={saveEdit}>Save Changes</button>
             </div>
           </div>
         </div>
@@ -109,26 +116,42 @@ const ProductList = () => {
                    <th>Item Description</th>
                    <th>Barcode</th>
                    <th>Rate (₹)</th>
-                   <th>Closing Stock</th>
+                   <th>Stock</th>
                    <th>Unit</th>
+                   <th>Expiry</th>
                    <th style={{ textAlign: 'right', paddingRight: '25px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {products.map(p => (
+                 {products.map(p => {
+                    const today = new Date().toISOString().split('T')[0];
+                    const expired = p.expiry_date && p.expiry_date < today;
+                    const near = p.expiry_date && !expired && p.expiry_date <= new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
+                    return (
                    <tr key={p.id}>
-                      <td style={{ paddingLeft: '25px', color: '#64748b' }}>#{p.id}</td>
-                      <td style={{ fontWeight: 600 }}>{p.name}</td>
-                      <td style={{ fontFamily: 'monospace' }}>{p.barcode || '-'}</td>
-                      <td style={{ fontWeight: 600, color: '#059669' }}>₹{p.price.toFixed(2)}</td>
-                      <td style={{ fontWeight: 600 }}>{p.quantity}</td>
-                      <td>{p.unit}</td>
-                      <td style={{ textAlign: 'right', paddingRight: '25px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                         <button onClick={() => handleEdit(p)} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', color: '#0284c7' }}>Edit</button>
-                         <button onClick={() => handleDelete(p.id, p.name)} style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', color: '#dc2626' }}>Delete</button>
-                      </td>
-                   </tr>
-                ))}
+                       <td style={{ paddingLeft: '25px', color: '#64748b' }}>#{p.id}</td>
+                       <td style={{ fontWeight: 600, color: expired ? '#ef4444' : 'inherit' }}>{p.name}{expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}</td>
+                       <td style={{ fontFamily: 'monospace' }}>{p.barcode || '-'}</td>
+                       <td style={{ fontWeight: 600, color: '#059669' }}>₹{p.price.toFixed(2)}</td>
+                       <td style={{ fontWeight: 600 }}>{p.quantity}</td>
+                       <td>{p.unit}</td>
+                       <td>
+                         {p.expiry_date ? (
+                           <span style={{
+                             fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                             background: expired ? '#ef444420' : near ? '#fef3c7' : '#dcfce7',
+                             color: expired ? '#ef4444' : near ? '#d97706' : '#16a34a',
+                             border: `1px solid ${expired ? '#fca5a5' : near ? '#fde68a' : '#86efac'}`
+                           }}>{p.expiry_date}</span>
+                         ) : <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>}
+                       </td>
+                       <td style={{ textAlign: 'right', paddingRight: '25px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                          <button onClick={() => handleEdit(p)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>Edit</button>
+                          <button onClick={() => handleDelete(p.id, p.name)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.85rem', color: '#dc2626', borderColor: '#fecaca', background: '#fef2f2' }}>Delete</button>
+                       </td>
+                    </tr>
+                    );
+                 })}
                 {products.length === 0 && (
                   <tr>
                     <td colSpan="7" style={{ textAlign: 'center', padding: '50px', color: '#94a3b8' }}>No records found.</td>

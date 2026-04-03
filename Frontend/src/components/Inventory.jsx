@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 const Inventory = () => {
   const [categories, setCategories] = useState([]);
   const [form, setForm] = useState({
-    name: "", category_id: "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: ""
+    name: "", category_id: "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "", expiry_date: ""
   });
 
   const loadCategories = async () => {
@@ -23,9 +23,16 @@ const Inventory = () => {
   const addProduct = async (e) => {
     e.preventDefault();
     if (window.api && window.api.addProduct) {
-      await window.api.addProduct({ ...form, price: Number(form.price), quantity: Number(form.quantity), category_id: Number(form.category_id) });
+      await window.api.addProduct({
+        ...form,
+        price: Number(form.price),
+        cost_price: Number(form.cost_price) || 0,
+        quantity: Number(form.quantity),
+        category_id: Number(form.category_id),
+        expiry_date: form.expiry_date || null
+      });
       alert("Product registered in database!");
-      setForm({ name: "", category_id: categories.length > 0 ? categories[0].id : "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "" });
+      setForm({ name: "", category_id: categories.length > 0 ? categories[0].id : "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "", expiry_date: "" });
     }
   };
 
@@ -58,9 +65,16 @@ const Inventory = () => {
                 <input className="form-input" name="price" type="number" step="0.01" value={form.price} onChange={handleChange} required />
               </div>
               <div className="form-group">
+                <label className="form-label">Cost Price (₹)</label>
+                <input className="form-input" name="cost_price" type="number" step="0.01" value={form.cost_price} onChange={handleChange} placeholder="Purchase cost" />
+              </div>
+              <div className="form-group">
                 <label className="form-label">Opening Stock Qty</label>
                 <input className="form-input" name="quantity" type="number" value={form.quantity} onChange={handleChange} required />
               </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '25px', marginBottom: '20px' }}>
               <div className="form-group">
                 <label className="form-label">Unit</label>
                 <select className="form-select" name="unit" value={form.unit} onChange={handleChange}>
@@ -68,7 +82,15 @@ const Inventory = () => {
                   <option value="Kg">Kg</option>
                   <option value="Box">Box</option>
                   <option value="Ltr">Ltr</option>
+                  <option value="Strip">Strip (Pharma)</option>
+                  <option value="Bottle">Bottle</option>
                 </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Expiry Date 🗓️</label>
+                <input className="form-input" name="expiry_date" type="date" value={form.expiry_date} onChange={handleChange}
+                  style={{ colorScheme: 'light' }}
+                />
               </div>
             </div>
 
