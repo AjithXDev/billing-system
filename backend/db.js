@@ -60,8 +60,12 @@ CREATE TABLE IF NOT EXISTS products (
 )
 `).run();
 
-// Safe migration: add expiry_date if missing
-try { db.prepare("ALTER TABLE products ADD COLUMN expiry_date TEXT DEFAULT NULL").run(); } catch(e) {}
+// Safe migration: add columns if they are missing from older versions
+try { db.prepare("ALTER TABLE products ADD COLUMN expiry_date TEXT DEFAULT NULL").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN unit TEXT").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN barcode TEXT").run(); } catch (e) { }
 
 // 🟢 HELD BILLS TABLE (Hold/Resume Feature)
 db.prepare(`

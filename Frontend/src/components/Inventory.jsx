@@ -23,16 +23,22 @@ const Inventory = () => {
   const addProduct = async (e) => {
     e.preventDefault();
     if (window.api && window.api.addProduct) {
-      await window.api.addProduct({
-        ...form,
-        price: Number(form.price),
-        cost_price: Number(form.cost_price) || 0,
-        quantity: Number(form.quantity),
-        category_id: Number(form.category_id),
-        expiry_date: form.expiry_date || null
-      });
-      alert("Product registered in database!");
-      setForm({ name: "", category_id: categories.length > 0 ? categories[0].id : "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "", expiry_date: "" });
+      try {
+        await window.api.addProduct({
+          ...form,
+          price: Number(form.price),
+          cost_price: Number(form.cost_price) || 0,
+          quantity: Number(form.quantity),
+          category_id: Number(form.category_id),
+          expiry_date: form.expiry_date || null
+        });
+        alert("Product registered in database!");
+        setForm({ name: "", category_id: categories.length > 0 ? categories[0].id : "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "", expiry_date: "" });
+      } catch (err) {
+        alert("❌ Error saving product: " + err.message);
+      }
+    } else {
+      alert("Error: Database connection not found! Please ensure you are running the app as a Desktop Application (Electron), not in a regular web browser.");
     }
   };
 
@@ -95,7 +101,7 @@ const Inventory = () => {
             </div>
 
             <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '20px', marginTop: '20px', textAlign: 'right' }}>
-               <button className="btn-action">SAVE PRODUCT</button>
+              <button className="btn-action">SAVE PRODUCT</button>
             </div>
           </form>
         </div>

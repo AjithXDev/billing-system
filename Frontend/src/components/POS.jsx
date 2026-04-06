@@ -85,7 +85,7 @@ function HeldBillsPanel({ onResume, onClose }) {
 
 /* ─────────────────── Main POS Component ────────────── */
 const POS = () => {
-  const emptyRow = () => ({ tempId: Date.now(), name: "", price: 0, qty: 0, total: 0, gstRate: 0, gstAmt: 0 });
+  const emptyRow = () => ({ tempId: Date.now() + Math.random(), name: "", price: 0, qty: 0, total: 0, gstRate: 0, gstAmt: 0 });
 
   const [billItems, setBillItems] = useState([emptyRow()]);
   const [currentRow, setCurrentRow] = useState(0);
@@ -155,7 +155,15 @@ const POS = () => {
   const handleInputChange = (index, value) => {
     const safeValue = typeof value === "string" ? value : "";
     const updated = [...billItems];
-    updated[index] = { ...updated[index], name: safeValue };
+    updated[index] = {
+      ...updated[index],
+      name: safeValue,
+      id: null,
+      price: 0,
+      total: 0,
+      gstRate: 0,
+      gstAmt: 0
+    };
     setBillItems(updated);
 
     const matchVal = safeValue.trim().toLowerCase();
@@ -204,17 +212,25 @@ const POS = () => {
     setTimeout(() => inputRefs.current[index + "_qty"]?.focus(), 10);
   };
 
+  const addNewRow = () => {
+    const newRow = emptyRow();
+    setBillItems(prev => [...prev, newRow]);
+    setTimeout(() => inputRefs.current[billItems.length]?.focus(), 10);
+  };
+
   const handleKeyDown = (e, index, field) => {
     if (field === "name") {
       if (e.key === "ArrowDown") { e.preventDefault(); setSelectedSugIndex(p => Math.min(p + 1, Math.max(0, suggestions.length - 1))); }
-      if (e.key === "ArrowUp")   { e.preventDefault(); setSelectedSugIndex(p => Math.max(p - 1, 0)); }
-      if (e.key === "Enter" && suggestions.length > 0 && suggestions[selectedSugIndex]) {
-        selectProduct(suggestions[selectedSugIndex], index);
+      if (e.key === "ArrowUp") { e.preventDefault(); setSelectedSugIndex(p => Math.max(p - 1, 0)); }
+      if (e.key === "Enter") {
+        if (suggestions.length > 0 && suggestions[selectedSugIndex]) {
+          selectProduct(suggestions[selectedSugIndex], index);
+        } else {
+          addNewRow();
+        }
       }
     } else if (field === "qty" && e.key === "Enter") {
-      const newRow = emptyRow();
-      setBillItems([...billItems, newRow]);
-      setTimeout(() => inputRefs.current[billItems.length]?.focus(), 10);
+      addNewRow();
     }
   };
 
@@ -232,9 +248,9 @@ const POS = () => {
     setBillItems(billItems.filter((_, i) => i !== idx));
   };
 
-  const qtyTotal  = billItems.reduce((s, i) => s + Number(i.qty || 0), 0);
-  const subtotal  = billItems.reduce((s, i) => s + Number(i.total || 0), 0);
-  const taxTotal  = billItems.reduce((s, i) => s + Number(i.gstAmt || 0), 0);
+  const qtyTotal = billItems.reduce((s, i) => s + Number(i.qty || 0), 0);
+  const subtotal = billItems.reduce((s, i) => s + Number(i.total || 0), 0);
+  const taxTotal = billItems.reduce((s, i) => s + Number(i.gstAmt || 0), 0);
   const grandTotal = Number(subtotal + taxTotal).toFixed(2);
 
   const handlePhoneChange = async (e) => {
@@ -247,6 +263,12 @@ const POS = () => {
   };
 
   const handleGenerateClick = () => {
+    const invalidItems = billItems.filter(i => i.name.trim() !== "" && !i.id);
+    if (invalidItems.length > 0) {
+      alert("Please add a valid product. Unregistered products cannot be billed.");
+      return;
+    }
+
     const validItems = billItems.filter(i => i.qty > 0 && i.id);
     if (validItems.length === 0) { alert("Please add at least one item before generating a bill."); return; }
     setAmountReceived("");
@@ -382,8 +404,8 @@ const POS = () => {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "15px" }}>
                         <div>
                           <label className="form-label">Amount Given By Customer (₹)</label>
-                          <input type="number" className="form-input" style={{ fontSize: "1.2rem", padding: "12px" }}
-                            value={amountReceived} onChange={e => setAmountReceived(e.target.value)} placeholder={`₹ ${grandTotal}`} />
+                          <input type="text" inputMode="decimal" className="form-input" style={{ fontSize: "1.2rem", padding: "12px" }}
+                            value={amountReceived} onChange={e => setAmountReceived(e.target.value.replace(/[^0-9.]/g, ''))} placeholder={`₹ ${grandTotal}`} />
                         </div>
                         {amountReceived && Number(amountReceived) >= Number(grandTotal) && (
                           <div style={{ padding: "15px", backgroundColor: "#ecfdf5", borderRadius: "6px", fontSize: "1.2rem", color: "#059669", textAlign: "center", fontWeight: "bold" }}>
@@ -455,9 +477,9 @@ const POS = () => {
               <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "30px", border: "1px solid #333" }}>
                 <thead>
                   <tr style={{ backgroundColor: "#e6f0fa", borderBottom: "1px solid #333" }}>
-                    <th style={{ padding: "12px", textAlign: "left",   borderRight: "1px solid #333" }}>Item Description</th>
+                    <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #333" }}>Item Description</th>
                     <th style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>Qty</th>
-                    <th style={{ padding: "12px", textAlign: "right",  borderRight: "1px solid #333" }}>Rate</th>
+                    <th style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>Rate</th>
                     <th style={{ padding: "12px", textAlign: "right" }}>Total</th>
                   </tr>
                 </thead>
@@ -469,7 +491,7 @@ const POS = () => {
                         <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>+ {item.gstRate}% GST (₹{item.gstAmt.toFixed(2)})</div>
                       </td>
                       <td style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>{item.qty}</td>
-                      <td style={{ padding: "12px", textAlign: "right",  borderRight: "1px solid #333" }}>₹{item.price.toFixed(2)}</td>
+                      <td style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>₹{item.price.toFixed(2)}</td>
                       <td style={{ padding: "12px", textAlign: "right" }}>₹{(item.total + item.gstAmt).toFixed(2)}</td>
                     </tr>
                   ))}
@@ -502,7 +524,7 @@ const POS = () => {
 
               <div className="no-print" style={{ marginTop: "40px", display: "flex", justifyContent: "center", gap: "20px" }}>
                 <button onClick={() => window.print()} style={{ padding: "12px 25px", background: "#333", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>🖨️ PRINT INVOICE</button>
-                <button onClick={closeSuccess}         style={{ padding: "12px 25px", background: "#0284c7", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>CLOSE & START NEW</button>
+                <button onClick={closeSuccess} style={{ padding: "12px 25px", background: "#0284c7", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>CLOSE & START NEW</button>
               </div>
             </div>
           )}
@@ -605,6 +627,26 @@ const POS = () => {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ── ADD NEW PRODUCT BUTTON ─── */}
+      <div style={{ padding: "10px 20px", display: "flex", justifyContent: "flex-end" }}>
+        <button
+          onClick={addNewRow}
+          style={{
+            padding: "8px 16px",
+            background: "#f1f5f9",
+            color: "#334155",
+            border: "1px dashed #cbd5e1",
+            borderRadius: "6px",
+            fontSize: "13px",
+            fontWeight: "600",
+            cursor: "pointer",
+            transition: "all 0.2s"
+          }}
+        >
+          Add Product
+        </button>
       </div>
 
       {/* ── FOOTER ─── */}

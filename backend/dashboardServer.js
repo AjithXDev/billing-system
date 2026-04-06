@@ -4,18 +4,18 @@
  * Internet access via localtunnel — owner can access from ANYWHERE.
  */
 
-const express  = require("express");
-const cors     = require("cors");
-const http     = require("http");
-const os       = require("os");
-const path     = require("path");
-const db       = require("./db");
+const express = require("express");
+const cors = require("cors");
+const http = require("http");
+const os = require("os");
+const path = require("path");
+const db = require("./db");
 
 const PORT = 4567;
-let server      = null;
-let localIP     = "127.0.0.1";
-let tunnelURL   = null;   // Public internet URL (via localtunnel)
-let tunnelObj   = null;
+let server = null;
+let localIP = "127.0.0.1";
+let tunnelURL = null;   // Public internet URL (via localtunnel)
+let tunnelObj = null;
 
 /* ── Get local WiFi IP ─────────────────────────────── */
 function getLocalIP() {
@@ -30,7 +30,7 @@ function getLocalIP() {
 
 /* ── Helpers ─────────────────────────────────────────── */
 function todayStr() { return new Date().toISOString().split("T")[0]; }
-function in7days()  { return new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]; }
+function in7days() { return new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]; }
 function inNdays(n) { return new Date(Date.now() + n * 86400000).toISOString().split("T")[0]; }
 
 /* ── Start Internet Tunnel ──────────────────────────── */
@@ -77,23 +77,23 @@ function startDashboardServer(mainWindow) {
   expressApp.get("/api/stats", (req, res) => {
     try {
       const today = todayStr();
-      const in7   = in7days();
-      const in30  = inNdays(30);
+      const in7 = in7days();
+      const in30 = inNdays(30);
 
-      const totalProducts   = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
+      const totalProducts = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
       const totalCategories = db.prepare("SELECT COUNT(*) as cnt FROM categories").get().cnt;
 
       // Sales
-      const todaySales   = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE date(created_at)=date('now','localtime')`).get().t;
-      const todayBills   = db.prepare(`SELECT COUNT(*) as cnt FROM invoices WHERE date(created_at)=date('now','localtime')`).get().cnt;
-      const weeklySales  = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-7 days')`).get().t;
+      const todaySales = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE date(created_at)=date('now','localtime')`).get().t;
+      const todayBills = db.prepare(`SELECT COUNT(*) as cnt FROM invoices WHERE date(created_at)=date('now','localtime')`).get().cnt;
+      const weeklySales = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-7 days')`).get().t;
       const monthlySales = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-30 days')`).get().t;
 
       // Alerts
-      const expiredCount    = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date<?`).get(today).cnt;
+      const expiredCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date<?`).get(today).cnt;
       const nearExpiryCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?`).get(today, in7).cnt;
-      const lowStockCount   = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity>0 AND quantity<=5`).get().cnt;
-      const outOfStock      = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity<=0`).get().cnt;
+      const lowStockCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity>0 AND quantity<=5`).get().cnt;
+      const outOfStock = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity<=0`).get().cnt;
 
       // Top 5 products this month
       const topProducts = db.prepare(`
@@ -150,8 +150,8 @@ function startDashboardServer(mainWindow) {
         WHERE inv.created_at>=datetime('now','-30 days')
       `).get().cost;
 
-      const todayProfit   = todaySales   - todayCost;
-      const weeklyProfit  = weeklySales  - weeklyCost;
+      const todayProfit = todaySales - todayCost;
+      const weeklyProfit = weeklySales - weeklyCost;
       const monthlyProfit = monthlySales - monthlyCost;
 
       // ── PEAK TIME ANALYSIS ───────────────────────────
@@ -181,7 +181,7 @@ function startDashboardServer(mainWindow) {
         todayCost, weeklyCost, monthlyCost,
         peakHours, paymentBreakdown
       });
-    } catch(e) {
+    } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });
@@ -192,10 +192,10 @@ function startDashboardServer(mainWindow) {
   expressApp.get("/api/expiry", (req, res) => {
     try {
       const today = todayStr();
-      const in30  = inNdays(30);   // show 30-day window for complete visibility
-      const in7   = in7days();
+      const in30 = inNdays(30);   // show 30-day window for complete visibility
+      const in7 = in7days();
 
-      const expired    = db.prepare(`
+      const expired = db.prepare(`
         SELECT p.*,c.name as category_name
         FROM products p LEFT JOIN categories c ON p.category_id=c.id
         WHERE p.expiry_date IS NOT NULL AND p.expiry_date<?
@@ -210,7 +210,7 @@ function startDashboardServer(mainWindow) {
       `).all(today, in30);
 
       res.json({ expired, nearExpiry });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   /* ══════════════════════════════════════════════════════
@@ -244,7 +244,7 @@ function startDashboardServer(mainWindow) {
       `).all();
 
       res.json({ lowStock, deadStock, outOfStock });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   /* ══════════════════════════════════════════════════════
@@ -290,7 +290,7 @@ function startDashboardServer(mainWindow) {
       `).all();
 
       res.json({ peakHours, dayOfWeek, categoryRevenue, recentProducts });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   /* ══════════════════════════════════════════════════════
@@ -300,7 +300,117 @@ function startDashboardServer(mainWindow) {
     try {
       const invoices = db.prepare(`SELECT * FROM invoices ORDER BY created_at DESC LIMIT 20`).all();
       res.json(invoices);
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  /* ══════════════════════════════════════════════════════
+     API: For Localhost Web Browser Fallback
+  ══════════════════════════════════════════════════════ */
+  expressApp.get("/api/categories", (req, res) => {
+    try { res.json(db.prepare("SELECT * FROM categories").all()); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.get("/api/products/full", (req, res) => {
+    try {
+      res.json(db.prepare(`
+        SELECT p.*, c.gst as category_gst, c.name as category_name
+        FROM products p LEFT JOIN categories c ON p.category_id = c.id
+      `).all());
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/products", (req, res) => {
+    try {
+      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date } = req.body;
+      db.prepare(`INSERT INTO products (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null
+      );
+      res.json({ message: "Product added" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.put("/api/products/:id", (req, res) => {
+    try {
+      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date } = req.body;
+      db.prepare(`UPDATE products SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=? WHERE id=?`).run(
+        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, req.params.id
+      );
+      res.json({ message: "Product updated" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/products/:id", (req, res) => {
+    try { db.prepare(`DELETE FROM products WHERE id=?`).run(req.params.id); res.json({ message: "Product deleted" }); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/products/bulk", (req, res) => {
+    try {
+      const updates = req.body;
+      const stmt = db.prepare(`UPDATE products SET quantity = quantity + ? WHERE id = ?`);
+      const trans = db.transaction((items) => { for (const item of items) stmt.run(item.addQty, item.id); });
+      trans(updates);
+      res.json({ message: "Bulk updated" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.get("/api/customers/:phone", (req, res) => {
+    try { res.json(db.prepare("SELECT * FROM customers WHERE phone = ?").get(req.params.phone) || null); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/invoices", (req, res) => {
+    try {
+      const { cart, customer, paymentMode } = req.body;
+      let total = 0;
+      cart.forEach(item => { total += (item.total + item.gstAmt); });
+
+      let customerId = null;
+      if (customer && customer.phone) {
+        const existing = db.prepare("SELECT * FROM customers WHERE phone = ?").get(customer.phone);
+        if (!existing) {
+          customerId = db.prepare("INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)").run(customer.name || "", customer.phone, customer.address || "").lastInsertRowid;
+        } else {
+          db.prepare("UPDATE customers SET name = ?, address = ? WHERE phone = ?").run(customer.name || existing.name, customer.address || existing.address, customer.phone);
+          customerId = existing.id;
+        }
+      }
+
+      const invRes = db.prepare(`INSERT INTO invoices (customer_name, customer_phone, customer_address, customer_id, payment_mode, total_amount) VALUES (?, ?, ?, ?, ?, ?)`).run(
+        customer?.name || "", customer?.phone || "", customer?.address || "", customerId, paymentMode || "Cash", total
+      );
+      const invoiceId = invRes.lastInsertRowid;
+
+      const insertItem = db.prepare(`INSERT INTO invoice_items (invoice_id, product_id, quantity, price, gst_rate, gst_amount) VALUES (?, ?, ?, ?, ?, ?)`);
+      const updateStock = db.prepare(`UPDATE products SET quantity = quantity - ? WHERE id = ?`);
+
+      db.transaction((items) => {
+        for (const item of items) {
+          insertItem.run(invoiceId, item.id, item.qty, item.price, item.gstRate, item.gstAmt);
+          updateStock.run(item.qty, item.id);
+        }
+      })(cart);
+      res.json({ message: "Invoice created", invoiceId });
+    } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/held-bills", (req, res) => {
+    try {
+      const { cart, customer, label } = req.body;
+      db.prepare(`INSERT INTO held_bills (label, cart_json, customer_json) VALUES (?, ?, ?)`).run(
+        label || `Held ${new Date().toLocaleTimeString('en-IN')}`, JSON.stringify(cart), JSON.stringify(customer || {})
+      );
+      res.json({ message: "Held" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.get("/api/held-bills", (req, res) => {
+    try {
+      const rows = db.prepare("SELECT * FROM held_bills ORDER BY created_at DESC").all();
+      res.json(rows.map(r => ({ ...r, cart: JSON.parse(r.cart_json), customer: JSON.parse(r.customer_json || '{}') })));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/held-bills/:id", (req, res) => {
+    try { db.prepare("DELETE FROM held_bills WHERE id=?").run(req.params.id); res.json({ message: "Removed" }); } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   /* ── Start HTTP server ────────────────────────────── */
@@ -322,11 +432,11 @@ function startDashboardServer(mainWindow) {
 }
 
 function stopDashboardServer() {
-  if (tunnelObj) { try { tunnelObj.close(); } catch(e){} }
-  if (server)    { server.close(); }
+  if (tunnelObj) { try { tunnelObj.close(); } catch (e) { } }
+  if (server) { server.close(); }
 }
 
-function getDashboardURL()     { return `http://${localIP}:${PORT}`; }
-function getTunnelURL()        { return tunnelURL; }
+function getDashboardURL() { return `http://${localIP}:${PORT}`; }
+function getTunnelURL() { return tunnelURL; }
 
 module.exports = { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL };

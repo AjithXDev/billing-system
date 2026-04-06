@@ -53,17 +53,21 @@ const BulkUpdate = () => {
     }));
 
     if (window.api && window.api.bulkUpdateProducts) {
-      await window.api.bulkUpdateProducts(payload);
-      alert("Stock Updated Successfully!");
-      setUpdates({});
-      load();
+      try {
+        await window.api.bulkUpdateProducts(payload);
+        alert("Stock Updated Successfully!");
+        setUpdates({});
+        load();
+      } catch (err) {
+        alert("❌ Error updating stock: " + err.message);
+      }
     }
   };
 
   return (
     <div className="admin-scroll-area">
       <div className="admin-card" style={{ maxWidth: "1100px" }}>
-        
+
         <div className="admin-card-header">
           Smart Bulk Stock Update
         </div>
