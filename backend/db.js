@@ -66,6 +66,7 @@ try { db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run(); }
 try { db.prepare("ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT 0").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN unit TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN barcode TEXT").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN image_url TEXT").run(); } catch (e) { }
 
 // 🟢 HELD BILLS TABLE (Hold/Resume Feature)
 db.prepare(`

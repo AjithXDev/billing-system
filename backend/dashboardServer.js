@@ -63,7 +63,7 @@ function startDashboardServer(mainWindow) {
   localIP = getLocalIP();
   const expressApp = express();
   expressApp.use(cors());
-  expressApp.use(express.json());
+  expressApp.use(express.json({ limit: '50mb' }));
 
   // ── Serve the mobile dashboard HTML ─────────────────
   expressApp.get("/", (req, res) => {
@@ -214,6 +214,53 @@ function startDashboardServer(mainWindow) {
   });
 
   /* ══════════════════════════════════════════════════════
+     API: Invoices History
+  ══════════════════════════════════════════════════════ */
+  expressApp.get("/api/invoices", (req, res) => {
+    try {
+      const rows = db.prepare("SELECT * FROM invoices ORDER BY created_at DESC").all();
+      const itemsStmt = db.prepare(`
+        SELECT p.name
+        FROM invoice_items ii
+        JOIN products p ON ii.product_id = p.id
+        WHERE ii.invoice_id = ?
+      `);
+      res.json(rows.map(r => ({
+        ...r,
+        productsList: itemsStmt.all(r.id).map(i => i.name).join(", ")
+      })));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /* ══════════════════════════════════════════════════════
+     API: Invoice Details (line items)
+  ══════════════════════════════════════════════════════ */
+  expressApp.get("/api/invoices/:id/items", (req, res) => {
+    try {
+      const items = db.prepare(`
+        SELECT ii.quantity, ii.price, ii.gst_rate, ii.gst_amount, p.name
+        FROM invoice_items ii
+        JOIN products p ON ii.product_id = p.id
+        WHERE ii.invoice_id = ?
+      `).all(req.params.id);
+      res.json(items);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  /* ══════════════════════════════════════════════════════
+     API: Delete Invoice
+  ══════════════════════════════════════════════════════ */
+  expressApp.delete("/api/invoices/:id", (req, res) => {
+    try {
+      db.prepare("DELETE FROM invoice_items WHERE invoice_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM invoices WHERE id = ?").run(req.params.id);
+      res.json({ message: "Invoice deleted" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  /* ══════════════════════════════════════════════════════
      API: Stock Alerts (low / dead / out-of-stock)
   ══════════════════════════════════════════════════════ */
   expressApp.get("/api/stock", (req, res) => {
@@ -321,9 +368,9 @@ function startDashboardServer(mainWindow) {
 
   expressApp.post("/api/products", (req, res) => {
     try {
-      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date } = req.body;
-      db.prepare(`INSERT INTO products (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null
+      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url, image_data } = req.body;
+      db.prepare(`INSERT INTO products (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image_url || image_data || null
       );
       res.json({ message: "Product added" });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -331,9 +378,9 @@ function startDashboardServer(mainWindow) {
 
   expressApp.put("/api/products/:id", (req, res) => {
     try {
-      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date } = req.body;
-      db.prepare(`UPDATE products SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=? WHERE id=?`).run(
-        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, req.params.id
+      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url } = req.body;
+      db.prepare(`UPDATE products SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image_url=? WHERE id=?`).run(
+        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image_url || null, req.params.id
       );
       res.json({ message: "Product updated" });
     } catch (e) { res.status(500).json({ error: e.message }); }

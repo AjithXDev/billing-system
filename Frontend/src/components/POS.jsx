@@ -1,722 +1,552 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { Plus, Minus, Search as SearchIcon, Printer, CheckCircle, Trash2, X, Pause, Play, ShoppingCart, ArrowRight, ChevronLeft } from "lucide-react";
 
-/* ─────────────────── helpers ─────────────────────────── */
 const todayStr = () => new Date().toISOString().split("T")[0];
 
-function isExpired(product) {
-  if (!product || !product.expiry_date) return false;
-  return product.expiry_date < todayStr();
-}
-
-/* ─────────────────── Held Bills Panel ───────────────── */
-function HeldBillsPanel({ onResume, onClose }) {
-  const [heldBills, setHeldBills] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = async () => {
-    setLoading(true);
-    const data = await window.api?.getHeldBills?.() || [];
-    setHeldBills(data);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const discard = async (id) => {
-    await window.api?.deleteHeldBill?.(id);
-    await load();
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="invoice-modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
-          ⏸️ Held Bills ({heldBills.length})
-        </div>
-        {loading ? (
-          <div style={{ textAlign: "center", color: "var(--text-3)", padding: "20px 0" }}>Loading…</div>
-        ) : heldBills.length === 0 ? (
-          <div style={{
-            textAlign: "center", color: "var(--text-4)", padding: "30px 0",
-            background: "var(--surface-2)", borderRadius: 10
-          }}>🗂️ No bills on hold right now</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" }}>
-            {heldBills.map(bill => (
-              <div key={bill.id} style={{
-                background: "var(--surface-2)", borderRadius: 10,
-                border: "1px solid var(--border)", padding: "12px 14px",
-                display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10
-              }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--text-1)" }}>{bill.label}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 2 }}>
-                    {bill.cart?.length || 0} items · {bill.customer?.name || "Walk-in"}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: "var(--text-4)", marginTop: 2 }}>
-                    Held at: {new Date(bill.created_at).toLocaleTimeString("en-IN")}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button
-                    onClick={() => { onResume(bill); onClose(); }}
-                    style={{
-                      padding: "6px 14px", background: "var(--primary)", color: "#fff",
-                      border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer"
-                    }}
-                  >▶ Resume</button>
-                  <button
-                    onClick={() => discard(bill.id)}
-                    style={{
-                      padding: "6px 10px", background: "#ef444420", color: "#ef4444",
-                      border: "1px solid #ef444440", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer"
-                    }}
-                  >🗑</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <button onClick={onClose} className="btn-outline" style={{ width: "100%", marginTop: 16 }}>Close</button>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────── Main POS Component ────────────── */
 const POS = () => {
-  const emptyRow = () => ({ tempId: Date.now() + Math.random(), name: "", price: 0, qty: 0, total: 0, gstRate: 0, gstAmt: 0 });
-
-  const [billItems, setBillItems] = useState([emptyRow()]);
-  const [currentRow, setCurrentRow] = useState(0);
-  const [suggestions, setSuggestions] = useState([]);
-  const [selectedSugIndex, setSelectedSugIndex] = useState(0);
-  const [showInvoice, setShowInvoice] = useState(false);
+  const [allProducts, setAllProducts] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [discount, setDiscount] = useState(0);
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [checkoutStep, setCheckoutStep] = useState(1);
+  const [amountReceived, setAmountReceived] = useState("");
+  const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [invoiceSuccess, setInvoiceSuccess] = useState(false);
   const [lastInvoiceId, setLastInvoiceId] = useState(null);
-  const [customer, setCustomer] = useState({ name: "", phone: "", address: "" });
-  const [paymentMode, setPaymentMode] = useState("Cash");
-  const [amountReceived, setAmountReceived] = useState("");
-  const [checkoutStep, setCheckoutStep] = useState(1);
-  const [allProducts, setAllProducts] = useState([]);
-  const [showHeldBills, setShowHeldBills] = useState(false);
-  const [heldCount, setHeldCount] = useState(0);
-  const inputRefs = useRef([]);
 
-  /* ── Load products & held bill count ── */
-  useEffect(() => {
+  // Hold / Resume
+  const [heldBills, setHeldBills] = useState([]);
+  const [showHeld, setShowHeld] = useState(false);
+
+  // Cart panel toggle (starts hidden, shows when items added)
+  const [showCart, setShowCart] = useState(false);
+
+  const searchRef = useRef(null);
+
+  // Load products
+  const loadProducts = useCallback(() => {
     if (window.api?.getProductsFull) {
       window.api.getProductsFull()
         .then(data => setAllProducts(Array.isArray(data) ? data : []))
         .catch(() => setAllProducts([]));
     }
-    refreshHeldCount();
-    inputRefs.current[0]?.focus();
   }, []);
 
-  const refreshHeldCount = async () => {
-    const held = await window.api?.getHeldBills?.() || [];
-    setHeldCount(held.length);
-  };
+  useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  /* ── Hold current bill ── */
-  const holdBill = async () => {
-    const validItems = billItems.filter(i => i.qty > 0 && i.id);
-    if (validItems.length === 0) {
-      alert("Nothing to hold — add at least one item.");
-      return;
+  // Load held bills
+  const loadHeldBills = useCallback(() => {
+    if (window.api?.getHeldBills) {
+      window.api.getHeldBills()
+        .then(data => setHeldBills(Array.isArray(data) ? data : []))
+        .catch(() => setHeldBills([]));
     }
-    const label = customer.name
-      ? `${customer.name} (${customer.phone || "no phone"})`
-      : `Bill held at ${new Date().toLocaleTimeString("en-IN")}`;
-    await window.api?.holdBill?.({ cart: validItems, customer, label });
-    // Reset for next customer
-    setBillItems([emptyRow()]);
-    setCustomer({ name: "", phone: "", address: "" });
-    refreshHeldCount();
-    alert(`✅ Bill held for "${label}". You can resume it anytime.`);
-  };
+  }, []);
 
-  /* ── Resume held bill ── */
-  const resumeBill = async (bill) => {
-    // Restore cart with fresh product data (to get latest prices/expiry)
-    const restoredCart = bill.cart.map(i => ({
-      ...i,
-      tempId: Date.now() + Math.random()
-    }));
-    setBillItems([...restoredCart, emptyRow()]);
-    setCustomer(bill.customer || { name: "", phone: "", address: "" });
-    // Remove from db
-    await window.api?.deleteHeldBill?.(bill.id);
-    refreshHeldCount();
-  };
+  useEffect(() => { loadHeldBills(); }, [loadHeldBills]);
 
-  /* ── Product search ── */
-  const handleInputChange = (index, value) => {
-    const safeValue = typeof value === "string" ? value : "";
-    const updated = [...billItems];
-    updated[index] = {
-      ...updated[index],
-      name: safeValue,
-      id: null,
-      price: 0,
-      total: 0,
-      gstRate: 0,
-      gstAmt: 0
-    };
-    setBillItems(updated);
+  const filteredProducts = useMemo(() => {
+    if (!searchQuery) return allProducts;
+    const q = searchQuery.toLowerCase();
+    return allProducts.filter(p =>
+      p.name?.toLowerCase().includes(q) ||
+      p.barcode?.toLowerCase().includes(q) ||
+      p.category_name?.toLowerCase().includes(q)
+    );
+  }, [allProducts, searchQuery]);
 
-    const matchVal = safeValue.trim().toLowerCase();
-    if (matchVal.length > 0) {
-      const filtered = allProducts.filter(p => {
-        if (!p) return false;
-        const pName = p.name ? String(p.name).toLowerCase() : "";
-        const pBarcode = p.barcode ? String(p.barcode).trim().toLowerCase() : "";
-        return pName.includes(matchVal) || pBarcode === matchVal;
-      });
-      setSuggestions(filtered);
-      setSelectedSugIndex(0);
-    } else {
-      setSuggestions([]);
-    }
-  };
-
-  /* ── Select product (with expiry guard) ── */
-  const selectProduct = (product, index) => {
-    if (!product) return;
-
-    // 🔥 EXPIRY BLOCK
-    if (isExpired(product)) {
-      alert(`🚫 "${product.name}" is EXPIRED (${product.expiry_date})!\nThis product cannot be added to billing.`);
+  // Add to Cart
+  const addToCart = useCallback((product) => {
+    if (product.expiry_date && product.expiry_date < todayStr()) {
+      alert(`🚫 "${product.name}" is EXPIRED! Cannot add.`);
       return;
     }
 
-    const updated = [...billItems];
-    const catGst = Number(product.category_gst || 0);
-    const price = Number(product.price || 0);
-
-    updated[index] = {
-      ...updated[index],
-      id: product.id,
-      name: product.name || "",
-      price,
-      qty: 1,
-      total: price,
-      gstRate: catGst,
-      gstAmt: (price * catGst) / 100,
-      expiry_date: product.expiry_date || null
-    };
-
-    setBillItems(updated);
-    setSuggestions([]);
-    setTimeout(() => inputRefs.current[index + "_qty"]?.focus(), 10);
-  };
-
-  const addNewRow = () => {
-    const newRow = emptyRow();
-    setBillItems(prev => [...prev, newRow]);
-    setTimeout(() => inputRefs.current[billItems.length]?.focus(), 10);
-  };
-
-  const handleKeyDown = (e, index, field) => {
-    if (field === "name") {
-      if (e.key === "ArrowDown") { e.preventDefault(); setSelectedSugIndex(p => Math.min(p + 1, Math.max(0, suggestions.length - 1))); }
-      if (e.key === "ArrowUp") { e.preventDefault(); setSelectedSugIndex(p => Math.max(p - 1, 0)); }
-      if (e.key === "Enter") {
-        if (suggestions.length > 0 && suggestions[selectedSugIndex]) {
-          selectProduct(suggestions[selectedSugIndex], index);
-        } else {
-          addNewRow();
-        }
+    setCart(prev => {
+      const existing = prev.find(i => i.id === product.id);
+      if (existing) {
+        return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
+      } else {
+        return [...prev, {
+          id: product.id,
+          name: product.name,
+          price: Number(product.price || 0),
+          qty: 1,
+          gstRate: Number(product.category_gst || 0),
+          image: product.image_url
+        }];
       }
-    } else if (field === "qty" && e.key === "Enter") {
-      addNewRow();
-    }
+    });
+    setShowCart(true);
+  }, []);
+
+  const updateQty = (id, delta) => {
+    setCart(prev => prev.map(i => {
+      if (i.id === id) {
+        const newQty = Math.max(1, i.qty + delta);
+        return { ...i, qty: newQty };
+      }
+      return i;
+    }));
   };
 
-  const updateQty = (idx, q) => {
-    const updated = [...billItems];
-    const newQty = parseFloat(q) || 0;
-    updated[idx] = { ...updated[idx], qty: newQty };
-    updated[idx].total = newQty * Number(updated[idx].price || 0);
-    updated[idx].gstAmt = (updated[idx].total * Number(updated[idx].gstRate || 0)) / 100;
-    setBillItems(updated);
+  const removeItem = (id) => {
+    setCart(prev => {
+      const next = prev.filter(i => i.id !== id);
+      if (next.length === 0) setShowCart(false);
+      return next;
+    });
   };
 
-  const removeRow = (idx) => {
-    if (billItems.length === 1) { setBillItems([emptyRow()]); return; }
-    setBillItems(billItems.filter((_, i) => i !== idx));
-  };
+  // Prevent input jank by preventing full product grid re-render on every keystroke in sidebar arrays.
+  const productGridJSX = useMemo(() => (
+    <div className="product-grid">
+      {filteredProducts.map(p => (
+        <div className="product-card" key={p.id} onClick={() => addToCart(p)}>
+          {p.image_url ? (
+            <img src={p.image_url} alt={p.name} className="product-card-img" />
+          ) : (
+            <div className="product-card-img-placeholder">
+              <span style={{ fontSize: 24, opacity: 0.5 }}>🛒</span>
+            </div>
+          )}
+          <div className="product-card-title">{p.name}</div>
+          <div className="product-card-price">₹{Number(p.price).toFixed(2)}</div>
+          {p.barcode && <div className="product-card-barcode">{p.barcode}</div>}
+          {p.quantity !== undefined && p.quantity <= 5 && (
+            <div style={{ fontSize: 10, color: p.quantity === 0 ? 'var(--danger)' : 'var(--warning)', fontWeight: 700, marginTop: 4 }}>
+              {p.quantity === 0 ? 'OUT OF STOCK' : `Only ${p.quantity} left`}
+            </div>
+          )}
+          <div className="product-card-add">
+            <Plus size={20} />
+          </div>
+        </div>
+      ))}
+      {filteredProducts.length === 0 && (
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-4)', gridColumn: '1/-1', fontSize: 16 }}>
+          No products matched your search.
+        </div>
+      )}
+    </div>
+  ), [filteredProducts, addToCart]);
 
-  const qtyTotal = billItems.reduce((s, i) => s + Number(i.qty || 0), 0);
-  const subtotal = billItems.reduce((s, i) => s + Number(i.total || 0), 0);
-  const taxTotal = billItems.reduce((s, i) => s + Number(i.gstAmt || 0), 0);
-  const grandTotal = Number(subtotal + taxTotal).toFixed(2);
+  // Keyboard shortcut listener
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Enter" && searchQuery && filteredProducts.length === 1) {
+        addToCart(filteredProducts[0]);
+        setSearchQuery("");
+        searchRef.current?.focus();
+      } else if (e.key === "F2") {
+        e.preventDefault();
+        handleCheckoutClick();
+      } else if (e.key === "F4" && invoiceSuccess) {
+        e.preventDefault();
+        window.print();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [searchQuery, filteredProducts, cart, invoiceSuccess, addToCart]);
 
-  const handlePhoneChange = async (e) => {
-    const p = e.target.value;
-    setCustomer(prev => ({ ...prev, phone: p }));
-    if (p.length >= 10 && window.api?.searchCustomer) {
-      const existing = await window.api.searchCustomer(p);
-      if (existing) setCustomer(prev => ({ ...prev, name: existing.name || prev.name, address: existing.address || prev.address }));
-    }
-  };
+  // Totals
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  const taxTotal = cart.reduce((sum, item) => sum + ((item.price * item.qty) * item.gstRate / 100), 0);
+  const grandTotal = subtotal + taxTotal - Number(discount);
 
-  const handleGenerateClick = () => {
-    const invalidItems = billItems.filter(i => i.name.trim() !== "" && !i.id);
-    if (invalidItems.length > 0) {
-      alert("Please add a valid product. Unregistered products cannot be billed.");
-      return;
-    }
-
-    const validItems = billItems.filter(i => i.qty > 0 && i.id);
-    if (validItems.length === 0) { alert("Please add at least one item before generating a bill."); return; }
+  const handleCheckoutClick = () => {
+    if (cart.length === 0) { alert("Cart is empty!"); return; }
+    setShowCheckout(true);
+    setCheckoutStep(1);
     setAmountReceived("");
     setPaymentMode("Cash");
-    setCheckoutStep(1);
-    setShowInvoice(true);
+  };
+
+  // ── HOLD BILL ──
+  const holdCurrentBill = async () => {
+    if (cart.length === 0) { alert("Cart is empty, nothing to hold."); return; }
+    const label = `Hold #${heldBills.length + 1} — ${cart.length} items`;
+    if (window.api?.holdBill) {
+      await window.api.holdBill({ cart, customer, label });
+    }
+    setCart([]);
+    setCustomer({ name: "", phone: "" });
+    setDiscount(0);
+    setShowCart(false);
+    loadHeldBills();
+  };
+
+  // ── RESUME BILL ──
+  const resumeBill = async (bill) => {
+    setCart(bill.cart || []);
+    setCustomer(bill.customer || { name: "", phone: "" });
+    setShowCart(true);
+    if (window.api?.deleteHeldBill) {
+      await window.api.deleteHeldBill(bill.id);
+    }
+    setShowHeld(false);
+    loadHeldBills();
+  };
+
+  const deleteHeldBill = async (id) => {
+    if (window.api?.deleteHeldBill) {
+      await window.api.deleteHeldBill(id);
+    }
+    loadHeldBills();
   };
 
   const finalizeInvoice = async () => {
-    const validItems = billItems.filter(i => i.qty > 0 && i.id);
-    if (validItems.length === 0) return;
-    if (paymentMode === "Cash" && Math.round(Number(amountReceived) * 100) < Math.round(Number(grandTotal) * 100)) {
-      alert(`Insufficient Cash! Need ₹${(Number(grandTotal) - Number(amountReceived)).toFixed(2)} more.`);
+    if (paymentMode === "Cash" && amountReceived && Math.round(Number(amountReceived)*100) < Math.round(grandTotal*100)) {
+      alert(`Insufficient Cash! Need ₹${(grandTotal - Number(amountReceived)).toFixed(2)} more.`);
       return;
     }
+
+    // Build cart items for backend with total and gstAmt fields
+    const cartForBackend = cart.map(item => ({
+      ...item,
+      total: item.price * item.qty,
+      gstAmt: (item.price * item.qty) * item.gstRate / 100
+    }));
+
     if (window.api?.createInvoice) {
-      const res = await window.api.createInvoice({ cart: validItems, customer, paymentMode });
-      setLastInvoiceId(res.invoiceId);
-      setInvoiceSuccess(true);
-      if (customer?.phone?.length >= 10 && window.api.sendWhatsapp) {
-        window.api.sendWhatsapp(customer.phone, `Thanks for shopping! Your bill total is ₹${grandTotal}. Have a great day! 🛍️`);
+      try {
+        const res = await window.api.createInvoice({ cart: cartForBackend, customer, paymentMode, discount });
+        setLastInvoiceId(res.invoiceId);
+        setInvoiceSuccess(true);
+        loadProducts(); // Refresh stock
+        
+        // 🔥 Send automatic WhatsApp message
+        if (window.api.sendWhatsapp && customer.phone) {
+          window.api.sendWhatsapp(
+            customer.phone,
+            "Thank you for purchasing our products. Please visit again."
+          );
+        }
+      } catch (e) {
+        alert("Error creating invoice: " + (e.message || "Unknown error"));
       }
+    } else {
+      setLastInvoiceId("INV-" + Math.floor(Math.random()*10000));
+      setInvoiceSuccess(true);
     }
   };
 
-  const closeSuccess = () => {
-    setBillItems([emptyRow()]);
-    setCustomer({ name: "", phone: "", address: "" });
-    setShowInvoice(false);
-    setTimeout(() => setInvoiceSuccess(false), 300);
+  const resetPOS = () => {
+    setCart([]);
+    setCustomer({ name: "", phone: "" });
+    setDiscount(0);
+    setShowCheckout(false);
+    setInvoiceSuccess(false);
+    setShowCart(false);
+    loadProducts();
   };
 
-  /* ════════════════════════════════════════════════════════
-     RENDER
-  ══════════════════════════════════════════════════════ */
   return (
-    <div className="pos-container" style={{ position: "relative" }}>
+    <div className="pos-layout">
 
-      {/* ── HELD BILLS PANEL ─── */}
-      {showHeldBills && (
-        <HeldBillsPanel
-          onResume={resumeBill}
-          onClose={() => { setShowHeldBills(false); refreshHeldCount(); }}
-        />
+      {/* ── LEFT: Products (75% or full when cart hidden) ── */}
+      <div className="pos-products-area" style={{ flex: showCart ? '0 0 75%' : '1' }}>
+        {/* Top Actions Bar */}
+        <div className="pos-topbar">
+          <div className="header-search" style={{ flex: 1 }}>
+            <SearchIcon size={18} />
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search by product name, barcode, or keyword... (Enter to add)"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="pos-topbar-actions">
+            {/* Hold Button */}
+            <button className="btn btn-outline" onClick={holdCurrentBill} title="Hold current bill (F3)">
+              <Pause size={16} /> Hold
+            </button>
+            {/* Resume Button */}
+            <button className="btn btn-outline" onClick={() => { loadHeldBills(); setShowHeld(true); }}
+              style={{ position: 'relative' }}>
+              <Play size={16} /> Resume
+              {heldBills.length > 0 && (
+                <span className="held-badge">{heldBills.length}</span>
+              )}
+            </button>
+            {/* Cart Toggle */}
+            <button className="btn btn-primary" onClick={() => setShowCart(!showCart)}
+              style={{ position: 'relative' }}>
+              <ShoppingCart size={16} /> Cart
+              {cart.length > 0 && (
+                <span className="held-badge" style={{ background: '#fff', color: 'var(--primary)' }}>{cart.length}</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Product Grid */}
+        {productGridJSX}
+      </div>
+
+      {/* ── RIGHT: Cart Panel (slides in when items added) ── */}
+      {showCart && (
+        <div className="pos-cart-panel">
+          <div className="cart-panel-header">
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Current Cart</h3>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '2px 10px', borderRadius: 12, fontSize: 13, fontWeight: 700 }}>
+                {cart.length} items
+              </span>
+              <button onClick={() => setShowCart(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="cart-items-scroll">
+            {cart.map(item => (
+              <div className="cart-item" key={item.id}>
+                <div className="cart-item-info">
+                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{item.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)' }}>₹{item.price.toFixed(2)} × {item.qty}</div>
+                </div>
+                <div className="cart-item-controls">
+                  <div className="qty-control">
+                    <button className="qty-btn" onClick={() => updateQty(item.id, -1)}><Minus size={12} /></button>
+                    <span className="qty-input">{item.qty}</span>
+                    <button className="qty-btn" onClick={() => updateQty(item.id, 1)}><Plus size={12} /></button>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', minWidth: 60, textAlign: 'right' }}>
+                    ₹{((item.price * item.qty) * (1 + item.gstRate/100)).toFixed(2)}
+                  </div>
+                  <button onClick={() => removeItem(item.id)}
+                    style={{ border: 'none', background: 'transparent', color: 'var(--danger)', cursor: 'pointer', padding: 4 }}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary Footer */}
+          <div className="cart-summary-footer">
+            <div className="summary-row"><span>Subtotal</span><span>₹{subtotal.toFixed(2)}</span></div>
+            <div className="summary-row"><span>GST</span><span>₹{taxTotal.toFixed(2)}</span></div>
+            <div className="summary-row" style={{ alignItems: 'center' }}>
+              <span>Discount</span>
+              <input type="number" className="form-input"
+                style={{ width: 80, height: 32, textAlign: 'right', padding: '0 8px' }}
+                value={discount} onChange={e => setDiscount(Math.max(0, Number(e.target.value)))} />
+            </div>
+            <div className="summary-row total">
+              <span>TOTAL</span>
+              <span>₹{Math.max(0, grandTotal).toFixed(2)}</span>
+            </div>
+
+            <button className="checkout-btn" onClick={handleCheckoutClick} disabled={cart.length === 0}>
+              <span>Next <ArrowRight size={18} /></span>
+              <span style={{ fontWeight: 800 }}>₹{Math.max(0, grandTotal).toFixed(2)}</span>
+            </button>
+          </div>
+        </div>
       )}
 
-      {/* ── CHECKOUT MODAL ───── */}
-      {showInvoice && (
-        <div className="modal-overlay" style={{
-          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: invoiceSuccess ? "white" : "rgba(15, 23, 42, 0.6)",
-          zIndex: 1000,
-          display: invoiceSuccess ? "block" : "flex",
-          justifyContent: "center", alignItems: "center",
-          overflowY: "auto"
-        }}>
-          {!invoiceSuccess ? (
-            <div className="modal-content" style={{
-              background: "white", padding: "30px", borderRadius: "12px",
-              width: "650px", maxHeight: "90vh", overflowY: "auto",
-              boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)"
-            }}>
-              {checkoutStep === 1 && (
-                <>
-                  <h2 style={{ marginTop: 0, marginBottom: "20px", color: "#0f172a" }}>1. Customer & Order Summary</h2>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "20px" }}>
-                    <div className="form-group">
-                      <label className="form-label">Phone Number (Auto Search)</label>
-                      <input className="form-input" placeholder="e.g. 9876543210" value={customer.phone} onChange={handlePhoneChange} />
+      {/* ── Held Bills Modal ── */}
+      {showHeld && (
+        <div className="modal-overlay" onClick={() => setShowHeld(false)}>
+          <div className="modal-content" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+              <h2 style={{ margin: 0 }}>Held Bills</h2>
+              <button onClick={() => setShowHeld(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><X size={24} /></button>
+            </div>
+
+            {heldBills.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-4)' }}>No held bills</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {heldBills.map(bill => (
+                  <div key={bill.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '14px 16px', background: 'var(--surface-2)', borderRadius: 'var(--r-md)',
+                    border: '1px solid var(--border)'
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: 14 }}>{bill.label}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{bill.cart?.length || 0} items</div>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Customer Name</label>
-                      <input className="form-input" placeholder="e.g. John Doe" value={customer.name} onChange={e => setCustomer({ ...customer, name: e.target.value })} />
-                    </div>
-                    <div className="form-group" style={{ gridColumn: "1 / -1" }}>
-                      <label className="form-label">Address</label>
-                      <input className="form-input" placeholder="e.g. 1st street, city..." value={customer.address} onChange={e => setCustomer({ ...customer, address: e.target.value })} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-primary" style={{ height: 34, padding: '0 14px', fontSize: 13 }} onClick={() => resumeBill(bill)}>
+                        <Play size={14} /> Resume
+                      </button>
+                      <button className="btn btn-outline" style={{ height: 34, padding: '0 12px', color: 'var(--danger)' }} onClick={() => deleteHeldBill(bill.id)}>
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-                  <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "20px", fontSize: "0.9rem", color: "#475569" }}>
+      {/* ── Checkout / Bill Summary Modal ── */}
+      {showCheckout && (
+        <div className="modal-overlay">
+          {!invoiceSuccess ? (
+            <div className="modal-content" style={{ maxWidth: 550 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
+                <h2 style={{ margin: 0 }}>
+                  {checkoutStep === 1 ? 'Bill Summary' : 'Payment'}
+                </h2>
+                <button onClick={() => setShowCheckout(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><X size={24} /></button>
+              </div>
+
+              {checkoutStep === 1 && (
+                <div>
+                  {/* Bill Summary Table */}
+                  <table className="modern-table" style={{ marginBottom: 20 }}>
                     <thead>
-                      <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#1e293b" }}>
-                        <th style={{ padding: "8px 0" }}>Item</th>
-                        <th style={{ padding: "8px 0", textAlign: "center" }}>Qty</th>
-                        <th style={{ padding: "8px 0", textAlign: "right" }}>Total</th>
+                      <tr>
+                        <th>Item</th>
+                        <th style={{ textAlign: 'center' }}>Qty</th>
+                        <th style={{ textAlign: 'right' }}>Price</th>
+                        <th style={{ textAlign: 'right' }}>Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {billItems.filter(i => i.qty > 0 && i.id).map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "10px 0", fontWeight: "500" }}>
-                            {item.name} <br />
-                            <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>₹{item.price} + {item.gstRate}% GST</span>
-                          </td>
-                          <td style={{ padding: "10px 0", textAlign: "center" }}>{item.qty}</td>
-                          <td style={{ padding: "10px 0", textAlign: "right", fontWeight: "bold", color: "#0f172a" }}>₹{(item.total + item.gstAmt).toFixed(2)}</td>
+                      {cart.map(item => (
+                        <tr key={item.id}>
+                          <td style={{ fontWeight: 600 }}>{item.name}</td>
+                          <td style={{ textAlign: 'center' }}>{item.qty}</td>
+                          <td style={{ textAlign: 'right' }}>₹{item.price.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>₹{((item.price * item.qty) * (1 + item.gstRate/100)).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
 
-                  <div style={{ textAlign: "right", fontSize: "1.25rem", fontWeight: "600", marginBottom: "25px", color: "hsl(var(--foreground))" }}>
-                    Net Payable: <span>₹{grandTotal}</span>
+                  <div style={{ background: 'var(--surface-2)', padding: 16, borderRadius: 12, marginBottom: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span>Subtotal</span><span style={{ fontWeight: 600 }}>₹{subtotal.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span>GST</span><span style={{ fontWeight: 600 }}>₹{taxTotal.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span>Discount</span><span style={{ fontWeight: 600 }}>-₹{Number(discount).toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid var(--border)', paddingTop: 12, marginTop: 8 }}>
+                      <span style={{ fontSize: 20, fontWeight: 800 }}>Grand Total</span>
+                      <span style={{ fontSize: 24, fontWeight: 800, color: 'var(--primary)' }}>₹{grandTotal.toFixed(2)}</span>
+                    </div>
                   </div>
 
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "15px" }}>
-                    <button onClick={() => setShowInvoice(false)} className="btn-outline">Cancel</button>
-                    <button onClick={() => setCheckoutStep(2)} className="btn-primary">Continue to Payment ➔</button>
+                  <div className="form-grid" style={{ marginBottom: 20 }}>
+                    <div className="form-group">
+                      <label className="form-label">Customer Phone</label>
+                      <input className="form-input" value={customer.phone} onChange={e => setCustomer({...customer, phone: e.target.value})} placeholder="Mobile number" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Customer Name</label>
+                      <input className="form-input" value={customer.name} onChange={e => setCustomer({...customer, name: e.target.value})} placeholder="Optional" />
+                    </div>
                   </div>
-                </>
+
+                  <button className="btn btn-primary" style={{ width: '100%', height: 50, fontSize: 16 }} onClick={() => setCheckoutStep(2)}>
+                    Next: Payment <ArrowRight size={18} />
+                  </button>
+                </div>
               )}
 
               {checkoutStep === 2 && (
-                <>
-                  <h2 style={{ marginTop: 0, marginBottom: "20px", color: "#0f172a" }}>2. Payment Verification</h2>
-                  <div style={{ textAlign: "center", marginBottom: "25px" }}>
-                    <div style={{ fontSize: "2.5rem", fontWeight: "bold", color: "#0f172a" }}>₹{grandTotal}</div>
-                    <div style={{ color: "#64748b", fontSize: "0.9rem" }}>Net Payable Amount</div>
-                  </div>
-
-                  <div style={{ border: "1px solid #e2e8f0", padding: "20px", borderRadius: "8px", marginBottom: "25px" }}>
-                    <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "bold" }}>
-                        <input type="radio" checked={paymentMode === "Cash"} onChange={() => setPaymentMode("Cash")} /> 💵 Cash
-                      </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "bold" }}>
-                        <input type="radio" checked={paymentMode === "UPI"} onChange={() => setPaymentMode("UPI")} /> 📱 UPI (GPay/PhonePe)
-                      </label>
+                <div>
+                  <div className="payment-methods" style={{ marginBottom: 24 }}>
+                    <div className={`pay-btn ${paymentMode === 'Cash' ? 'active' : ''}`} onClick={() => setPaymentMode('Cash')}>
+                      <span style={{ fontSize: 24 }}>💵</span> CASH
                     </div>
-
-                    {paymentMode === "Cash" && (
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "15px" }}>
-                        <div>
-                          <label className="form-label">Amount Given By Customer (₹)</label>
-                          <input type="text" inputMode="decimal" className="form-input" style={{ fontSize: "1.2rem", padding: "12px" }}
-                            value={amountReceived} onChange={e => setAmountReceived(e.target.value.replace(/[^0-9.]/g, ''))} placeholder={`₹ ${grandTotal}`} />
-                        </div>
-                        {amountReceived && Number(amountReceived) >= Number(grandTotal) && (
-                          <div style={{ padding: "15px", backgroundColor: "#ecfdf5", borderRadius: "6px", fontSize: "1.2rem", color: "#059669", textAlign: "center", fontWeight: "bold" }}>
-                            Give Change: ₹{(Number(amountReceived) - Number(grandTotal)).toFixed(2)}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {paymentMode === "UPI" && (
-                      <div style={{ display: "flex", alignItems: "center", gap: "20px", backgroundColor: "#f8fafc", padding: "20px", borderRadius: "8px" }}>
-                        <div style={{ width: "80px", height: "80px", background: "#e2e8f0", display: "flex", justifyContent: "center", alignItems: "center", borderRadius: "8px" }}>
-                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                            <rect x="7" y="7" width="3" height="3"></rect>
-                            <rect x="14" y="7" width="3" height="3"></rect>
-                            <rect x="7" y="14" width="3" height="3"></rect>
-                            <rect x="14" y="14" width="3" height="3"></rect>
-                          </svg>
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: "bold", color: "#0f172a", fontSize: "1.1rem" }}>Scan Shop QR</div>
-                          <div style={{ fontSize: "0.9rem", color: "#64748b", marginTop: "5px" }}>
-                            Validate the exact payment of <b>₹{grandTotal}</b> on your phone before confirming this bill.
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className={`pay-btn ${paymentMode === 'UPI' ? 'active' : ''}`} onClick={() => setPaymentMode('UPI')}>
+                      <span style={{ fontSize: 24 }}>📱</span> UPI
+                    </div>
+                    <div className={`pay-btn ${paymentMode === 'Card' ? 'active' : ''}`} onClick={() => setPaymentMode('Card')}>
+                      <span style={{ fontSize: 24 }}>💳</span> CARD
+                    </div>
                   </div>
 
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "15px" }}>
-                    <button onClick={() => setCheckoutStep(1)} className="btn-outline">Back</button>
-                    <button onClick={finalizeInvoice} className="btn-primary" style={{ flex: 1, fontSize: "1.05rem" }}>
-                      Complete Payment ✓
+                  {paymentMode === 'Cash' && (
+                    <div className="form-group" style={{ marginBottom: 24 }}>
+                      <label className="form-label">Amount Received (₹)</label>
+                      <input type="number" className="form-input"
+                        style={{ fontSize: 20, height: 56, textAlign: 'center' }}
+                        value={amountReceived} onChange={e => setAmountReceived(e.target.value)} autoFocus />
+                      {Number(amountReceived) >= grandTotal && (
+                        <div style={{ margin: '12px 0 0', padding: 16, background: 'var(--success-bg)', color: 'var(--success)', borderRadius: 8, textAlign: 'center', fontSize: 18, fontWeight: 700 }}>
+                          Change: ₹{(Number(amountReceived) - grandTotal).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-outline" style={{ flex: 1, height: 50 }} onClick={() => setCheckoutStep(1)}>
+                      <ChevronLeft size={18} /> Back
+                    </button>
+                    <button className="btn btn-primary" style={{ flex: 2, height: 50, fontSize: 16 }} onClick={finalizeInvoice}>
+                      Complete Payment
                     </button>
                   </div>
-                </>
+                </div>
               )}
             </div>
           ) : (
-            /* ── PRINTABLE INVOICE ─ */
-            <div className="printable-invoice" style={{ background: "white", maxWidth: "800px", margin: "40px auto", padding: "40px", boxShadow: "0 10px 30px rgba(0,0,0,0.1)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "2px solid #333", paddingBottom: "20px", marginBottom: "30px" }}>
-                <div>
-                  <h1 style={{ margin: "0 0 5px 0", fontSize: "2.5rem", fontFamily: "Inter, sans-serif" }}>
-                    <span style={{ color: "hsl(var(--primary))", fontStyle: "italic" }}>i</span>
-                    <span style={{ color: "#111", letterSpacing: "-1px" }}>VA BILLING</span>
-                  </h1>
-                  <div style={{ color: "#555" }}>123 Business Road, Market City 60001</div>
-                  <div style={{ color: "#555" }}>Phone: +91 90000 00000</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <h2 style={{ margin: "0 0 10px 0", color: "#333" }}>INVOICE</h2>
-                  <div><strong>Invoice #:</strong> {lastInvoiceId}</div>
-                  <div><strong>Date:</strong> {new Date().toLocaleDateString()}</div>
-                  <div><strong>Payment Via:</strong> {paymentMode}</div>
-                </div>
+            <div className="modal-content" style={{ textAlign: 'center', padding: '40px 24px' }}>
+              <div style={{ width: 80, height: 80, background: 'var(--success-bg)', color: 'var(--success)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
+                <CheckCircle size={48} />
               </div>
-
-              <div style={{ marginBottom: "30px" }}>
-                <strong>Bill To:</strong><br />
-                {customer.name ? (
-                  <><div>{customer.name}</div><div>{customer.phone}</div><div>{customer.address}</div></>
-                ) : (
-                  <div>Walk-in Customer</div>
-                )}
-              </div>
-
-              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "30px", border: "1px solid #333" }}>
-                <thead>
-                  <tr style={{ backgroundColor: "#e6f0fa", borderBottom: "1px solid #333" }}>
-                    <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #333" }}>Item Description</th>
-                    <th style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>Qty</th>
-                    <th style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>Rate</th>
-                    <th style={{ padding: "12px", textAlign: "right" }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {billItems.filter(i => i.qty > 0 && i.id).map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: "1px solid #ccc" }}>
-                      <td style={{ padding: "12px", borderRight: "1px solid #333" }}>
-                        {item.name}
-                        <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>+ {item.gstRate}% GST (₹{item.gstAmt.toFixed(2)})</div>
-                      </td>
-                      <td style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>{item.qty}</td>
-                      <td style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>₹{item.price.toFixed(2)}</td>
-                      <td style={{ padding: "12px", textAlign: "right" }}>₹{(item.total + item.gstAmt).toFixed(2)}</td>
+              <h2 style={{ fontSize: 24, marginBottom: 8, color: 'var(--text-1)' }}>Payment Successful!</h2>
+              <p style={{ color: 'var(--text-3)', marginBottom: 24 }}>Invoice #{lastInvoiceId} created successfully.</p>
+              
+              <div style={{ background: 'var(--surface-2)', padding: '16px', borderRadius: '12px', marginBottom: '32px', textAlign: 'left' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3)', marginBottom: 12, textTransform: 'uppercase' }}>Final Bill Summary</div>
+                <table className="modern-table" style={{ marginBottom: 16, width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '8px 0' }}>Item</th>
+                      <th style={{ textAlign: 'center', padding: '8px 0' }}>Qty</th>
+                      <th style={{ textAlign: 'right', padding: '8px 0' }}>Total</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <div style={{ width: "300px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #eee" }}>
-                    <span>Subtotal:</span><span>₹{subtotal.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #333" }}>
-                    <span>Total GST:</span><span>₹{taxTotal.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", fontWeight: "bold", fontSize: "1.2rem" }}>
-                    <span>NET PAYABLE:</span><span>₹{grandTotal}</span>
-                  </div>
-                  {paymentMode === "Cash" && amountReceived && (
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", color: "#555" }}>
-                      <span>Cash Tendered:</span><span>₹{Number(amountReceived).toFixed(2)}</span>
-                    </div>
-                  )}
+                  </thead>
+                  <tbody>
+                    {cart.map(item => (
+                      <tr key={item.id}>
+                        <td style={{ fontWeight: 600, padding: '8px 0' }}>{item.name}</td>
+                        <td style={{ textAlign: 'center', padding: '8px 0' }}>{item.qty}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, padding: '8px 0' }}>₹{((item.price * item.qty) * (1 + item.gstRate/100)).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px dashed var(--border)', paddingTop: 12 }}>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>Total Paid ({paymentMode})</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--primary)' }}>₹{grandTotal.toFixed(2)}</span>
                 </div>
               </div>
 
-              <div style={{ marginTop: "50px", textAlign: "center", color: "#666", fontSize: "0.9rem", borderTop: "1px solid #ccc", paddingTop: "20px" }}>
-                Returns are accepted within 30 days of the purchase date.<br />
-                Thank You for your business!
-              </div>
-
-              <div className="no-print" style={{ marginTop: "40px", display: "flex", justifyContent: "center", gap: "20px" }}>
-                <button onClick={() => window.print()} style={{ padding: "12px 25px", background: "#333", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>🖨️ PRINT INVOICE</button>
-                <button onClick={closeSuccess} style={{ padding: "12px 25px", background: "#0284c7", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>CLOSE & START NEW</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button className="btn btn-primary" style={{ width: '100%', height: 50 }} onClick={() => window.print()}>
+                  <Printer size={20} /> Print Receipt (F4)
+                </button>
+                <button className="btn btn-outline" style={{ width: '100%', height: 50 }} onClick={resetPOS}>
+                  New Bill
+                </button>
               </div>
             </div>
           )}
         </div>
       )}
-
-      {/* ── COLUMN HEADERS ─── */}
-      <div className="pos-table-header">
-        <div>S.NO</div>
-        <div style={{ textAlign: "left", paddingLeft: "15px" }}>DESCRIPTION</div>
-        <div>RATE (₹)</div>
-        <div>QTY</div>
-        <div>GST %</div>
-        <div>GST (₹)</div>
-        <div>AMOUNT (₹)</div>
-      </div>
-
-      {/* ── ITEM ROWS ────────── */}
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: "100px" }}>
-        {billItems.map((item, idx) => (
-          <div key={item.tempId} className="pos-row" style={{ position: "relative", zIndex: currentRow === idx ? 100 : 1 }}>
-            <div className="pos-cell" style={{ justifyContent: "center" }}>
-              {idx + 1}
-            </div>
-
-            <div className="pos-cell" style={{ position: "relative" }}>
-              <input
-                className="pos-input"
-                ref={el => (inputRefs.current[idx] = el)}
-                value={item.name}
-                onFocus={() => setCurrentRow(idx)}
-                onChange={e => handleInputChange(idx, e.target.value)}
-                onKeyDown={e => handleKeyDown(e, idx, "name")}
-                placeholder="Type to search..."
-              />
-
-              {/* Expiry warning badge on row */}
-              {item.expiry_date && item.expiry_date >= todayStr() && (
-                <span style={{
-                  position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-                  background: "#fef3c7", color: "#d97706",
-                  border: "1px solid #fde68a",
-                  borderRadius: 20, fontSize: 9.5, fontWeight: 700,
-                  padding: "1px 6px", pointerEvents: "none"
-                }}>
-                  EXP {item.expiry_date}
-                </span>
-              )}
-
-              {suggestions.length > 0 && idx === currentRow && (
-                <div className="tally-suggestions">
-                  {suggestions.map((p, sIdx) => (
-                    <div
-                      key={p.id}
-                      className={`tally-suggestion-item ${sIdx === selectedSugIndex ? "selected" : ""}`}
-                      onClick={() => selectProduct(p, idx)}
-                      style={isExpired(p) ? { opacity: 0.5, pointerEvents: "none" } : {}}
-                    >
-                      <span>
-                        {p.name}
-                        {isExpired(p) && <span style={{ fontSize: 10, color: "#ef4444", marginLeft: 5 }}>[EXPIRED]</span>}
-                      </span>
-                      <span>₹{p.price}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="pos-cell">
-              <input className="pos-input" value={item.price || ""} readOnly />
-            </div>
-
-            <div className="pos-cell">
-              <input
-                className="pos-input"
-                ref={el => (inputRefs.current[idx + "_qty"] = el)}
-                value={item.qty || ""}
-                onChange={e => updateQty(idx, e.target.value)}
-                onKeyDown={e => handleKeyDown(e, idx, "qty")}
-              />
-            </div>
-
-            <div className="pos-cell">{item.gstRate}</div>
-            <div className="pos-cell">{Number(item.gstAmt || 0).toFixed(2)}</div>
-            <div className="pos-cell" style={{ position: "relative" }}>
-              {Number((item.total || 0) + (item.gstAmt || 0)).toFixed(2)}
-              {idx > 0 && (
-                <button
-                  onClick={() => removeRow(idx)}
-                  style={{
-                    position: "absolute", right: 4,
-                    width: 18, height: 18, borderRadius: "50%",
-                    border: "none", background: "#ef444430", color: "#ef4444",
-                    fontSize: 11, cursor: "pointer", lineHeight: 1,
-                    display: "flex", alignItems: "center", justifyContent: "center"
-                  }}
-                >×</button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── ADD NEW PRODUCT BUTTON ─── */}
-      <div style={{ padding: "10px 20px", display: "flex", justifyContent: "flex-end" }}>
-        <button
-          onClick={addNewRow}
-          style={{
-            padding: "8px 16px",
-            background: "#f1f5f9",
-            color: "#334155",
-            border: "1px dashed #cbd5e1",
-            borderRadius: "6px",
-            fontSize: "13px",
-            fontWeight: "600",
-            cursor: "pointer",
-            transition: "all 0.2s"
-          }}
-        >
-          Add Product
-        </button>
-      </div>
-
-      {/* ── FOOTER ─── */}
-      <div className="pos-footer">
-        <div className="pos-footer-col">
-          <span className="footer-label">TOTAL QTY</span>
-          <span className="footer-val">{qtyTotal}</span>
-        </div>
-        <div className="pos-footer-col">
-          <span className="footer-label">TAXABLE AMT</span>
-          <span className="footer-val">₹{subtotal.toFixed(2)}</span>
-        </div>
-        <div className="pos-footer-col">
-          <span className="footer-label">TOTAL GST</span>
-          <span className="footer-val">₹{taxTotal.toFixed(2)}</span>
-        </div>
-        <div className="pos-footer-col">
-          <span className="footer-label">NET PAYABLE</span>
-          <span className="footer-val">₹{grandTotal}</span>
-        </div>
-
-        {/* HOLD BILL BUTTON */}
-        <button
-          onClick={holdBill}
-          style={{
-            marginLeft: "auto",
-            padding: "0 20px", height: 42,
-            background: "transparent",
-            border: "1px solid #f59e0b",
-            color: "#f59e0b",
-            borderRadius: "var(--r-md)",
-            fontSize: 13, fontWeight: 700,
-            cursor: "pointer", transition: "all .15s",
-            display: "flex", alignItems: "center", gap: 6
-          }}
-        >
-          ⏸️ Hold
-        </button>
-
-        {/* RESUME BUTTON with count badge */}
-        <button
-          onClick={() => setShowHeldBills(true)}
-          style={{
-            position: "relative",
-            padding: "0 20px", height: 42,
-            background: "#7c3aed20",
-            border: "1px solid #7c3aed",
-            color: "#7c3aed",
-            borderRadius: "var(--r-md)",
-            fontSize: 13, fontWeight: 700,
-            cursor: "pointer", transition: "all .15s",
-            display: "flex", alignItems: "center", gap: 6
-          }}
-        >
-          ▶ Resume
-          {heldCount > 0 && (
-            <span style={{
-              position: "absolute", top: -6, right: -6,
-              background: "#ef4444", color: "#fff",
-              borderRadius: "50%", width: 18, height: 18,
-              fontSize: 10, fontWeight: 800,
-              display: "flex", alignItems: "center", justifyContent: "center"
-            }}>{heldCount}</span>
-          )}
-        </button>
-
-        <button className="btn-invoice" onClick={handleGenerateClick}>
-          GENERATE BILL
-        </button>
-      </div>
     </div>
   );
 };
