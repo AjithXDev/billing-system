@@ -8,7 +8,13 @@ const DEFAULTS = {
   gstNumber: "",
   invoicePrefix: "INV",
   lowStockThreshold: 5,
+  deadStockThresholdDays: 30,
   expiryAlertDays: 7,
+  ownerPhone: "",
+  isCloudEnabled: false,
+  masterKey: "owner123",
+  supabaseUrl: "",
+  supabaseKey: "",
 };
 
 function SettingRow({ label, children }) {
@@ -50,7 +56,7 @@ export default function Settings() {
 
     // Get Internet Tunnel URL (for anywhere access)
     // First try if it's already generated
-    window.api?.getTunnelUrl?.().then(url => {
+    window.api?.getDashboardUrl?.().then(url => {
       if (url) setTunnelUrl(url);
     }).catch(() => {});
 
@@ -58,12 +64,18 @@ export default function Settings() {
     window.api?.onTunnelReady?.(data => {
       setTunnelUrl(data.url);
     });
+
+    // Get Auto-generated Shop ID
+    window.api?.getShopId?.().then(id => {
+      if (id) setCfg(prev => ({ ...prev, shopId: id }));
+    });
   }, []);
 
   const set = (key, val) => setCfg(prev => ({ ...prev, [key]: val }));
 
   const save = () => {
     localStorage.setItem("smart_billing_settings", JSON.stringify(cfg));
+    window.api?.saveAppSettings?.(cfg);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -141,6 +153,14 @@ export default function Settings() {
           </div>
         </SettingRow>
 
+        <SettingRow label="Dead Stock Threshold">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="number" style={numInputStyle} value={cfg.deadStockThresholdDays} min={1} max={365}
+              onChange={e => set("deadStockThresholdDays", Number(e.target.value))} />
+            <span style={{ fontSize: 12, color: "var(--text-3)" }}>days (unsold)</span>
+          </div>
+        </SettingRow>
+
         <SettingRow label="Expiry Warning Days">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="number" style={numInputStyle} value={cfg.expiryAlertDays} min={1} max={90}
@@ -149,7 +169,55 @@ export default function Settings() {
           </div>
         </SettingRow>
 
+        <SectionTitle icon="📱" title="Automation & Notifications" />
 
+        <SettingRow label="Owner WhatsApp Number">
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+            <input style={inputStyle} value={cfg.ownerPhone} onChange={e => set("ownerPhone", e.target.value)} placeholder="919876543210 (with country code)" />
+            <span style={{ fontSize: 10, color: "var(--text-4)" }}>For automated stock/expiry alerts via WhatsApp.</span>
+          </div>
+        </SettingRow>
+
+        <SectionTitle icon="☁️" title="Cloud Remote Sync" />
+        
+        <div style={{ padding: "16px 0", borderBottom: "1px solid var(--border)", display: 'flex', gap: 30, alignItems: 'center' }}>
+           <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", marginBottom: 4 }}>Mobile App Quick Link</div>
+              <p style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 6, lineHeight: 1.6 }}>
+                Scan this QR code from your **iVA SmartBill mobile app** to automatically connect this terminal to your phone. 
+                No manual entry required.
+              </p>
+              <div style={{ marginTop: 15, display: 'flex', gap: 10 }}>
+                 <div style={{ padding: '4px 12px', background: 'var(--surface-3)', borderRadius: 20, fontSize: 10, fontWeight: 700 }}>
+                    ID: {cfg.shopId || '...'}
+                 </div>
+                 <div style={{ padding: '4px 12px', background: '#dcfce7', color: '#166534', borderRadius: 20, fontSize: 10, fontWeight: 700 }}>
+                    SYNC ENABLED
+                 </div>
+              </div>
+           </div>
+           <div style={{ background: '#fff', padding: 12, borderRadius: 16, border: '1px solid var(--border)' }}>
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(JSON.stringify({
+                  shopId: cfg.shopId,
+                  masterKey: cfg.masterKey
+                }))}`} 
+                alt="Quick Link QR" 
+                style={{ width: 140, height: 140 }}
+              />
+           </div>
+        </div>
+
+        <SettingRow label="Master Access Key">
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <input style={{ ...inputStyle, fontFamily: "monospace" }} type="text" value={cfg.masterKey} onChange={e => set("masterKey", e.target.value)} placeholder="Key for mobile login" />
+            <span style={{ fontSize: 10, color: "var(--text-4)" }}>Required to unlock your dashboard on mobile. Change this for security.</span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label="Background Auto-Sync">
+          <input type="checkbox" checked={cfg.isCloudEnabled} onChange={e => set("isCloudEnabled", e.target.checked)} />
+        </SettingRow>
 
         {/* ── ABOUT BRAND ── */}
         <SectionTitle icon="ℹ️" title="About Software" />

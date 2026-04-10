@@ -7,6 +7,42 @@ import Settings from "./components/Settings";
 import logoUrl from "./assets/logo.png";
 import "./App.css";
 
+/* ── Mobile Dashboard View ────────── */
+function MobileDashboardView() {
+  const [url, setUrl] = useState("Generating...");
+  useEffect(() => {
+    window.api.getDashboardUrl().then(u => setUrl(u || "https://local-link-active.com"));
+  }, []);
+
+  return (
+    <div className="admin-scroll-area">
+      <div className="admin-card" style={{ maxWidth: 600, margin: '40px auto', textAlign: 'center' }}>
+        <div className="admin-card-header">Owner Remote Access 📱</div>
+        <div className="admin-card-body" style={{ padding: 40 }}>
+          <div style={{ fontSize: 40, marginBottom: 20 }}>🌍</div>
+          <h2 style={{ marginBottom: 10 }}>Access From Anywhere</h2>
+          <p style={{ color: 'var(--text-3)', fontSize: 13, marginBottom: 30 }}>
+            Share this link to your phone or scan the QR code to track your business profit, stock, and analytics in real-time from anywhere in the world.
+          </p>
+          
+          <div style={{ background: 'var(--surface-2)', padding: 15, borderRadius: 10, border: '1px solid var(--border)', marginBottom: 30 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-4)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 5 }}>Your Public Link</div>
+            <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: 16 }}>{url}</div>
+          </div>
+
+          <div style={{ background: '#fff', padding: 20, display: 'inline-block', borderRadius: 15, border: '1px solid var(--border)' }}>
+             <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`} alt="QR" />
+          </div>
+          
+          <div style={{ marginTop: 30, fontSize: 12, color: 'var(--text-4)' }}>
+            ⚠️ Power and Internet must be ON at this Billing PC.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Error Boundary ──────────────────────────────────────────── */
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, errorInfo: null }; }
@@ -83,8 +119,9 @@ function App() {
   const [waStatus,    setWaStatus]      = useState('connecting');
   const [qrData,      setQrData]        = useState(null);
   const [showQR,      setShowQR]        = useState(false);
-  const [dashboardUrl, setDashboardUrl] = useState(null);
-  const [showDashQR,  setShowDashQR]    = useState(false);
+  const [alertState,  setAlertState]    = useState({ lowStock: [], deadStock: [] });
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [lastNotified, setLastNotified] = useState(0); // timestamp to avoid spamming
 
   useEffect(() => {
     if (!window.api) return;
@@ -102,16 +139,47 @@ function App() {
       if (status === 'ready') setShowQR(false);
     });
 
-    // Listen for dashboard server ready
-    window.api.onDashboardReady?.(data => {
-      setDashboardUrl(data.url);
-    });
+    // Initial alert check & background monitor
+    const checkAlerts = async () => {
+      try {
+        const raw = localStorage.getItem("smart_billing_settings");
+        const cfg = raw ? JSON.parse(raw) : { lowStockThreshold: 5, deadStockThresholdDays: 30 };
+        
+        const stockAlerts = await window.api.getStockAlerts({
+          lowStock: cfg.lowStockThreshold,
+          deadStockDays: cfg.deadStockThresholdDays
+        });
 
-    // Also try to get URL if server already started
-    window.api.getDashboardUrl?.().then(url => {
-      if (url) setDashboardUrl(url);
-    }).catch(() => {});
-  }, []);
+        // Identify NEW alerts to avoid re-notifying same items instantly
+        const newLow = stockAlerts.lowStock.filter(p => !alertState.lowStock.find(ap => ap.id === p.id));
+        const newDead = stockAlerts.deadStock.filter(p => !alertState.deadStock.find(ap => ap.id === p.id));
+
+        if (newLow.length > 0 || newDead.length > 0) {
+          setShowAlertModal(true); // Trigger pop-up only for NEW alerts
+          
+          // Send automatic message to owner if phone exists and WhatsApp is ready
+          const now = Date.now();
+          if (cfg.ownerPhone && now - lastNotified > 3600000) { // Max once per hour
+            let msg = `⚠️ *Smart Billing Alert*\n\n`;
+            if (newLow.length > 0) msg += `📉 *Low Stock:* ${newLow.map(p => p.name).join(', ')}\n`;
+            if (newDead.length > 0) msg += `💀 *Dead Stock:* ${newDead.map(p => p.name).join(', ')}\n`;
+            msg += `\nPlease check your inventory.`;
+
+            window.api.sendWhatsapp(cfg.ownerPhone, msg).catch(console.error);
+            setLastNotified(now);
+          }
+        }
+
+        setAlertState(stockAlerts);
+      } catch (err) {
+        console.error("Alert check failed:", err);
+      }
+    };
+
+    checkAlerts();
+    const interval = setInterval(checkAlerts, 300000); // Check every 5 mins
+    return () => clearInterval(interval);
+  }, [alertState, lastNotified]);
 
   const navItems = [
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
@@ -142,29 +210,13 @@ function App() {
                 <div key={item.id}
                   className={`sidebar-item ${currentView === item.id ? 'active' : ''}`}
                   onClick={() => setCurrentView(item.id)}>
-                  <div className="sidebar-icon">{item.icon}</div>
+                  <div className="sidebar-icon">
+                    {item.icon}
+                  </div>
                   <span className="sidebar-label">{item.label}</span>
                 </div>
               ))}
             </div>
-
-            {/* 📱 Mobile Dashboard Link */}
-            {dashboardUrl && (
-              <button
-                onClick={() => setShowDashQR(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '5px 11px', borderRadius: 20,
-                  background: '#7c3aed18', color: '#7c3aed',
-                  border: '1px solid #7c3aed40',
-                  fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
-                  marginBottom: 6, width: 'calc(100% - 16px)', marginLeft: 8,
-                  justifyContent: 'center', transition: 'opacity .15s'
-                }}
-              >
-                📱 Owner Dashboard
-              </button>
-            )}
 
             {/* WhatsApp connection pill at bottom of sidebar */}
             <WAPill
@@ -193,7 +245,7 @@ function App() {
               </div>
             )}
           </header>
-
+          
           <div className="enterprise-workspace">
             {currentView === 'pos'          && <POS />}
             {currentView === 'add_product'  && <Inventory />}
@@ -206,29 +258,30 @@ function App() {
         {/* ── WhatsApp QR Modal ─────────────────────────────── */}
         {showQR && qrData && <WhatsAppQRModal qrData={qrData} onClose={() => setShowQR(false)} />}
 
-        {/* ── Mobile Dashboard QR Modal ─────────────────── */}
-        {showDashQR && dashboardUrl && (
-          <div className="modal-overlay" onClick={() => setShowDashQR(false)}>
-            <div className="invoice-modal" style={{ textAlign: 'center', maxWidth: 380 }}
-                 onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>📱 Owner Mobile Dashboard</div>
-              <p style={{ fontSize: 12.5, color: 'var(--text-3)', marginBottom: 16 }}>
-                Scan this QR on your phone (same WiFi network) to open the Owner Dashboard.
-              </p>
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(dashboardUrl)}`}
-                alt="Dashboard QR"
-                style={{ borderRadius: 8, border: '1px solid var(--border)', width: 200, height: 200 }}
-              />
-              <p style={{
-                fontSize: 12, color: 'var(--primary)', fontWeight: 700,
-                marginTop: 14, letterSpacing: '.01em',
-                background: 'var(--primary-light)', borderRadius: 8, padding: '8px 12px'
-              }}>{dashboardUrl}</p>
-              <p style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 6 }}>
-                Make sure your phone is on the same WiFi as this computer.
-              </p>
-              <button className="btn-outline" onClick={() => setShowDashQR(false)} style={{ marginTop: 14, width: '100%' }}>Close</button>
+        {/* 🚨 Stock Alert Modal */}
+        {showAlertModal && (alertState.lowStock.length > 0 || alertState.deadStock.length > 0) && (
+          <div className="modal-overlay" onClick={() => setShowAlertModal(false)}>
+            <div className="invoice-modal" style={{ maxWidth: 450, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+              <h2 style={{ margin: '0 0 10px 0', color: 'var(--text-1)' }}>Inventory Warning</h2>
+              <div style={{ fontSize: 14, color: 'var(--text-3)', lineHeight: 1.6, marginBottom: 20 }}>
+                {alertState.lowStock.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    📉 <b>{alertState.lowStock.length} items</b> are running low on stock.
+                  </div>
+                )}
+                {alertState.deadStock.length > 0 && (
+                  <div>
+                    💀 <b>{alertState.deadStock.length} items</b> identified as dead stock (not sold recently).
+                  </div>
+                )}
+                <div style={{ marginTop: 12, padding: 10, background: 'var(--surface-2)', borderRadius: 8, fontSize: 12 }}>
+                  Owner has been notified via WhatsApp (if configured).
+                </div>
+              </div>
+              <button className="btn-primary" style={{ width: '100%' }} onClick={() => setShowAlertModal(false)}>
+                Okay, I'll Check
+              </button>
             </div>
           </div>
         )}

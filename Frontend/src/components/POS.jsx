@@ -101,7 +101,17 @@ const POS = () => {
   const [allProducts, setAllProducts] = useState([]);
   const [showHeldBills, setShowHeldBills] = useState(false);
   const [heldCount, setHeldCount] = useState(0);
+  const [settings, setSettings] = useState({ storeName: "iVA BILLING", storeAddress: "123 Business Road...", storePhone: "+91 90000 00000" });
+  const [syncPending, setSyncPending] = useState(0);
   const inputRefs = useRef([]);
+
+  /* ── Load settings ── */
+  const loadSettings = () => {
+    try {
+      const raw = localStorage.getItem("smart_billing_settings");
+      if (raw) setSettings(JSON.parse(raw));
+    } catch (e) {}
+  };
 
   /* ── Load products & held bill count ── */
   useEffect(() => {
@@ -111,7 +121,13 @@ const POS = () => {
         .catch(() => setAllProducts([]));
     }
     refreshHeldCount();
+    loadSettings();
     inputRefs.current[0]?.focus();
+
+    const syncCheck = setInterval(() => {
+      window.api?.getSyncStatus?.().then(res => setSyncPending(res.pending));
+    }, 10000);
+    return () => clearInterval(syncCheck);
   }, []);
 
   const refreshHeldCount = async () => {
@@ -286,10 +302,10 @@ const POS = () => {
     }
     if (window.api?.createInvoice) {
       const res = await window.api.createInvoice({ cart: validItems, customer, paymentMode });
-      setLastInvoiceId(res.invoiceId);
+      setLastInvoiceId(res.billNo); // Use billNo instead of autoincrement ID for display
       setInvoiceSuccess(true);
       if (customer?.phone?.length >= 10 && window.api.sendWhatsapp) {
-        window.api.sendWhatsapp(customer.phone, `Thanks for shopping! Your bill total is ₹${grandTotal}. Have a great day! 🛍️`);
+        window.api.sendWhatsapp(customer.phone, `Thanks for shopping at ${settings.storeName}! Your bill total is ₹${grandTotal}. Have a great day! 🛍️`);
       }
     }
   };
@@ -451,15 +467,14 @@ const POS = () => {
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "2px solid #333", paddingBottom: "20px", marginBottom: "30px" }}>
                 <div>
                   <h1 style={{ margin: "0 0 5px 0", fontSize: "2.5rem", fontFamily: "Inter, sans-serif" }}>
-                    <span style={{ color: "hsl(var(--primary))", fontStyle: "italic" }}>i</span>
-                    <span style={{ color: "#111", letterSpacing: "-1px" }}>VA BILLING</span>
+                    <span style={{ color: "#111", letterSpacing: "-1px", textTransform: "uppercase" }}>{settings.storeName || "iVA BILLING"}</span>
                   </h1>
-                  <div style={{ color: "#555" }}>123 Business Road, Market City 60001</div>
-                  <div style={{ color: "#555" }}>Phone: +91 90000 00000</div>
+                  <div style={{ color: "#555" }}>{settings.storeAddress}</div>
+                  <div style={{ color: "#555" }}>Phone: {settings.storePhone}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <h2 style={{ margin: "0 0 10px 0", color: "#333" }}>INVOICE</h2>
-                  <div><strong>Invoice #:</strong> {lastInvoiceId}</div>
+                  <div><strong>Bill No:</strong> #{lastInvoiceId}</div>
                   <div><strong>Date:</strong> {new Date().toLocaleDateString()}</div>
                   <div><strong>Payment Via:</strong> {paymentMode}</div>
                 </div>
@@ -629,28 +644,22 @@ const POS = () => {
         ))}
       </div>
 
-      {/* ── ADD NEW PRODUCT BUTTON ─── */}
-      <div style={{ padding: "10px 20px", display: "flex", justifyContent: "flex-end" }}>
-        <button
-          onClick={addNewRow}
-          style={{
-            padding: "8px 16px",
-            background: "#f1f5f9",
-            color: "#334155",
-            border: "1px dashed #cbd5e1",
-            borderRadius: "6px",
-            fontSize: "13px",
-            fontWeight: "600",
-            cursor: "pointer",
-            transition: "all 0.2s"
-          }}
-        >
-          Add Product
-        </button>
-      </div>
-
+      
       {/* ── FOOTER ─── */}
       <div className="pos-footer">
+        <div className="pos-footer-col" style={{ width: 140 }}>
+           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ 
+                width: 8, height: 8, borderRadius: '50%', 
+                background: syncPending > 0 ? '#f59e0b' : '#10b981',
+                boxShadow: syncPending > 0 ? '0 0 8px #f59e0b' : '0 0 8px #10b981'
+              }}></div>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)' }}>
+                {syncPending > 0 ? `SYNCING (${syncPending})` : 'CLOUD SECURED'}
+              </span>
+           </div>
+        </div>
+
         <div className="pos-footer-col">
           <span className="footer-label">TOTAL QTY</span>
           <span className="footer-val">{qtyTotal}</span>
