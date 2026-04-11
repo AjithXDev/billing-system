@@ -3,7 +3,17 @@ import React, { useState, useEffect } from "react";
 const Inventory = () => {
   const [categories, setCategories] = useState([]);
   const [form, setForm] = useState({
-    name: "", category_id: "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "", expiry_date: ""
+    name: "",
+    category_id: "",
+    gst_rate: "0",
+    product_code: "",
+    price_type: "exclusive",
+    price: "",
+    cost_price: "",
+    quantity: "",
+    unit: "Pcs",
+    barcode: "",
+    expiry_date: ""
   });
 
   const loadCategories = async () => {
@@ -30,10 +40,25 @@ const Inventory = () => {
           cost_price: Number(form.cost_price) || 0,
           quantity: Number(form.quantity),
           category_id: Number(form.category_id),
+          gst_rate: Number(form.gst_rate),
+          product_code: form.product_code || null,
+          price_type: form.price_type,
           expiry_date: form.expiry_date || null
         });
-        alert("Product registered in database!");
-        setForm({ name: "", category_id: categories.length > 0 ? categories[0].id : "", price: "", cost_price: "", quantity: "", unit: "Pcs", barcode: "", expiry_date: "" });
+        alert("Product registered in database! 🔥");
+        setForm({
+          name: "",
+          category_id: categories.length > 0 ? categories[0].id : "",
+          gst_rate: "0",
+          product_code: "",
+          price_type: "exclusive",
+          price: "",
+          cost_price: "",
+          quantity: "",
+          unit: "Pcs",
+          barcode: "",
+          expiry_date: ""
+        });
       } catch (err) {
         alert("❌ Error saving product: " + err.message);
       }
@@ -54,14 +79,31 @@ const Inventory = () => {
                 <input className="form-input" name="name" value={form.name} onChange={handleChange} required />
               </div>
               <div className="form-group">
-                <label className="form-label">Category (GST)</label>
+                <label className="form-label">Category</label>
                 <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange}>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="form-group">
+                <label className="form-label">Short Code / Unique ID</label>
+                <input className="form-input" name="product_code" value={form.product_code} onChange={handleChange} placeholder="e.g. 101" />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '25px', marginBottom: '20px' }}>
+              <div className="form-group">
+                <label className="form-label">GST Rate (%)</label>
+                <select className="form-select" name="gst_rate" value={form.gst_rate} onChange={handleChange}>
+                  <option value="0">0% (Nil)</option>
+                  <option value="5">5% (Essential)</option>
+                  <option value="12">12% (Standard)</option>
+                  <option value="18">18% (Premium)</option>
+                  <option value="28">28% (Luxury)</option>
+                </select>
+              </div>
+              <div className="form-group">
                 <label className="form-label">Barcode / SKU</label>
-                <input className="form-input" name="barcode" value={form.barcode} onChange={handleChange} />
+                <input className="form-input" name="barcode" value={form.barcode} onChange={handleChange} placeholder="Scan or type..." />
               </div>
             </div>
 
@@ -69,10 +111,24 @@ const Inventory = () => {
               <div className="form-group">
                 <label className="form-label">Selling Price (₹)</label>
                 <input className="form-input" name="price" type="number" step="0.01" value={form.price} onChange={handleChange} required />
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                   <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                      <input type="radio" name="price_type" value="exclusive" checked={form.price_type === 'exclusive'} onChange={handleChange} /> + GST
+                   </label>
+                   <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                      <input type="radio" name="price_type" value="inclusive" checked={form.price_type === 'inclusive'} onChange={handleChange} /> Incl. GST
+                   </label>
+                </div>
               </div>
               <div className="form-group">
                 <label className="form-label">Cost Price (₹)</label>
                 <input className="form-input" name="cost_price" type="number" step="0.01" value={form.cost_price} onChange={handleChange} placeholder="Purchase cost" />
+                {(form.price && form.cost_price) && (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', color: (Number(form.price) - Number(form.cost_price)) >= 0 ? '#059669' : '#ef4444', fontSize: '11px', fontWeight: 800 }}>
+                    💰 Profit: ₹{(Number(form.price) - Number(form.cost_price)).toFixed(2)} 
+                    ({(((Number(form.price) - Number(form.cost_price)) / Number(form.cost_price)) * 100).toFixed(1)}%)
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Opening Stock Qty</label>

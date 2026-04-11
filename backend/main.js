@@ -98,6 +98,9 @@ ipcMain.handle("add-product", async (event, product) => {
   const {
     name,
     category_id,
+    gst_rate,
+    product_code,
+    price_type,
     price,
     cost_price,
     quantity,
@@ -108,11 +111,14 @@ ipcMain.handle("add-product", async (event, product) => {
 
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
+    gst_rate || 0,
+    product_code || null,
+    price_type || 'exclusive',
     price,
     cost_price || 0,
     quantity,
@@ -126,12 +132,12 @@ ipcMain.handle("add-product", async (event, product) => {
 
 // 🟢 EDIT PRODUCT (with expiry_date)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, price, cost_price, quantity, unit, barcode, expiry_date } = product;
+  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date } = product;
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?
     WHERE id=?
-  `).run(name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, id);
+  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, id);
   return { message: "Product updated" };
 });
 
@@ -187,13 +193,13 @@ ipcMain.handle("get-sync-status", () => {
 });
 
 
-// 🟢 GET PRODUCTS WITH CATEGORY GST
+// 🟢 GET PRODUCTS WITH CATEGORY GST (Backwards compatible fallback)
 ipcMain.handle("get-products-full", () => {
   return db.prepare(`
     SELECT 
       p.*,
-      c.gst as category_gst,
-      c.name as category_name
+      COALESCE(p.gst_rate, c.gst, 0) as category_gst,
+      COALESCE(c.name, 'General') as category_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
   `).all();

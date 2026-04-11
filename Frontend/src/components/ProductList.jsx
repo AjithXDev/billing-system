@@ -37,10 +37,175 @@ const ProductList = () => {
       return;
     }
     if (window.api.editProduct) {
-      await window.api.editProduct(editingProduct);
+      await window.api.editProduct({
+        ...editingProduct,
+        gst_rate: Number(editingProduct.gst_rate) || 0,
+        product_code: editingProduct.product_code || null,
+        price_type: editingProduct.price_type || 'exclusive'
+      });
       setEditModalOpen(false);
       load();
     }
+  };
+
+  const printPriceList = () => {
+    const printWindow = window.open('', '_blank');
+    const content = `
+      <html>
+        <head>
+          <title>Price List Preview</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+            body { 
+              font-family: 'Inter', -apple-system, sans-serif; 
+              padding: 50px; 
+              color: #0f172a; 
+              background: #f1f5f9; 
+              line-height: 1.5;
+            }
+            .container { 
+              max-width: 900px; 
+              margin: 0 auto; 
+              background: white; 
+              padding: 60px; 
+              border-radius: 2px; 
+              box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+              position: relative;
+              border-top: 8px solid #3b82f6;
+            }
+            header { 
+              display: flex; 
+              justify-content: space-between; 
+              align-items: flex-start; 
+              margin-bottom: 50px; 
+            }
+            .shop-info h1 { 
+              margin: 0; 
+              font-size: 32px; 
+              font-weight: 800; 
+              letter-spacing: -0.025em;
+              text-transform: uppercase;
+              color: #1e3a8a;
+            }
+            .tagline { color: #64748b; font-size: 14px; margin-top: 4px; font-weight: 500; }
+            .catalog-label {
+              background: #eff6ff;
+              color: #2563eb;
+              padding: 6px 12px;
+              border-radius: 6px;
+              font-size: 12px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+            }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th { 
+              text-align: left; 
+              padding: 14px 12px; 
+              background: #f8fafc; 
+              color: #475569; 
+              font-size: 11px; 
+              text-transform: uppercase; 
+              letter-spacing: 0.1em;
+              border-bottom: 2px solid #e2e8f0;
+            }
+            td { 
+              padding: 16px 12px; 
+              border-bottom: 1px solid #f1f5f9; 
+              font-size: 14px; 
+            }
+            tr:nth-child(even) { background: #fafafa; }
+            .id-col { font-weight: 800; color: #2563eb; width: 120px; }
+            .price-col { font-weight: 800; color: #0f172a; text-align: right; font-size: 16px; }
+            .unit-col { color: #94a3b8; font-size: 12px; font-weight: 600; }
+            
+            .no-print { 
+              position: fixed; 
+              top: 30px; 
+              right: 30px; 
+              display: flex; 
+              gap: 12px; 
+              z-index: 100;
+            }
+            .btn { 
+              padding: 12px 24px; 
+              border-radius: 8px; 
+              border: none; 
+              cursor: pointer; 
+              font-weight: 700; 
+              font-size: 14px; 
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              transition: transform 0.1s;
+              box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+            }
+            .btn:active { transform: scale(0.95); }
+            .btn-print { background: #2563eb; color: white; }
+            .btn-close { background: white; color: #475569; border: 1px solid #e2e8f0; }
+            
+            footer {
+              margin-top: 60px;
+              padding-top: 20px;
+              border-top: 1px solid #e2e8f0;
+              text-align: center;
+              font-size: 12px;
+              color: #94a3b8;
+            }
+
+            @media print { 
+              .no-print { display: none; } 
+              body { background: white; padding: 0; } 
+              .container { box-shadow: none; width: 100%; max-width: 100%; padding: 0; border: none; } 
+            }
+          </style>
+        </head>
+        <body>
+          <div class="no-print">
+            <button class="btn btn-close" onclick="window.close()">Close Preview</button>
+            <button class="btn btn-print" onclick="window.print()">📥 Save as PDF / Print</button>
+          </div>
+          <div class="container">
+            <header>
+              <div class="shop-info">
+                <div class="catalog-label">Product Catalog</div>
+                <h1>MY MART</h1>
+                <div class="tagline">Providing quality products since 2024</div>
+              </div>
+              <div style="text-align: right">
+                <div style="font-size: 12px; color: #64748b; font-weight: 600;">DATE GENERATED</div>
+                <div style="font-weight: 800; font-size: 16px;">${new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+              </div>
+            </header>
+            <table>
+              <thead>
+                <tr>
+                  <th class="id-col">ITEM CODE</th>
+                  <th>PRODUCT DESCRIPTION</th>
+                  <th style="text-align: center">UNIT</th>
+                  <th style="text-align: right">RATE (INR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${products.map(p => `
+                  <tr>
+                    <td class="id-col">#${p.product_code || p.id}</td>
+                    <td style="font-weight: 600">${p.name}</td>
+                    <td style="text-align: center" class="unit-col">${p.unit}</td>
+                    <td class="price-col">₹${p.price.toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <footer>
+              This is a computer-generated price list and subject to change without notice.
+            </footer>
+          </div>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(content);
+    printWindow.document.close();
   };
 
   return (
@@ -77,6 +242,22 @@ const ProductList = () => {
                 </select>
               </div>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div className="form-group">
+                <label className="form-label">Short Code / ID</label>
+                <input className="form-input" value={editingProduct.product_code || ""} onChange={e => setEditingProduct({...editingProduct, product_code: e.target.value})} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">GST Rate (%)</label>
+                <select className="form-select" value={editingProduct.gst_rate || 0} onChange={e => setEditingProduct({...editingProduct, gst_rate: parseFloat(e.target.value)})}>
+                  <option value="0">0%</option>
+                  <option value="5">5%</option>
+                  <option value="12">12%</option>
+                  <option value="18">18%</option>
+                  <option value="28">28%</option>
+                </select>
+              </div>
+            </div>
             <div className="form-group" style={{ marginTop: '10px' }}>
               <label className="form-label">Barcode</label>
               <input className="form-input" value={editingProduct.barcode || ""} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
@@ -86,6 +267,15 @@ const ProductList = () => {
               <select className="form-select" value={editingProduct.category_id || ""} onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div className="form-group">
+                <label className="form-label">Price Type</label>
+                <select className="form-select" value={editingProduct.price_type || "exclusive"} onChange={e => setEditingProduct({...editingProduct, price_type: e.target.value})}>
+                  <option value="exclusive">Exclusive (+ GST)</option>
+                  <option value="inclusive">Inclusive (GST Included)</option>
+                </select>
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Expiry Date 🗓️</label>
@@ -105,14 +295,17 @@ const ProductList = () => {
       <div className="admin-card" style={{ maxWidth: '100%' }}>
          <div className="admin-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Inventory Records ({products.length})</span>
-            <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={load}>Refresh Data</button>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem', background: '#334155' }} onClick={printPriceList}>🖨️ Print Price List</button>
+              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={load}>Refresh Data</button>
+            </div>
          </div>
 
          <div className="admin-card-body" style={{ padding: '0' }}>
             <table className="data-table">
               <thead>
                 <tr>
-                   <th style={{ width: '80px', paddingLeft: '25px' }}>ID</th>
+                   <th style={{ width: '100px', paddingLeft: '25px' }}>Code/ID</th>
                    <th>Item Description</th>
                    <th>Barcode</th>
                    <th>Rate (₹)</th>
@@ -129,7 +322,7 @@ const ProductList = () => {
                     const near = p.expiry_date && !expired && p.expiry_date <= new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
                     return (
                    <tr key={p.id}>
-                       <td style={{ paddingLeft: '25px', color: '#64748b' }}>#{p.id}</td>
+                       <td style={{ paddingLeft: '25px', color: '#0284c7', fontWeight: 800 }}>{p.product_code || `#${p.id}`}</td>
                        <td style={{ fontWeight: 600, color: expired ? '#ef4444' : 'inherit' }}>{p.name}{expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}</td>
                        <td style={{ fontFamily: 'monospace' }}>{p.barcode || '-'}</td>
                        <td style={{ fontWeight: 600, color: '#059669' }}>₹{p.price.toFixed(2)}</td>

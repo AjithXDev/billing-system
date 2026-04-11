@@ -48,3 +48,4 @@ DROP POLICY IF EXISTS "Public Access" ON public.products;
 CREATE POLICY "Public Access" ON public.products FOR ALL USING (true);
 DROP POLICY IF EXISTS "Public Access" ON public.notifications;
 CREATE POLICY "Public Access" ON public.notifications FOR ALL USING (true);
+  
