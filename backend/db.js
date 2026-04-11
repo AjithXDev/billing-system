@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS customers (
 db.prepare(`
 CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bill_no INTEGER,
+  bill_date TEXT,
   customer_name TEXT,
   customer_phone TEXT,
   customer_address TEXT,
@@ -104,6 +106,14 @@ CREATE TABLE IF NOT EXISTS invoices (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 `).run();
+
+try { db.prepare("ALTER TABLE invoices ADD COLUMN bill_no INTEGER").run(); } catch(e){}
+try { db.prepare("ALTER TABLE invoices ADD COLUMN bill_date TEXT").run(); } catch(e){}
+try { db.prepare("ALTER TABLE invoices ADD COLUMN is_synced INTEGER DEFAULT 0").run(); } catch(e){}
+
+// Sync tracking for other tables
+try { db.prepare("ALTER TABLE products ADD COLUMN is_synced INTEGER DEFAULT 0").run(); } catch(e){}
+try { db.prepare("ALTER TABLE customers ADD COLUMN is_synced INTEGER DEFAULT 0").run(); } catch(e){}
 
 try {
   db.prepare("ALTER TABLE invoices ADD COLUMN customer_name TEXT").run();

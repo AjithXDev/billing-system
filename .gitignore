@@ -32,3 +32,8 @@ dist-electron
 *.db
 
 mobile_app_guide.md
+.env
+
+desktop_app_guide.md
+
+supabase_setup.sql

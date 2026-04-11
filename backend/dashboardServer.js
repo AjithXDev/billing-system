@@ -17,6 +17,19 @@ let localIP = "127.0.0.1";
 let tunnelURL = null;   // Public internet URL (via localtunnel)
 let tunnelObj = null;
 
+const getSettings = () => {
+    try {
+        const { app } = require("electron");
+        const fs = require("fs");
+        const path = require("path");
+        const configPath = path.join(app.getPath("userData"), "app_settings.json");
+        if (fs.existsSync(configPath)) {
+            return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        }
+    } catch(e) {}
+    return { masterKey: "owner123" };
+};
+
 /* ── Get local WiFi IP ─────────────────────────────── */
 function getLocalIP() {
   const ifaces = os.networkInterfaces();
@@ -33,28 +46,46 @@ function todayStr() { return new Date().toISOString().split("T")[0]; }
 function in7days() { return new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]; }
 function inNdays(n) { return new Date(Date.now() + n * 86400000).toISOString().split("T")[0]; }
 
-/* ── Start Internet Tunnel ──────────────────────────── */
+/* ── Reconnection Logic & Tunnel Management ── */
 async function startTunnel(mainWindow) {
+  const settings = getSettings();
+  const shopSlug = (settings.storeName || "iva-billing").toLowerCase().replace(/[^a-z0-9]/g, "-");
+  const subdomain = `${shopSlug}-owner-${Math.floor(1000 + Math.random() * 9000)}`;
+
   try {
     const localtunnel = require("localtunnel");
-    tunnelObj = await localtunnel({ port: PORT, subdomain: "innoaivators-dashboard" });
-    tunnelURL = tunnelObj.url;
-    console.log("[Tunnel] Public URL:", tunnelURL);
+    
+    // Close existing tunnel if any
+    if (tunnelObj) {
+      try { tunnelObj.close(); } catch(e) {}
+    }
 
-    if (mainWindow && mainWindow.webContents) {
+    tunnelObj = await localtunnel({ 
+      port: PORT, 
+      subdomain: subdomain 
+    });
+
+    tunnelURL = tunnelObj.url;
+    console.log("[Sync Engine] Public URL:", tunnelURL);
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("tunnel-ready", { url: tunnelURL });
     }
 
     tunnelObj.on("close", () => {
-      console.log("[Tunnel] Closed.");
+      console.log("[Sync Engine] Tunnel lost. Attempting reconnect in 30s...");
       tunnelURL = null;
+      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 30000);
     });
+
     tunnelObj.on("error", (err) => {
-      console.error("[Tunnel] Error:", err.message);
+      console.error("[Sync Engine] Tunnel error:", err.message);
+      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 30000);
     });
+
   } catch (e) {
-    console.warn("[Tunnel] Could not start internet tunnel:", e.message);
-    // Fallback: local IP only
+    console.warn("[Sync Engine] Offline mode. Waiting for internet...");
+    setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 60000); // Check every minute
   }
 }
 
@@ -70,6 +101,16 @@ function startDashboardServer(mainWindow) {
     res.sendFile(path.join(__dirname, "..", "mobile-dashboard", "index.html"));
   });
   expressApp.use(express.static(path.join(__dirname, "..", "mobile-dashboard")));
+
+  expressApp.post("/api/auth", (req, res) => {
+    const { key } = req.body;
+    const settings = getSettings();
+    if (key === settings.masterKey) {
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ success: false });
+    }
+  });
 
   /* ══════════════════════════════════════════════════════
      API: Dashboard Summary Stats + Profit

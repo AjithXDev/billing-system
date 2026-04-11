@@ -23,11 +23,12 @@ contextBridge.exposeInMainWorld("api", {
   getStockAlerts:      ()             => ipcRenderer.invoke("get-stock-alerts"),
   getDashboardStats:   ()             => ipcRenderer.invoke("get-dashboard-stats"),
 
-  // 🔥 Owner Mobile Dashboard URL
+  // 🔥 Owner Mobile Dashboard URL & Cloud Sync
   getDashboardUrl:     ()             => ipcRenderer.invoke("get-dashboard-url"),
-  getTunnelUrl:        ()             => ipcRenderer.invoke("get-tunnel-url"),
-  onDashboardReady:    (cb)           => ipcRenderer.on("dashboard-server-ready", (_e, data) => cb(data)),
   onTunnelReady:       (cb)           => ipcRenderer.on("tunnel-ready", (_e, data) => cb(data)),
+  getShopId:           ()             => ipcRenderer.invoke("get-shop-id"),
+  saveAppSettings:     (data)         => ipcRenderer.invoke("save-app-settings", data),
+  getAppSettings:      ()             => ipcRenderer.invoke("get-app-settings"),
 
   // WhatsApp — automatic sending
   sendWhatsapp:        (phone, text)  => ipcRenderer.invoke("send-whatsapp", phone, text),

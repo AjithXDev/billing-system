@@ -1,8 +1,12 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const fs = require("fs");
 const path = require("path");
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { v4: uuidv4 } = require('uuid');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
-const { startDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
+const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
+const { initSupabase, syncToCloud, logNotification } = require("./cloudSync");
 
 let mainWindow = null;
 
@@ -24,23 +28,65 @@ function createWindow() {
   // Start WhatsApp client AFTER the window has loaded so QR events reach the renderer
   mainWindow.webContents.once("did-finish-load", () => {
     initWhatsApp(mainWindow);
-    // Start owner mobile dashboard HTTP server
-    startDashboardServer(mainWindow);
   });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+    stopDashboardServer();
+  });
+
+  // Start the background API & Mobile Dashboard server
+  startDashboardServer(mainWindow);
+
+  // 🟢 Auto-Generate Shop ID if missing in .env
+  let shopId = process.env.SHOP_ID;
+  if (!shopId) {
+    shopId = `shop-${uuidv4().slice(0, 8)}`;
+    // Append to .env for persistence
+    try {
+      fs.appendFileSync(path.join(__dirname, '..', '.env'), `\nSHOP_ID=${shopId}`);
+      process.env.SHOP_ID = shopId;
+      console.log("[Setup] Auto-generated Unique Shop ID:", shopId);
+    } catch(e) { console.error("Failed to save SHOP_ID to .env"); }
+  }
+
+  // 🟢 Initialize Cloud Sync & Alert Loop
+  setInterval(async () => {
+    try {
+        const configPath = path.join(app.getPath("userData"), "app_settings.json");
+        let settings = {};
+        if (fs.existsSync(configPath)) {
+            settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        }
+
+        const url = settings.supabaseUrl || process.env.SUPABASE_URL;
+        const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+        const currentShopId = process.env.SHOP_ID || 'billing-shop';
+
+        if (url && key && url.startsWith('http')) {
+            initSupabase(url, key);
+            await syncToCloud(currentShopId);
+
+            // Check for inventory alerts and log to Cloud
+            if (settings.isCloudEnabled !== false) {
+                const today = new Date().toISOString().split('T')[0];
+                const expired = db.prepare("SELECT name FROM products WHERE expiry_date < ?").all(today);
+                const lowThreshold = settings.lowStockThreshold || 5;
+                const lowStock = db.prepare("SELECT name FROM products WHERE quantity > 0 AND quantity <= ?").all(lowThreshold);
+
+                if (expired.length > 0) {
+                    await logNotification(currentShopId, 'EXPIRY', `${expired.length} products expired!`);
+                }
+                if (lowStock.length > 0) {
+                    await logNotification(currentShopId, 'LOW_STOCK', `${lowStock.length} products running low!`);
+                }
+            }
+        }
+    } catch(e) { console.error("[Sync Loop Error]", e.message); }
+  }, 60000); 
 }
 
 app.whenReady().then(createWindow);
-
-
-// 🟢 GET DASHBOARD URL (local)
-ipcMain.handle("get-dashboard-url", async () => {
-  return getDashboardURL();
-});
-
-// 🟢 GET TUNNEL URL (internet)
-ipcMain.handle("get-tunnel-url", async () => {
-  return getTunnelURL();
-});
 
 // 🟢 GET CATEGORIES
 ipcMain.handle("get-categories", async () => {
@@ -106,6 +152,41 @@ ipcMain.handle("send-whatsapp", async (event, phone, message) => {
 // 🟢 GET WHATSAPP STATUS
 ipcMain.handle("whatsapp-status", async () => {
   return getStatus();
+});
+
+// 🟢 GET DASHBOARD URL
+ipcMain.handle("get-dashboard-url", () => {
+  return getTunnelURL();
+});
+
+ipcMain.handle("save-app-settings", (event, settings) => {
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle("get-app-settings", (event) => {
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    }
+  } catch (e) {}
+  return null;
+});
+
+ipcMain.handle("get-shop-id", () => {
+  return process.env.SHOP_ID;
+});
+
+ipcMain.handle("get-sync-status", () => {
+  const pendingInvoices = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE is_synced = 0").get().cnt;
+  const pendingProducts = db.prepare("SELECT COUNT(*) as cnt FROM products WHERE is_synced = 0").get().cnt;
+  return { pending: pendingInvoices + pendingProducts };
 });
 
 
@@ -206,10 +287,16 @@ ipcMain.handle("create-invoice", async (event, data) => {
     }
   }
 
+  const today = new Date().toISOString().split('T')[0];
+  const lastBill = db.prepare("SELECT bill_no FROM invoices WHERE bill_date = ? ORDER BY bill_no DESC LIMIT 1").get(today);
+  const nextBillNo = lastBill ? (lastBill.bill_no + 1) : 1;
+
   const result = db.prepare(`
-    INSERT INTO invoices (customer_name, customer_phone, customer_address, customer_id, payment_mode, total_amount)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO invoices (bill_no, bill_date, customer_name, customer_phone, customer_address, customer_id, payment_mode, total_amount)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
+    nextBillNo,
+    today,
     customer?.name || "",
     customer?.phone || "",
     customer?.address || "",
@@ -219,6 +306,8 @@ ipcMain.handle("create-invoice", async (event, data) => {
   );
 
   const invoiceId = result.lastInsertRowid;
+  // We return both to the frontend
+  const responseData = { message: "Invoice created successfully! 🔥", invoiceId, billNo: nextBillNo };
 
   const insertItem = db.prepare(`
     INSERT INTO invoice_items 
@@ -249,7 +338,7 @@ ipcMain.handle("create-invoice", async (event, data) => {
 
   transaction(cart);
 
-  return { message: "Invoice created successfully! 🔥", invoiceId };
+  return responseData;
 });
 
 // ============================================================
@@ -311,27 +400,32 @@ ipcMain.handle("get-expiry-alerts", async () => {
   return { expired, nearExpiry };
 });
 
-// Get low-stock and dead-stock products
-ipcMain.handle("get-stock-alerts", async () => {
+// Get low-stock and dead-stock products (with dynamic thresholds)
+ipcMain.handle("get-stock-alerts", async (event, limits) => {
+  const lowThreshold = limits?.lowStock || 5;
+  const deadDays = limits?.deadStockDays || 30;
+
   const lowStock = db.prepare(`
     SELECT p.*, c.name as category_name
     FROM products p LEFT JOIN categories c ON p.category_id = c.id
-    WHERE p.quantity > 0 AND p.quantity <= 5
+    WHERE p.quantity > 0 AND p.quantity <= ?
     ORDER BY p.quantity ASC
-  `).all();
+  `).all(lowThreshold);
 
-  // Dead stock = quantity > 0 but not sold in last 30 days
+  // Dead stock = quantity > 0 but not sold in last X days
+  // AND product must be older than X days (ignore newly added products)
   const deadStock = db.prepare(`
     SELECT p.*, c.name as category_name
     FROM products p LEFT JOIN categories c ON p.category_id = c.id
     WHERE p.quantity > 0
+    AND p.created_at <= datetime('now', ?)
     AND p.id NOT IN (
       SELECT DISTINCT ii.product_id FROM invoice_items ii
       INNER JOIN invoices inv ON ii.invoice_id = inv.id
-      WHERE inv.created_at >= datetime('now', '-30 days')
+      WHERE inv.created_at >= datetime('now', ?)
     )
     ORDER BY p.quantity DESC
-  `).all();
+  `).all(`-${deadDays} days`, `-${deadDays} days`);
 
   return { lowStock, deadStock };
 });
@@ -340,6 +434,8 @@ ipcMain.handle("get-stock-alerts", async () => {
 ipcMain.handle("get-dashboard-stats", async () => {
   const today = new Date().toISOString().split('T')[0];
   const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+
+  const lowThreshold = 5;
 
   const totalProducts = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
   const totalCategories = db.prepare("SELECT COUNT(*) as cnt FROM categories").get().cnt;
@@ -358,8 +454,8 @@ ipcMain.handle("get-dashboard-stats", async () => {
     SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ?
   `).get(today, in7).cnt;
   const lowStockCount = db.prepare(`
-    SELECT COUNT(*) as cnt FROM products WHERE quantity > 0 AND quantity <= 5
-  `).get().cnt;
+    SELECT COUNT(*) as cnt FROM products WHERE quantity > 0 AND quantity <= ?
+  `).get(lowThreshold).cnt;
   const outOfStock = db.prepare(`
     SELECT COUNT(*) as cnt FROM products WHERE quantity <= 0
   `).get().cnt;
