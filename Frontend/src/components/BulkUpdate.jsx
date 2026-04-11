@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Search, Save, PackagePlus } from "lucide-react";
+import { Search, Save, PackagePlus, Box } from "lucide-react";
 
-const BulkUpdate = () => {
+export default function BulkUpdate() {
   const [products, setProducts] = useState([]);
   const [filter, setFilter] = useState("");
   const [updates, setUpdates] = useState({});
@@ -12,9 +12,10 @@ const BulkUpdate = () => {
     } else {
       // Mock data
       setProducts([
-        { id: 1, name: "Tomato Ketchup", category_gst: 0, quantity: 10, unit: "Pcs", price: 120 },
-        { id: 2, name: "Milk 1L", category_gst: 5, quantity: 40, unit: "Pcs", price: 65 },
-        { id: 3, name: "Bread", category_gst: 0, quantity: 5, unit: "Pcs", price: 40 }
+        { id: 1, name: "Premium Tomato Ketchup 1kg", category_gst: 0, quantity: 10, unit: "Pcs", price: 120 },
+        { id: 2, name: "Fresh Dairy Milk 1L", category_gst: 5, quantity: 40, unit: "Pcs", price: 65 },
+        { id: 3, name: "Whole Wheat Bread", category_gst: 0, quantity: 5, unit: "Pcs", price: 40 },
+        { id: 4, name: "Basmati Rice 5kg", category_gst: 0, quantity: 2, unit: "Pcs", price: 450 },
       ]);
     }
   };
@@ -54,89 +55,116 @@ const BulkUpdate = () => {
   const hasChanges = Object.values(updates).some(val => Number(val) !== 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="page-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Bulk Stock Inward</span>
+    <div style={{ maxWidth: 1200, margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      
+      {/* Page Title & Actions */}
+      <div className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <PackagePlus size={24} color="var(--primary)" />
+        Bulk Stock Inward
         {hasChanges && (
-          <button className="btn btn-primary" onClick={processUpdate}>
-            <Save size={18} /> Save All {Object.keys(updates).filter(k => updates[k] !== "").length} Changes
+          <button className="btn btn-primary" onClick={processUpdate} style={{ marginLeft: 'auto' }}>
+            <Save size={18} style={{ marginRight: 6 }} /> 
+            Save All {Object.keys(updates).filter(k => updates[k] !== "").length} Changes
           </button>
         )}
       </div>
 
-      <div className="modern-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0 }}>
+      <div className="modern-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         
+        {/* Search Bar matching history filter approach */}
         <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
           <div className="header-search" style={{ width: 400 }}>
             <Search size={18} />
             <input type="text" placeholder="Search product to update stock..." value={filter} onChange={e => setFilter(e.target.value)} />
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-3)' }}>
-            <PackagePlus size={18} />
-            <span style={{ fontSize: 13 }}>Fast bulk entry</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-3)', fontSize: 13, fontWeight: 500 }}>
+            Fast bulk entry ({filteredProducts.length} items)
           </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <table className="modern-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th style={{ textAlign: "center" }}>Current Stock</th>
-                <th style={{ textAlign: "center", width: 140 }}>Add Quantity</th>
-                <th style={{ textAlign: "center" }}>Final Stock</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map(p => {
-                const addedQty = Number(updates[p.id] || 0);
-                const finalQty = p.quantity + addedQty;
-                const isUpdated = addedQty !== 0;
-
-                return (
-                  <tr key={p.id} style={{ background: isUpdated ? 'var(--primary-light)' : 'transparent' }}>
-                    <td>
-                      <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{p.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Price: ₹{p.price}</div>
-                    </td>
-                    <td style={{ textAlign: "center", fontSize: 16, fontWeight: 600 }}>{p.quantity} <span style={{ fontSize: 12, fontWeight: 500 }}>{p.unit}</span></td>
-                    <td style={{ textAlign: "center" }}>
-                      <input 
-                        type="number" 
-                        className="form-input" 
-                        style={{ width: 100, height: 40, textAlign: "center", fontWeight: 700, borderColor: isUpdated ? 'var(--primary)' : 'var(--border-2)' }} 
-                        value={updates[p.id] || ""} 
-                        onChange={(e) => handleChange(p.id, e.target.value)}
-                        placeholder="+0"
-                      />
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      <span style={{ 
-                        fontSize: 18, 
-                        fontWeight: 800, 
-                        color: isUpdated ? 'var(--primary)' : 'var(--text-1)' 
-                      }}>
-                        {finalQty} 
-                      </span>
-                      <span style={{ fontSize: 12, marginLeft: 4, fontWeight: 500, color: 'var(--text-3)' }}>
-                        {p.unit}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredProducts.length === 0 && (
-                <tr>
-                  <td colSpan="4" style={{ textAlign: "center", padding: 40, color: 'var(--text-4)' }}>No products found.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        {/* Minimalist Data Header (Matching History Style) */}
+        <div style={{
+          display: 'flex',
+          padding: '14px 24px',
+          borderBottom: '1px solid var(--border)',
+          fontSize: 11, 
+          fontWeight: 800, 
+          color: 'var(--text-3)',
+          textTransform: 'uppercase', 
+          letterSpacing: '.06em',
+          gap: 16
+        }}>
+          <div style={{ flex: 1 }}>Product Details</div>
+          <div style={{ width: 140, textAlign: 'center' }}>Current Stock</div>
+          <div style={{ width: 160, textAlign: 'center' }}>Add Quantity</div>
+          <div style={{ width: 140, textAlign: 'center' }}>Final Stock</div>
         </div>
 
+        {/* Data Rows */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {filteredProducts.length === 0 ? (
+             <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-4)' }}>
+              <Box size={48} style={{ opacity: 0.4, marginBottom: 16 }} />
+              <div style={{ fontSize: 15 }}>No products found.</div>
+            </div>
+          ) : (
+            filteredProducts.map(p => {
+              const addedQty = Number(updates[p.id] || 0);
+              const finalQty = p.quantity + addedQty;
+              const isUpdated = addedQty !== 0;
+
+              return (
+                <div key={p.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 16,
+                  padding: '14px 24px', borderBottom: '1px solid var(--border)',
+                  background: isUpdated ? 'var(--primary-light)' : 'transparent',
+                  transition: 'background .15s'
+                }}>
+                  {/* Product Details */}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text-1)', fontSize: 14 }}>{p.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>Price: ₹{p.price}</div>
+                  </div>
+                  
+                  {/* Current Stock */}
+                  <div style={{ width: 140, textAlign: 'center', fontWeight: 600, fontSize: 16, color: 'var(--text-2)' }}>
+                    {p.quantity} <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-3)' }}>{p.unit}</span>
+                  </div>
+                  
+                  {/* Add Quantity Input */}
+                  <div style={{ width: 160, textAlign: 'center' }}>
+                    <input 
+                      type="number" 
+                      className="form-input" 
+                      style={{ 
+                        width: '100%', maxWidth: 120, height: 42, 
+                        textAlign: "center", fontWeight: 700, fontSize: 16,
+                        borderColor: isUpdated ? 'var(--primary)' : 'var(--border-2)',
+                        boxShadow: isUpdated ? '0 0 0 3px rgba(37,99,235,.1)' : 'none'
+                      }} 
+                      value={updates[p.id] || ""} 
+                      onChange={(e) => handleChange(p.id, e.target.value)}
+                      placeholder="+0"
+                    />
+                  </div>
+                  
+                  {/* Final Stock */}
+                  <div style={{ width: 140, textAlign: 'center' }}>
+                    <span style={{ 
+                      fontSize: 18, 
+                      fontWeight: 800, 
+                      color: isUpdated ? 'var(--primary)' : 'var(--text-1)' 
+                    }}>
+                      {finalQty} 
+                    </span>
+                    <span style={{ fontSize: 12, marginLeft: 4, fontWeight: 500, color: 'var(--text-3)' }}>{p.unit}</span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );
-};
-
-export default BulkUpdate;
+}

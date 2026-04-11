@@ -1,26 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-  /* Primary Brand — Supermarket POS Blue */
+  /* Primary Brand — Deep Blue */
   --primary:          #0052cc;
   --primary-hover:    #0043aa;
   --primary-light:    #e6f0ff;
   --primary-fg:       #ffffff;
 
   /* Backgrounds */
-  --bg:               #f1f5f9;  /* Light gray background */
+  --bg:               #f1f5f9;
   --surface:          #ffffff;
   --surface-hover:    #f8fafc;
   --surface-2:        #f8fafc;
-  --sidebar-bg:       #1e293b;  /* Dark theme sidebar */
-  --sidebar-hover:    #334155;
+  --surface-3:        #f1f5f9;
+
+  /* Sidebar — Dark Navy */
+  --sidebar-bg:       #0f1d36;
+  --sidebar-hover:    #172a4a;
   --sidebar-active:   #0052cc;
+  --sidebar-text:     #8b9cc2;
+  --sidebar-text-active: #ffffff;
+  --sidebar-border:   #1c2e4a;
 
   /* Text */
-  --text-1:           #0f172a;    /* bold headings */
-  --text-2:           #334155;    /* body copy */
-  --text-3:           #64748b;    /* muted labels */
-  --text-4:           #94a3b8;    /* placeholders */
+  --text-1:           #0f172a;
+  --text-2:           #334155;
+  --text-3:           #64748b;
+  --text-4:           #94a3b8;
 
   /* Borders */
   --border:           #e2e8f0;
@@ -35,6 +41,7 @@
   --danger-bg:        #fee2e2;
 
   /* Shadows */
+  --shadow-xs:        0 1px 2px 0 rgb(0 0 0 / 0.03);
   --shadow-sm:        0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md:        0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg:        0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);

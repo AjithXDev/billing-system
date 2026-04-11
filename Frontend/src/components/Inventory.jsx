@@ -13,7 +13,8 @@ const Inventory = () => {
     quantity: "",
     unit: "Pcs",
     barcode: "",
-    expiry_date: ""
+    expiry_date: "",
+    image: ""
   });
 
   const loadCategories = async () => {
@@ -43,7 +44,8 @@ const Inventory = () => {
           gst_rate: Number(form.gst_rate),
           product_code: form.product_code || null,
           price_type: form.price_type,
-          expiry_date: form.expiry_date || null
+          expiry_date: form.expiry_date || null,
+          image: form.image || null
         });
         alert("Product registered in database! 🔥");
         setForm({
@@ -57,7 +59,8 @@ const Inventory = () => {
           quantity: "",
           unit: "Pcs",
           barcode: "",
-          expiry_date: ""
+          expiry_date: "",
+          image: ""
         });
       } catch (err) {
         alert("❌ Error saving product: " + err.message);
@@ -67,23 +70,51 @@ const Inventory = () => {
     }
   };
 
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setForm({ ...form, image: reader.result });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="admin-scroll-area">
       <div className="admin-card">
         <div className="admin-card-header">Add New Product details</div>
         <div className="admin-card-body">
           <form onSubmit={addProduct}>
+            
+            {/* Image Upload box */}
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '25px', alignItems: 'flex-start' }}>
+               <div style={{ width: '120px', height: '120px', borderRadius: '8px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
+                 {form.image ? (
+                   <img src={form.image} alt="Product" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                 ) : (
+                   <div style={{ textAlign: 'center', color: 'var(--text-4)', fontSize: '12px' }}>
+                     📷<br/>No Image
+                   </div>
+                 )}
+                 <input type="file" accept="image/*" onChange={handleImageChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
+               </div>
+               <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px' }}>
+                 <div className="form-group">
+                   <label className="form-label">Product Name</label>
+                   <input className="form-input" name="name" value={form.name} onChange={handleChange} required />
+                 </div>
+                 <div className="form-group">
+                   <label className="form-label">Category</label>
+                   <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange}>
+                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                   </select>
+                 </div>
+               </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '25px', marginBottom: '20px' }}>
-              <div className="form-group">
-                <label className="form-label">Product Name</label>
-                <input className="form-input" name="name" value={form.name} onChange={handleChange} required />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Category</label>
-                <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange}>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
               <div className="form-group">
                 <label className="form-label">Short Code / Unique ID</label>
                 <input className="form-input" name="product_code" value={form.product_code} onChange={handleChange} placeholder="e.g. 101" />

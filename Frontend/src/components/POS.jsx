@@ -153,6 +153,53 @@ const POS = () => {
     alert(`✅ Bill held for "${label}". You can resume it anytime.`);
   };
 
+  /* ── Add Product from Grid ── */
+  const addProductToCart = (product) => {
+    if (!product) return;
+    if (isExpired(product)) {
+      alert(`🚫 "${product.name}" is EXPIRED (${product.expiry_date})!\nThis product cannot be added to billing.`);
+      return;
+    }
+
+    const priceType = product.price_type || 'exclusive';
+    const catGst = Number(product.gst_rate || product.category_gst || 0);
+    const price = Number(product.price || 0);
+
+    const existingIdx = billItems.findIndex(i => i.id === product.id);
+    if (existingIdx >= 0) {
+      updateQty(existingIdx, Number(billItems[existingIdx].qty || 0) + 1);
+    } else {
+      let total, gstAmt;
+      const quantity = 1;
+      if (priceType === 'inclusive') {
+        total = price * quantity;
+        const taxable = total / (1 + catGst / 100);
+        gstAmt = total - taxable;
+      } else {
+        const taxable = price * quantity;
+        gstAmt = (taxable * catGst) / 100;
+        total = taxable + gstAmt;
+      }
+      
+      const newRow = {
+        tempId: Date.now() + Math.random(),
+        id: product.id,
+        name: product.name || "",
+        price,
+        price_type: priceType,
+        qty: quantity,
+        total: priceType === 'inclusive' ? total - gstAmt : price * quantity,
+        gstRate: catGst,
+        gstAmt,
+        expiry_date: product.expiry_date || null,
+        image: product.image || null
+      };
+
+      const currentValid = billItems.filter(i => i.id);
+      setBillItems([...currentValid, newRow]);
+    }
+  };
+
   /* ── Resume held bill ── */
   const resumeBill = async (bill) => {
     // Restore cart with fresh product data (to get latest prices/expiry)
@@ -249,6 +296,8 @@ const POS = () => {
     setTimeout(() => inputRefs.current[billItems.length]?.focus(), 10);
   };
 
+  const filteredProducts = allProducts;
+
   const handleKeyDown = (e, index, field) => {
     if (field === "name") {
       if (e.key === "ArrowDown") { e.preventDefault(); setSelectedSugIndex(p => Math.min(p + 1, Math.max(0, suggestions.length - 1))); }
@@ -294,8 +343,9 @@ const POS = () => {
   };
 
   const removeRow = (idx) => {
-    if (billItems.length === 1) { setBillItems([emptyRow()]); return; }
-    setBillItems(billItems.filter((_, i) => i !== idx));
+    if (billItems.length === 1 && !billItems[0].id) { setBillItems([emptyRow()]); return; }
+    const updated = billItems.filter((_, i) => i !== idx);
+    setBillItems(updated.length ? updated : [emptyRow()]);
   };
 
   const qtyTotal = billItems.reduce((s, i) => s + Number(i.qty || 0), 0);
@@ -582,191 +632,156 @@ const POS = () => {
         </div>
       )}
 
-      {/* ── COLUMN HEADERS ─── */}
-      <div className="pos-table-header">
-        <div>S.NO</div>
-        <div style={{ textAlign: "left", paddingLeft: "15px" }}>DESCRIPTION</div>
-        <div>RATE (₹)</div>
-        <div>QTY</div>
-        <div>GST %</div>
-        <div>GST (₹)</div>
-        <div>AMOUNT (₹)</div>
-      </div>
+      {/* ── MAIN LAYOUT ─── */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden", height: "calc(100vh - 65px)", background: "var(--bg)", margin: "-20px" }}>
+        
+        {/* LEFT PANEL: PRODUCTS GRID */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px", overflow: "hidden" }}>
+          
+          {/* SEARCH BAR REMOVED STRICTLY */}
 
-      {/* ── ITEM ROWS ────────── */}
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: "100px" }}>
-        {billItems.map((item, idx) => (
-          <div key={item.tempId} className="pos-row" style={{ position: "relative", zIndex: currentRow === idx ? 100 : 1 }}>
-            <div className="pos-cell" style={{ justifyContent: "center" }}>
-              {idx + 1}
-            </div>
-
-            <div className="pos-cell" style={{ position: "relative" }}>
-              <input
-                className="pos-input"
-                ref={el => (inputRefs.current[idx] = el)}
-                value={item.name}
-                onFocus={() => setCurrentRow(idx)}
-                onChange={e => handleInputChange(idx, e.target.value)}
-                onKeyDown={e => handleKeyDown(e, idx, "name")}
-                placeholder="Type to search..."
-              />
-
-              {/* Expiry warning badge on row */}
-              {item.expiry_date && item.expiry_date >= todayStr() && (
-                <span style={{
-                  position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-                  background: "#fef3c7", color: "#d97706",
-                  border: "1px solid #fde68a",
-                  borderRadius: 20, fontSize: 9.5, fontWeight: 700,
-                  padding: "1px 6px", pointerEvents: "none"
-                }}>
-                  EXP {item.expiry_date}
-                </span>
-              )}
-
-              {suggestions.length > 0 && idx === currentRow && (
-                <div className="tally-suggestions">
-                  {suggestions.map((p, sIdx) => (
-                    <div
-                      key={p.id}
-                      className={`tally-suggestion-item ${sIdx === selectedSugIndex ? "selected" : ""}`}
-                      onClick={() => selectProduct(p, idx)}
-                      style={isExpired(p) ? { opacity: 0.5, pointerEvents: "none" } : {}}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontWeight: 700, fontSize: '13px' }}>
-                          {p.product_code && <span style={{ color: 'var(--primary)', marginRight: 6 }}>[{p.product_code}]</span>}
-                          {p.name}
-                          {isExpired(p) && <span style={{ fontSize: 10, color: "#ef4444", marginLeft: 5 }}>[EXPIRED]</span>}
-                        </span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>
-                          ₹{p.price} • Stock: {p.quantity} {p.unit}
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 700, color: 'var(--primary)' }}>₹{p.price}</div>
+          {/* GRID */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "20px", overflowY: "auto", paddingBottom: "30px", alignContent: "flex-start" }}>
+            {filteredProducts.map(p => (
+              <div 
+                key={p.id} 
+                style={{
+                  background: "white",
+                  borderRadius: "var(--r-lg)",
+                  border: "1px solid var(--border)",
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  boxShadow: "var(--shadow-sm)",
+                  opacity: isExpired(p) ? 0.5 : 1
+                }}
+              >
+                <div style={{ height: "140px", background: "#f8fafc", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "1px solid var(--border)" }}>
+                  {p.image ? (
+                    <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ fontSize: "40px", color: "#cbd5e1" }}>🛍️</div>
+                  )}
+                  {isExpired(p) && (
+                    <div style={{ position: "absolute", top: 10, right: 10, background: "#ef4444", color: "white", fontSize: "10px", fontWeight: "bold", padding: "2px 6px", borderRadius: "10px" }}>
+                      EXPIRED
                     </div>
-                  ))}
+                  )}
+                  {p.product_code && (
+                    <div style={{ position: "absolute", bottom: 10, left: 10, background: "rgba(0,0,0,0.6)", color: "white", fontSize: "10.5px", fontWeight: "bold", padding: "2px 6px", borderRadius: "6px" }}>
+                      Code: {p.product_code}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-
-            <div className="pos-cell" style={{ background: '#f8fafc', color: '#64748b' }}>
-              ₹{item.price || "0"}
-            </div>
-
-            <div className="pos-cell">
-              <input
-                className="pos-input"
-                ref={el => (inputRefs.current[idx + "_qty"] = el)}
-                value={item.qty || ""}
-                onChange={e => updateQty(idx, e.target.value)}
-                onKeyDown={e => handleKeyDown(e, idx, "qty")}
-              />
-            </div>
-
-            <div className="pos-cell">{item.gstRate}</div>
-            <div className="pos-cell">{Number(item.gstAmt || 0).toFixed(2)}</div>
-            <div className="pos-cell" style={{ position: "relative" }}>
-              {Number((item.total || 0) + (item.gstAmt || 0)).toFixed(2)}
-              {idx > 0 && (
-                <button
-                  onClick={() => removeRow(idx)}
-                  style={{
-                    position: "absolute", right: 4,
-                    width: 18, height: 18, borderRadius: "50%",
-                    border: "none", background: "#ef444430", color: "#ef4444",
-                    fontSize: 11, cursor: "pointer", lineHeight: 1,
-                    display: "flex", alignItems: "center", justifyContent: "center"
-                  }}
-                >×</button>
-              )}
-            </div>
+                <div style={{ padding: "15px", display: "flex", flexDirection: "column", flex: 1, justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontWeight: "600", fontSize: "14px", color: "var(--text-1)", marginBottom: "4px", lineHeight: "1.3" }}>{p.name}</div>
+                    <div style={{ fontSize: "11px", color: "var(--text-3)", marginBottom: "10px" }}>Stock: {p.quantity} {p.unit}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontWeight: "700", color: "var(--primary)", fontSize: "15px" }}>₹{p.price}</div>
+                    <button 
+                      onClick={() => addProductToCart(p)}
+                      style={{
+                        background: "var(--primary)", color: "white", border: "none",
+                        width: "32px", height: "32px", borderRadius: "50%",
+                        fontSize: "20px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer"
+                      }}
+                    >+</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {filteredProducts.length === 0 && (
+              <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "40px", color: "var(--text-3)" }}>
+                No products found.
+              </div>
+            )}
           </div>
-        ))}
-      </div>
-
-      
-      {/* ── FOOTER ─── */}
-      <div className="pos-footer">
-        <div className="pos-footer-col" style={{ width: 140 }}>
-           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ 
-                width: 8, height: 8, borderRadius: '50%', 
-                background: syncPending > 0 ? '#f59e0b' : '#10b981',
-                boxShadow: syncPending > 0 ? '0 0 8px #f59e0b' : '0 0 8px #10b981'
-              }}></div>
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)' }}>
-                {syncPending > 0 ? `SYNCING (${syncPending})` : 'CLOUD SECURED'}
-              </span>
-           </div>
         </div>
 
-        <div className="pos-footer-col">
-          <span className="footer-label">TOTAL QTY</span>
-          <span className="footer-val">{qtyTotal}</span>
-        </div>
-        <div className="pos-footer-col">
-          <span className="footer-label">TAXABLE AMT</span>
-          <span className="footer-val">₹{subtotal.toFixed(2)}</span>
-        </div>
-        <div className="pos-footer-col">
-          <span className="footer-label">TOTAL GST</span>
-          <span className="footer-val">₹{taxTotal.toFixed(2)}</span>
-        </div>
-        <div className="pos-footer-col">
-          <span className="footer-label">NET PAYABLE</span>
-          <span className="footer-val">₹{grandTotal}</span>
-        </div>
+        {/* RIGHT PANEL: CART */}
+        <div style={{ width: "400px", background: "white", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 15px rgba(0,0,0,0.03)" }}>
+          
+          <div style={{ padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)" }}>
+             <div style={{ fontWeight: "700", fontSize: "16px", color: "var(--text-1)" }}>Current Bill</div>
+             <div style={{ background: "var(--primary-light)", color: "var(--primary)", padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: "600" }}>{qtyTotal} Items</div>
+          </div>
 
-        {/* HOLD BILL BUTTON */}
-        <button
-          onClick={holdBill}
-          style={{
-            marginLeft: "auto",
-            padding: "0 20px", height: 42,
-            background: "transparent",
-            border: "1px solid #f59e0b",
-            color: "#f59e0b",
-            borderRadius: "var(--r-md)",
-            fontSize: 13, fontWeight: 700,
-            cursor: "pointer", transition: "all .15s",
-            display: "flex", alignItems: "center", gap: 6
-          }}
-        >
-          ⏸️ Hold
-        </button>
+          {/* Cart Items List */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "15px", display: "flex", flexDirection: "column", gap: "15px" }}>
+            {billItems.filter(i => i.id).map((item, idx) => (
+              <div key={item.tempId} style={{ display: "flex", gap: "12px", background: "var(--surface-2)", padding: "10px", borderRadius: "var(--r-md)" }}>
+                <div style={{ width: "50px", height: "50px", borderRadius: "6px", overflow: "hidden", background: "var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                   {item.image ? (
+                      <img src={item.image} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                   ) : (
+                      <span style={{ fontSize: "20px", color: "white" }}>🛍️</span>
+                   )}
+                </div>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                   <div style={{ fontWeight: "600", fontSize: "13.5px", color: "var(--text-1)", lineHeight: "1.2" }}>{item.name}</div>
+                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", alignItems: "center" }}>
+                      <div style={{ fontSize: "12px", color: "var(--text-3)" }}>
+                         ₹{item.price} x <input 
+                           type="number" 
+                           value={item.qty} 
+                           onChange={(e) => updateQty(idx, e.target.value)} 
+                           style={{ width: "40px", padding: "2px 4px", fontSize: "12px", border: "1px solid var(--border)", borderRadius: "4px", textAlign: "center" }} 
+                         />
+                      </div>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "var(--text-1)" }}>₹{(item.total + item.gstAmt).toFixed(2)}</div>
+                   </div>
+                </div>
+                <button 
+                  onClick={() => removeRow(idx)}
+                  style={{ width: "24px", height: "24px", borderRadius: "50%", background: "#ef444415", color: "#ef4444", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", alignSelf: "center", fontSize: "14px" }}
+                >×</button>
+              </div>
+            ))}
+            {billItems.filter(i => i.id).length === 0 && (
+              <div style={{ textAlign: "center", color: "var(--text-4)", marginTop: "40px", fontSize: "14px" }}>
+                 <div style={{ fontSize: "40px", marginBottom: "10px" }}>🛒</div>
+                 Cart is empty.<br/>Add products from the left.
+              </div>
+            )}
+          </div>
 
-        {/* RESUME BUTTON with count badge */}
-        <button
-          onClick={() => setShowHeldBills(true)}
-          style={{
-            position: "relative",
-            padding: "0 20px", height: 42,
-            background: "#7c3aed20",
-            border: "1px solid #7c3aed",
-            color: "#7c3aed",
-            borderRadius: "var(--r-md)",
-            fontSize: 13, fontWeight: 700,
-            cursor: "pointer", transition: "all .15s",
-            display: "flex", alignItems: "center", gap: 6
-          }}
-        >
-          ▶ Resume
-          {heldCount > 0 && (
-            <span style={{
-              position: "absolute", top: -6, right: -6,
-              background: "#ef4444", color: "#fff",
-              borderRadius: "50%", width: 18, height: 18,
-              fontSize: 10, fontWeight: 800,
-              display: "flex", alignItems: "center", justifyContent: "center"
-            }}>{heldCount}</span>
-          )}
-        </button>
+          {/* Cart Footer */}
+          <div style={{ background: "#f8fafc", borderTop: "1px solid var(--border)", padding: "20px" }}>
+             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "13px", color: "var(--text-3)" }}>
+               <span>Taxable Amount</span>
+               <span>₹{subtotal.toFixed(2)}</span>
+             </div>
+             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "15px", fontSize: "13px", color: "var(--text-3)" }}>
+               <span>Total GST</span>
+               <span>₹{taxTotal.toFixed(2)}</span>
+             </div>
+             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px", fontSize: "18px", fontWeight: "800", color: "var(--text-1)" }}>
+               <span>Net Payable</span>
+               <span style={{ color: "var(--primary)" }}>₹{grandTotal}</span>
+             </div>
 
-        <button className="btn-invoice" onClick={handleGenerateClick}>
-          GENERATE BILL
-        </button>
+             <div style={{ display: "flex", gap: "10px" }}>
+               <button 
+                 onClick={holdBill}
+                 style={{ flex: 1, padding: "12px", background: "white", border: "1px solid #f59e0b", color: "#f59e0b", borderRadius: "var(--r-md)", fontWeight: "700", cursor: "pointer" }}
+               >⏸️ Hold</button>
+               <button 
+                 onClick={() => setShowHeldBills(true)}
+                 style={{ flex: 1, position: "relative", padding: "12px", background: "white", border: "1px solid #7c3aed", color: "#7c3aed", borderRadius: "var(--r-md)", fontWeight: "700", cursor: "pointer" }}
+               >
+                 ▶ Resume
+                 {heldCount > 0 && <span style={{ position: "absolute", top: "-5px", right: "-5px", background: "#ef4444", color: "white", borderRadius: "50%", padding: "2px 6px", fontSize: "10px" }}>{heldCount}</span>}
+               </button>
+             </div>
+             <button 
+               onClick={handleGenerateClick}
+               style={{ width: "100%", marginTop: "15px", padding: "15px", background: "var(--primary)", color: "white", border: "none", borderRadius: "var(--r-md)", fontWeight: "700", fontSize: "16px", cursor: "pointer", boxShadow: "0 4px 12px rgba(0, 82, 204, 0.25)" }}
+             >NEXT ➔</button>
+          </div>
+
+        </div>
       </div>
     </div>
   );

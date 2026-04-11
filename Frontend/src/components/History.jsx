@@ -25,13 +25,20 @@ export default function History() {
 
   // Group invoices into Today, This Week, This Month, Older
   const groupInvoices = (list) => {
+    // Assign sequential displayId based on creation order (oldest -> newest)
+    const sequenced = [...list].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+    sequenced.forEach((inv, index) => { inv.displayId = index + 1; });
+
     const now = new Date();
     const todayStr = now.toISOString().split("T")[0];
     const weekAgo = new Date(now.getTime() - 7 * 86400000);
     const monthAgo = new Date(now.getTime() - 30 * 86400000);
 
     const groups = { today: [], thisWeek: [], thisMonth: [], older: [] };
-    list.forEach(inv => {
+    
+    // Group in descending order for display (newest first)
+    const descending = [...sequenced].reverse();
+    descending.forEach(inv => {
       const d = new Date(inv.created_at);
       const dateStr = d.toISOString().split("T")[0];
       if (dateStr === todayStr) groups.today.push(inv);
@@ -83,7 +90,7 @@ export default function History() {
           onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
           onMouseLeave={e => e.currentTarget.style.background = ''}>
             {/* Invoice ID */}
-            <div style={{ width: 70, fontWeight: 700, color: 'var(--primary)', fontSize: 14 }}>#{inv.id}</div>
+            <div style={{ width: 70, fontWeight: 700, color: 'var(--primary)', fontSize: 14 }}>#{inv.displayId}</div>
             {/* Date */}
             <div style={{ width: 150, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)' }}>
               <Calendar size={14} color="var(--text-3)" />
@@ -167,7 +174,7 @@ export default function History() {
         <div className="modal-overlay" onClick={() => setViewInvoice(null)}>
           <div className="modal-content" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ margin: 0 }}>Invoice #{viewInvoice.id}</h2>
+              <h2 style={{ margin: 0 }}>Invoice #{viewInvoice.displayId}</h2>
               <button onClick={() => setViewInvoice(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><X size={24} /></button>
             </div>
 

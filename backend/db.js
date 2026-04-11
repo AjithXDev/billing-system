@@ -83,6 +83,7 @@ try { db.prepare("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 0").run(
 try { db.prepare("ALTER TABLE products ADD COLUMN product_code TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN hsn_code TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN price_type TEXT DEFAULT 'exclusive'").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN image TEXT DEFAULT NULL").run(); } catch (e) { }
 
 // Migration: If gst_rate is 0 and category_id exists, copy gst from categories
 try {

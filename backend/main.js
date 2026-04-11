@@ -104,13 +104,14 @@ ipcMain.handle("add-product", async (event, product) => {
     quantity,
     unit,
     barcode,
-    expiry_date
+    expiry_date,
+    image
   } = product;
 
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
@@ -122,7 +123,8 @@ ipcMain.handle("add-product", async (event, product) => {
     quantity,
     unit,
     barcode ? String(barcode) : null,
-    expiry_date || null
+    expiry_date || null,
+    image || null
   );
 
   return { message: "Product added" };
@@ -130,12 +132,12 @@ ipcMain.handle("add-product", async (event, product) => {
 
 // 🟢 EDIT PRODUCT (with expiry_date)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date } = product;
+  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image } = product;
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?
     WHERE id=?
-  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, id);
+  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, id);
   return { message: "Product updated" };
 });
 
@@ -311,6 +313,49 @@ ipcMain.handle("create-invoice", async (event, data) => {
 });
 
 // ============================================================
+// 🔥 INVOICE HISTORY HANDLERS
+// ============================================================
+
+// Get all invoices (with a mini product list for each)
+ipcMain.handle("get-invoices", async () => {
+  const invoices = db.prepare(`
+    SELECT * FROM invoices ORDER BY created_at DESC
+  `).all();
+
+  // Attach a comma-separated product list string for each invoice
+  const getItems = db.prepare(`
+    SELECT p.name FROM invoice_items ii
+    JOIN products p ON ii.product_id = p.id
+    WHERE ii.invoice_id = ?
+  `);
+
+  return invoices.map(inv => {
+    const items = getItems.all(inv.id);
+    return {
+      ...inv,
+      productsList: items.map(i => i.name).join(', ')
+    };
+  });
+});
+
+// Get full details (line items) for a single invoice
+ipcMain.handle("get-invoice-details", async (event, invoiceId) => {
+  return db.prepare(`
+    SELECT ii.*, p.name 
+    FROM invoice_items ii
+    JOIN products p ON ii.product_id = p.id
+    WHERE ii.invoice_id = ?
+  `).all(invoiceId);
+});
+
+// Delete an invoice and its items
+ipcMain.handle("delete-invoice", async (event, invoiceId) => {
+  db.prepare("DELETE FROM invoice_items WHERE invoice_id = ?").run(invoiceId);
+  db.prepare("DELETE FROM invoices WHERE id = ?").run(invoiceId);
+  return { message: "Invoice deleted" };
+});
+
+// ============================================================
 // 🔥 HOLD / RESUME BILL HANDLERS
 // ============================================================
 
@@ -429,6 +474,21 @@ ipcMain.handle("get-dashboard-stats", async () => {
     SELECT COUNT(*) as cnt FROM products WHERE quantity <= 0
   `).get().cnt;
 
+  // Profit Calculations: (Selling Price - Cost Price) * Quantity
+  const calculateProfit = (timeframeStr) => {
+    return db.prepare(`
+      SELECT SUM((ii.price - COALESCE(p.cost_price, 0)) * ii.quantity) as profit
+      FROM invoice_items ii
+      JOIN products p ON ii.product_id = p.id
+      JOIN invoices inv ON ii.invoice_id = inv.id
+      WHERE inv.created_at >= datetime('now', '${timeframeStr}')
+    `).get().profit || 0;
+  };
+
+  const todayProfit = calculateProfit('start of day');
+  const weeklyProfit = calculateProfit('-7 days');
+  const monthlyProfit = calculateProfit('-30 days');
+
   // Top 5 products sold this month
   const topProducts = db.prepare(`
     SELECT p.name, SUM(ii.quantity) as sold
@@ -441,9 +501,26 @@ ipcMain.handle("get-dashboard-stats", async () => {
     LIMIT 5
   `).all();
 
+  const dailySales = db.prepare(`
+    SELECT date(created_at) as day, SUM(total_amount) as total, COUNT(*) as bills
+    FROM invoices 
+    WHERE created_at >= datetime('now', '-7 days')
+    GROUP BY day
+    ORDER BY day ASC
+  `).all();
+
+  const monthlySalesBreakdown = db.prepare(`
+    SELECT strftime('%Y-%m', created_at) as month, SUM(total_amount) as total, COUNT(*) as bills
+    FROM invoices 
+    WHERE created_at >= datetime('now', '-12 months')
+    GROUP BY month
+    ORDER BY month ASC
+  `).all();
+
   return {
     totalProducts, totalCategories, todaySales, todayBills,
     expiredCount, nearExpiryCount, lowStockCount, outOfStock,
-    topProducts
+    topProducts, todayProfit, weeklyProfit, monthlyProfit,
+    dailySales, monthlySalesBreakdown
   };
 });

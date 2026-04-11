@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 
 const ProductList = () => {
   const [products, setProducts] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [isEditModalOpen, setEditModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -284,6 +285,39 @@ const ProductList = () => {
                 style={{ colorScheme: 'light' }}
               />
             </div>
+            <div className="form-group">
+              <label className="form-label">Product Image (Optional)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                {editingProduct.image && (
+                  <img src={editingProduct.image} alt="Preview" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }} />
+                )}
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                          setEditingProduct({ ...editingProduct, image: reader.result });
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    style={{
+                      width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)', cursor: 'pointer', fontSize: 13
+                    }}
+                  />
+                  {editingProduct.image && (
+                    <button
+                      onClick={() => setEditingProduct({ ...editingProduct, image: null })}
+                      style={{ marginTop: 8, padding: '4px 10px', fontSize: 11, background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: 4, cursor: 'pointer' }}
+                    >Remove Image</button>
+                  )}
+                </div>
+              </div>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '30px' }}>
               <button className="btn-outline" onClick={() => setEditModalOpen(false)}>Cancel</button>
               <button className="btn-primary" onClick={saveEdit}>Save Changes</button>
@@ -295,7 +329,16 @@ const ProductList = () => {
       <div className="admin-card" style={{ maxWidth: '100%' }}>
          <div className="admin-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Inventory Records ({products.length})</span>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <input
+                type="text"
+                placeholder="Search products..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '13px', width: '200px'
+                }}
+              />
               <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem', background: '#334155' }} onClick={printPriceList}>🖨️ Print Price List</button>
               <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={load}>Refresh Data</button>
             </div>
@@ -316,14 +359,28 @@ const ProductList = () => {
                 </tr>
               </thead>
               <tbody>
-                 {products.map(p => {
+                 {products
+                   .filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.barcode || "").includes(searchQuery) || (p.product_code || "").toLowerCase().includes(searchQuery.toLowerCase()))
+                   .map((p, index) => {
                     const today = new Date().toISOString().split('T')[0];
                     const expired = p.expiry_date && p.expiry_date < today;
                     const near = p.expiry_date && !expired && p.expiry_date <= new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
                     return (
                    <tr key={p.id}>
-                       <td style={{ paddingLeft: '25px', color: '#0284c7', fontWeight: 800 }}>{p.product_code || `#${p.id}`}</td>
-                       <td style={{ fontWeight: 600, color: expired ? '#ef4444' : 'inherit' }}>{p.name}{expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}</td>
+                       <td style={{ paddingLeft: '25px', color: '#0284c7', fontWeight: 800 }}>#{index + 1}</td>
+                       <td style={{ fontWeight: 600, color: expired ? '#ef4444' : 'inherit' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {p.image ? (
+                              <img src={p.image} alt={p.name} style={{ width: 30, height: 30, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+                            ) : (
+                              <div style={{ width: 30, height: 30, background: 'var(--surface-2)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>🛍️</div>
+                            )}
+                            <div>
+                               {p.name}
+                               {expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}
+                            </div>
+                          </div>
+                       </td>
                        <td style={{ fontFamily: 'monospace' }}>{p.barcode || '-'}</td>
                        <td style={{ fontWeight: 600, color: '#059669' }}>₹{p.price.toFixed(2)}</td>
                        <td style={{ fontWeight: 600 }}>{p.quantity}</td>
