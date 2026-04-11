@@ -93,48 +93,51 @@ ipcMain.handle("get-categories", async () => {
   return db.prepare("SELECT * FROM categories").all();
 });
 
-// 🟢 ADD PRODUCT (with expiry_date + image_url)
+// 🟢 ADD PRODUCT (with expiry_date)
 ipcMain.handle("add-product", async (event, product) => {
   const {
     name,
     category_id,
+    gst_rate,
+    product_code,
+    price_type,
     price,
     cost_price,
     quantity,
     unit,
     barcode,
-    expiry_date,
-    image_url,
-    image_data
+    expiry_date
   } = product;
 
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
+    gst_rate || 0,
+    product_code || null,
+    price_type || 'exclusive',
     price,
     cost_price || 0,
     quantity,
     unit,
     barcode ? String(barcode) : null,
-    expiry_date || null,
-    image_url || image_data || null
+    expiry_date || null
   );
 
   return { message: "Product added" };
 });
 
-// 🟢 EDIT PRODUCT (with expiry_date + image_url)
+// 🟢 EDIT PRODUCT (with expiry_date)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url } = product;
+  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date } = product;
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image_url=?
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?
     WHERE id=?
-  `).run(name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image_url || null, id);
+  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, id);
   return { message: "Product updated" };
 });
 
@@ -190,13 +193,13 @@ ipcMain.handle("get-sync-status", () => {
 });
 
 
-// 🟢 GET PRODUCTS WITH CATEGORY GST
+// 🟢 GET PRODUCTS WITH CATEGORY GST (Backwards compatible fallback)
 ipcMain.handle("get-products-full", () => {
   return db.prepare(`
     SELECT 
       p.*,
-      c.gst as category_gst,
-      c.name as category_name
+      COALESCE(p.gst_rate, c.gst, 0) as category_gst,
+      COALESCE(c.name, 'General') as category_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
   `).all();
@@ -227,38 +230,6 @@ ipcMain.handle("bulkUpdateProducts", async (event, updates) => {
 // 🟢 SEARCH CUSTOMER BY PHONE
 ipcMain.handle("search-customer", async (event, phone) => {
   return db.prepare("SELECT * FROM customers WHERE phone = ?").get(phone);
-});
-// 🟢 GET ALL INVOICES (HISTORY)
-ipcMain.handle("get-invoices", async () => {
-  const rows = db.prepare("SELECT * FROM invoices ORDER BY created_at DESC").all();
-  const itemsStmt = db.prepare(`
-    SELECT p.name
-    FROM invoice_items ii
-    JOIN products p ON ii.product_id = p.id
-    WHERE ii.invoice_id = ?
-  `);
-  return rows.map(r => {
-    const productsList = itemsStmt.all(r.id).map(i => i.name).join(", ");
-    return { ...r, productsList };
-  });
-});
-
-// 🟢 GET INVOICE DETAILS (line items for View Bill)
-ipcMain.handle("get-invoice-details", async (event, invoiceId) => {
-  const items = db.prepare(`
-    SELECT ii.quantity, ii.price, ii.gst_rate, ii.gst_amount, p.name
-    FROM invoice_items ii
-    JOIN products p ON ii.product_id = p.id
-    WHERE ii.invoice_id = ?
-  `).all(invoiceId);
-  return items;
-});
-
-// 🟢 DELETE INVOICE
-ipcMain.handle("delete-invoice", async (event, invoiceId) => {
-  db.prepare("DELETE FROM invoice_items WHERE invoice_id = ?").run(invoiceId);
-  db.prepare("DELETE FROM invoices WHERE id = ?").run(invoiceId);
-  return { message: "Invoice deleted" };
 });
 
 // 🟢 CREATE INVOICE (CUSTOMER + PAYMENT)

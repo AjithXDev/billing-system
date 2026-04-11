@@ -1,31 +1,17 @@
 import React, { useState, useEffect } from "react";
-import { Edit, Trash2, Search as SearchIcon, Filter, Image as ImageIcon } from "lucide-react";
 
 const ProductList = () => {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [isEditModalOpen, setEditModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [categories, setCategories] = useState([]);
   
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filterCategory, setFilterCategory] = useState("All");
-
   const load = async () => {
     if (window.api && window.api.getProductsFull) {
       setProducts(await window.api.getProductsFull());
-    } else {
-      // Mock Data 
-      setProducts([
-        { id: 1, name: "Tomato Ketchup", category_name: "Grocery", barcode: "123456789", price: 120, cost_price: 90, quantity: 4, unit: "Pcs" },
-        { id: 2, name: "Milk 1L", category_name: "Dairy", barcode: "987654321", price: 65, cost_price: 50, quantity: 40, unit: "Pcs", expiry_date: "2026-05-01" },
-        { id: 3, name: "Bread", category_name: "Bakery", barcode: "111222333", price: 40, cost_price: 30, quantity: 2, unit: "Pcs", expiry_date: "2026-04-10" },
-      ]);
     }
-
     if (window.api && window.api.getCategories) {
       setCategories(await window.api.getCategories());
-    } else {
-      setCategories([{id: 1, name: "Grocery"}, {id: 2, name: "Dairy"}, {id: 3, name: "Bakery"}]);
     }
   };
   
@@ -33,17 +19,15 @@ const ProductList = () => {
 
   const handleDelete = async (id, name) => {
     if (window.confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) {
-      if (window.api && window.api.deleteProduct) {
+      if (window.api.deleteProduct) {
         await window.api.deleteProduct(id);
         load();
-      } else {
-        setProducts(prev => prev.filter(p => p.id !== id));
       }
     }
   };
 
   const handleEdit = (product) => {
-    setEditingProduct({ ...product });
+    setEditingProduct({ ...product }); // create copy
     setEditModalOpen(true);
   };
 
@@ -52,176 +36,189 @@ const ProductList = () => {
       alert("Name and Selling Price are required!");
       return;
     }
-    if (window.api && window.api.editProduct) {
-      await window.api.editProduct(editingProduct);
+    if (window.api.editProduct) {
+      await window.api.editProduct({
+        ...editingProduct,
+        gst_rate: Number(editingProduct.gst_rate) || 0,
+        product_code: editingProduct.product_code || null,
+        price_type: editingProduct.price_type || 'exclusive'
+      });
       setEditModalOpen(false);
       load();
-    } else {
-      setProducts(prev => prev.map(p => p.id === editingProduct.id ? editingProduct : p));
-      setEditModalOpen(false);
     }
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditingProduct({...editingProduct, image_url: reader.result});
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  const printPriceList = () => {
+    const printWindow = window.open('', '_blank');
+    const content = `
+      <html>
+        <head>
+          <title>Price List Preview</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+            body { 
+              font-family: 'Inter', -apple-system, sans-serif; 
+              padding: 50px; 
+              color: #0f172a; 
+              background: #f1f5f9; 
+              line-height: 1.5;
+            }
+            .container { 
+              max-width: 900px; 
+              margin: 0 auto; 
+              background: white; 
+              padding: 60px; 
+              border-radius: 2px; 
+              box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+              position: relative;
+              border-top: 8px solid #3b82f6;
+            }
+            header { 
+              display: flex; 
+              justify-content: space-between; 
+              align-items: flex-start; 
+              margin-bottom: 50px; 
+            }
+            .shop-info h1 { 
+              margin: 0; 
+              font-size: 32px; 
+              font-weight: 800; 
+              letter-spacing: -0.025em;
+              text-transform: uppercase;
+              color: #1e3a8a;
+            }
+            .tagline { color: #64748b; font-size: 14px; margin-top: 4px; font-weight: 500; }
+            .catalog-label {
+              background: #eff6ff;
+              color: #2563eb;
+              padding: 6px 12px;
+              border-radius: 6px;
+              font-size: 12px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+            }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th { 
+              text-align: left; 
+              padding: 14px 12px; 
+              background: #f8fafc; 
+              color: #475569; 
+              font-size: 11px; 
+              text-transform: uppercase; 
+              letter-spacing: 0.1em;
+              border-bottom: 2px solid #e2e8f0;
+            }
+            td { 
+              padding: 16px 12px; 
+              border-bottom: 1px solid #f1f5f9; 
+              font-size: 14px; 
+            }
+            tr:nth-child(even) { background: #fafafa; }
+            .id-col { font-weight: 800; color: #2563eb; width: 120px; }
+            .price-col { font-weight: 800; color: #0f172a; text-align: right; font-size: 16px; }
+            .unit-col { color: #94a3b8; font-size: 12px; font-weight: 600; }
+            
+            .no-print { 
+              position: fixed; 
+              top: 30px; 
+              right: 30px; 
+              display: flex; 
+              gap: 12px; 
+              z-index: 100;
+            }
+            .btn { 
+              padding: 12px 24px; 
+              border-radius: 8px; 
+              border: none; 
+              cursor: pointer; 
+              font-weight: 700; 
+              font-size: 14px; 
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              transition: transform 0.1s;
+              box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+            }
+            .btn:active { transform: scale(0.95); }
+            .btn-print { background: #2563eb; color: white; }
+            .btn-close { background: white; color: #475569; border: 1px solid #e2e8f0; }
+            
+            footer {
+              margin-top: 60px;
+              padding-top: 20px;
+              border-top: 1px solid #e2e8f0;
+              text-align: center;
+              font-size: 12px;
+              color: #94a3b8;
+            }
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.barcode?.includes(searchQuery);
-    const matchesCategory = filterCategory === "All" || p.category_name === filterCategory || String(p.category_id) === String(filterCategory);
-    return matchesSearch && matchesCategory;
-  });
+            @media print { 
+              .no-print { display: none; } 
+              body { background: white; padding: 0; } 
+              .container { box-shadow: none; width: 100%; max-width: 100%; padding: 0; border: none; } 
+            }
+          </style>
+        </head>
+        <body>
+          <div class="no-print">
+            <button class="btn btn-close" onclick="window.close()">Close Preview</button>
+            <button class="btn btn-print" onclick="window.print()">📥 Save as PDF / Print</button>
+          </div>
+          <div class="container">
+            <header>
+              <div class="shop-info">
+                <div class="catalog-label">Product Catalog</div>
+                <h1>MY MART</h1>
+                <div class="tagline">Providing quality products since 2024</div>
+              </div>
+              <div style="text-align: right">
+                <div style="font-size: 12px; color: #64748b; font-weight: 600;">DATE GENERATED</div>
+                <div style="font-weight: 800; font-size: 16px;">${new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+              </div>
+            </header>
+            <table>
+              <thead>
+                <tr>
+                  <th class="id-col">ITEM CODE</th>
+                  <th>PRODUCT DESCRIPTION</th>
+                  <th style="text-align: center">UNIT</th>
+                  <th style="text-align: right">RATE (INR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${products.map(p => `
+                  <tr>
+                    <td class="id-col">#${p.product_code || p.id}</td>
+                    <td style="font-weight: 600">${p.name}</td>
+                    <td style="text-align: center" class="unit-col">${p.unit}</td>
+                    <td class="price-col">₹${p.price.toFixed(2)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <footer>
+              This is a computer-generated price list and subject to change without notice.
+            </footer>
+          </div>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(content);
+    printWindow.document.close();
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="page-title">Master Inventory</div>
-
-      <div className="modern-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0 }}>
-        
-        {/* Toolbar */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 16, flex: 1 }}>
-            <div className="header-search" style={{ width: 320 }}>
-              <SearchIcon size={18} />
-              <input type="text" placeholder="Search by name or barcode..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-            </div>
-            <div style={{ position: 'relative' }}>
-              <Filter size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-4)' }} />
-              <select className="form-select" style={{ paddingLeft: 42, width: 200, height: 40 }} value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-                <option value="All">All Categories</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-3)' }}>
-            Showing {filteredProducts.length} Products
-          </div>
-        </div>
-
-        {/* Table */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <table className="modern-table">
-            <thead>
-              <tr>
-                <th style={{ width: 60, textAlign: 'center' }}>Image</th>
-                <th>Product Name</th>
-                <th>Barcode</th>
-                <th>Selling Price</th>
-                <th>Stock</th>
-                <th>Expiry Date</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map(p => {
-                const isLowStock = p.quantity <= 5;
-                const isOutOfStock = p.quantity === 0;
-                
-                return (
-                  <tr key={p.id}>
-                    <td style={{ textAlign: 'center' }}>
-                      {p.image_url ? (
-                        <img src={p.image_url} alt="" style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
-                      ) : (
-                        <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--surface-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', color: 'var(--text-4)' }}>
-                          <ImageIcon size={20} />
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600, color: 'var(--text-1)' }}>{p.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{p.category_name || "Uncategorized"}</div>
-                    </td>
-                    <td style={{ fontFamily: 'monospace', color: 'var(--text-2)' }}>{p.barcode || '—'}</td>
-                    <td style={{ fontWeight: 700 }}>₹{Number(p.price).toFixed(2)}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ 
-                          width: 8, height: 8, borderRadius: '50%', 
-                          background: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)'
-                        }} />
-                        <span style={{ fontWeight: 600 }}>{p.quantity} {p.unit}</span>
-                      </div>
-                    </td>
-                    <td>
-                      {p.expiry_date ? (
-                        <span style={{ fontSize: 13, fontWeight: 500 }}>{p.expiry_date}</span>
-                      ) : <span style={{ color: 'var(--text-4)' }}>N/A</span>}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                        <button className="btn-outline" style={{ height: 32, padding: '0 12px' }} onClick={() => handleEdit(p)}>
-                          <Edit size={14} /> Edit
-                        </button>
-                        <button className="btn-outline" style={{ height: 32, padding: '0 12px', color: 'var(--danger)', borderColor: 'var(--danger-bg)' }} onClick={() => handleDelete(p.id, p.name)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredProducts.length === 0 && (
-                <tr>
-                  <td colSpan="7" style={{ textAlign: 'center', padding: 40, color: 'var(--text-4)' }}>No products found matching your criteria.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Edit Modal */}
+    <div className="admin-scroll-area">
       {isEditModalOpen && editingProduct && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 700 }}>
-            <h2 style={{ fontSize: 20, marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>Edit Product</h2>
-            
-            <div style={{ display: 'flex', gap: 24, marginBottom: 24 }}>
-              {/* Image Editor */}
-              <div style={{ width: 140 }}>
-                <label className="image-upload-box" style={{ width: 140, height: 140 }}>
-                  {editingProduct.image_url ? (
-                     <img src={editingProduct.image_url} alt="" style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 12 }} />
-                  ) : (
-                    <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
-                      <ImageIcon size={32} style={{ marginBottom: 8 }}/>
-                      <div style={{ fontSize: 12 }}>Change Image</div>
-                    </div>
-                  )}
-                  <input type="file" style={{ display: 'none' }} accept="image/*" onChange={handleImageChange} />
-                </label>
-              </div>
-
-              {/* Form Details */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div className="form-group">
-                  <label className="form-label">Product Name</label>
-                  <input className="form-input" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
-                </div>
-                <div style={{ display: 'flex', gap: 16 }}>
-                  <div className="form-group" style={{ flex: 1 }}>
-                    <label className="form-label">Category</label>
-                    <select className="form-select" value={editingProduct.category_id || ""} onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ flex: 1 }}>
-                    <label className="form-label">Barcode</label>
-                    <input className="form-input" value={editingProduct.barcode || ""} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
-                  </div>
-                </div>
-              </div>
+          <div className="invoice-modal">
+            <h2 style={{ marginBottom: '20px', color: '#0f172a' }}>Edit Product</h2>
+            <div className="form-group">
+              <label className="form-label">Product Name</label>
+              <input className="form-input" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
             </div>
-
-            <div className="form-grid" style={{ marginBottom: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
               <div className="form-group">
                 <label className="form-label">Selling Price</label>
                 <input type="number" className="form-input" value={editingProduct.price} onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} />
@@ -235,18 +232,128 @@ const ProductList = () => {
                 <input type="number" className="form-input" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value)})} />
               </div>
               <div className="form-group">
-                <label className="form-label">Expiry Date</label>
-                <input type="date" className="form-input" value={editingProduct.expiry_date || ""} onChange={e => setEditingProduct({...editingProduct, expiry_date: e.target.value || null})} />
+                <label className="form-label">Unit</label>
+                <select className="form-select" value={editingProduct.unit} onChange={e => setEditingProduct({...editingProduct, unit: e.target.value})}>
+                  <option value="PCS">PCS</option>
+                  <option value="KG">KG</option>
+                  <option value="LTR">LTR</option>
+                  <option value="BOX">BOX</option>
+                  <option value="PKT">PKT</option>
+                </select>
               </div>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <button className="btn btn-outline" onClick={() => setEditModalOpen(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveEdit}>Save Changes</button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div className="form-group">
+                <label className="form-label">Short Code / ID</label>
+                <input className="form-input" value={editingProduct.product_code || ""} onChange={e => setEditingProduct({...editingProduct, product_code: e.target.value})} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">GST Rate (%)</label>
+                <select className="form-select" value={editingProduct.gst_rate || 0} onChange={e => setEditingProduct({...editingProduct, gst_rate: parseFloat(e.target.value)})}>
+                  <option value="0">0%</option>
+                  <option value="5">5%</option>
+                  <option value="12">12%</option>
+                  <option value="18">18%</option>
+                  <option value="28">28%</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginTop: '10px' }}>
+              <label className="form-label">Barcode</label>
+              <input className="form-input" value={editingProduct.barcode || ""} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Category</label>
+              <select className="form-select" value={editingProduct.category_id || ""} onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div className="form-group">
+                <label className="form-label">Price Type</label>
+                <select className="form-select" value={editingProduct.price_type || "exclusive"} onChange={e => setEditingProduct({...editingProduct, price_type: e.target.value})}>
+                  <option value="exclusive">Exclusive (+ GST)</option>
+                  <option value="inclusive">Inclusive (GST Included)</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Expiry Date 🗓️</label>
+              <input type="date" className="form-input" value={editingProduct.expiry_date || ""}
+                onChange={e => setEditingProduct({...editingProduct, expiry_date: e.target.value || null})}
+                style={{ colorScheme: 'light' }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '30px' }}>
+              <button className="btn-outline" onClick={() => setEditModalOpen(false)}>Cancel</button>
+              <button className="btn-primary" onClick={saveEdit}>Save Changes</button>
             </div>
           </div>
         </div>
       )}
+
+      <div className="admin-card" style={{ maxWidth: '100%' }}>
+         <div className="admin-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Inventory Records ({products.length})</span>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem', background: '#334155' }} onClick={printPriceList}>🖨️ Print Price List</button>
+              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={load}>Refresh Data</button>
+            </div>
+         </div>
+
+         <div className="admin-card-body" style={{ padding: '0' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                   <th style={{ width: '100px', paddingLeft: '25px' }}>Code/ID</th>
+                   <th>Item Description</th>
+                   <th>Barcode</th>
+                   <th>Rate (₹)</th>
+                   <th>Stock</th>
+                   <th>Unit</th>
+                   <th>Expiry</th>
+                   <th style={{ textAlign: 'right', paddingRight: '25px' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                 {products.map(p => {
+                    const today = new Date().toISOString().split('T')[0];
+                    const expired = p.expiry_date && p.expiry_date < today;
+                    const near = p.expiry_date && !expired && p.expiry_date <= new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
+                    return (
+                   <tr key={p.id}>
+                       <td style={{ paddingLeft: '25px', color: '#0284c7', fontWeight: 800 }}>{p.product_code || `#${p.id}`}</td>
+                       <td style={{ fontWeight: 600, color: expired ? '#ef4444' : 'inherit' }}>{p.name}{expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}</td>
+                       <td style={{ fontFamily: 'monospace' }}>{p.barcode || '-'}</td>
+                       <td style={{ fontWeight: 600, color: '#059669' }}>₹{p.price.toFixed(2)}</td>
+                       <td style={{ fontWeight: 600 }}>{p.quantity}</td>
+                       <td>{p.unit}</td>
+                       <td>
+                         {p.expiry_date ? (
+                           <span style={{
+                             fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                             background: expired ? '#ef444420' : near ? '#fef3c7' : '#dcfce7',
+                             color: expired ? '#ef4444' : near ? '#d97706' : '#16a34a',
+                             border: `1px solid ${expired ? '#fca5a5' : near ? '#fde68a' : '#86efac'}`
+                           }}>{p.expiry_date}</span>
+                         ) : <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>}
+                       </td>
+                       <td style={{ textAlign: 'right', paddingRight: '25px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                          <button onClick={() => handleEdit(p)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>Edit</button>
+                          <button onClick={() => handleDelete(p.id, p.name)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.85rem', color: '#dc2626', borderColor: '#fecaca', background: '#fef2f2' }}>Delete</button>
+                       </td>
+                    </tr>
+                    );
+                 })}
+                {products.length === 0 && (
+                  <tr>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '50px', color: '#94a3b8' }}>No records found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+         </div>
+      </div>
     </div>
   );
 };

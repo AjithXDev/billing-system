@@ -32,24 +32,37 @@ const catCount = db.prepare("SELECT COUNT(*) as count FROM categories").get();
 if (catCount.count === 0) {
   const insertCat = db.prepare("INSERT INTO categories (name, gst) VALUES (?, ?)");
   const defaultCats = [
-    { name: "General (0%)", gst: 0 },
-    { name: "Essential (5%)", gst: 5 },
-    { name: "Standard (12%)", gst: 12 },
-    { name: "Premium (18%)", gst: 18 },
-    { name: "Luxury (28%)", gst: 28 }
+    { name: "Grocery", gst: 0 },
+    { name: "Snacks & Biscuits", gst: 18 },
+    { name: "Soft Drinks", gst: 28 },
+    { name: "Dairy Products", gst: 5 },
+    { name: "Cosmetics", gst: 18 },
+    { name: "General", gst: 0 }
   ];
   for (const cat of defaultCats) {
     insertCat.run(cat.name, cat.gst);
   }
 }
 
+// 🟢 MIGRATION: Rename existing categories from "GST labels" to "Proper Names"
+try {
+  db.prepare("UPDATE categories SET name = 'Grocery & General' WHERE name = 'General (0%)'").run();
+  db.prepare("UPDATE categories SET name = 'Essential Food' WHERE name = 'Essential (5%)'").run();
+  db.prepare("UPDATE categories SET name = 'Standard Items' WHERE name = 'Standard (12%)'").run();
+  db.prepare("UPDATE categories SET name = 'Premium Snacks' WHERE name = 'Premium (18%)'").run();
+  db.prepare("UPDATE categories SET name = 'Luxury & Drinks' WHERE name = 'Luxury (28%)'").run();
+} catch (e) { }
 
-// 🟢 PRODUCTS TABLE (GST FROM CATEGORY LINK)
+
+// 🟢 PRODUCTS TABLE (GST FROM CATEGORY LINK + DIRECT GST)
 db.prepare(`
 CREATE TABLE IF NOT EXISTS products (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   category_id INTEGER,
+  gst_rate REAL DEFAULT 0,
+  product_code TEXT UNIQUE,
+  price_type TEXT DEFAULT 'exclusive',
   price REAL NOT NULL,
   cost_price REAL DEFAULT 0,
   quantity INTEGER DEFAULT 0,
@@ -66,7 +79,19 @@ try { db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run(); }
 try { db.prepare("ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT 0").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN unit TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN barcode TEXT").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN image_url TEXT").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN product_code TEXT").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN hsn_code TEXT").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN price_type TEXT DEFAULT 'exclusive'").run(); } catch (e) { }
+
+// Migration: If gst_rate is 0 and category_id exists, copy gst from categories
+try {
+  db.prepare(`
+    UPDATE products 
+    SET gst_rate = (SELECT gst FROM categories WHERE categories.id = products.category_id)
+    WHERE (gst_rate IS NULL OR gst_rate = 0) AND category_id IS NOT NULL
+  `).run();
+} catch (e) { console.error("Migration error:", e.message); }
 
 // 🟢 HELD BILLS TABLE (Hold/Resume Feature)
 db.prepare(`

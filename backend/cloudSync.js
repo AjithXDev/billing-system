@@ -56,7 +56,10 @@ async function syncToCloud(shopId, customSupabase = null) {
         price: p.price,
         cost_price: p.cost_price,
         quantity: p.quantity,
-        expiry_date: p.expiry_date
+        expiry_date: p.expiry_date,
+        gst_rate: p.gst_rate,
+        product_code: p.product_code,
+        price_type: p.price_type
       })));
       if (!error) {
         db.transaction((items) => {

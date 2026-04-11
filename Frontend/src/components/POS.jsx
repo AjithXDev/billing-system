@@ -188,7 +188,8 @@ const POS = () => {
         if (!p) return false;
         const pName = p.name ? String(p.name).toLowerCase() : "";
         const pBarcode = p.barcode ? String(p.barcode).trim().toLowerCase() : "";
-        return pName.includes(matchVal) || pBarcode === matchVal;
+        const pCode = p.product_code ? String(p.product_code).toLowerCase() : "";
+        return pName.includes(matchVal) || pBarcode === matchVal || pCode === matchVal;
       });
       setSuggestions(filtered);
       setSelectedSugIndex(0);
@@ -208,18 +209,32 @@ const POS = () => {
     }
 
     const updated = [...billItems];
-    const catGst = Number(product.category_gst || 0);
+    const catGst = Number(product.gst_rate || product.category_gst || 0);
     const price = Number(product.price || 0);
+    const quantity = 1;
+    const priceType = product.price_type || 'exclusive';
+
+    let total, gstAmt;
+    if (priceType === 'inclusive') {
+      total = price * quantity;
+      const taxable = total / (1 + catGst / 100);
+      gstAmt = total - taxable;
+    } else {
+      const taxable = price * quantity;
+      gstAmt = (taxable * catGst) / 100;
+      total = taxable + gstAmt;
+    }
 
     updated[index] = {
       ...updated[index],
       id: product.id,
       name: product.name || "",
       price,
-      qty: 1,
-      total: price,
+      price_type: priceType,
+      qty: quantity,
+      total: priceType === 'inclusive' ? total - gstAmt : price * quantity, 
       gstRate: catGst,
-      gstAmt: (price * catGst) / 100,
+      gstAmt: gstAmt,
       expiry_date: product.expiry_date || null
     };
 
@@ -253,9 +268,28 @@ const POS = () => {
   const updateQty = (idx, q) => {
     const updated = [...billItems];
     const newQty = parseFloat(q) || 0;
-    updated[idx] = { ...updated[idx], qty: newQty };
-    updated[idx].total = newQty * Number(updated[idx].price || 0);
-    updated[idx].gstAmt = (updated[idx].total * Number(updated[idx].gstRate || 0)) / 100;
+    const item = updated[idx];
+    const priceType = item.price_type || 'exclusive';
+    const rate = Number(item.gstRate || 0);
+    const price = Number(item.price || 0);
+
+    let total, gstAmt, taxable;
+    if (priceType === 'inclusive') {
+      total = price * newQty;
+      taxable = total / (1 + rate / 100);
+      gstAmt = total - taxable;
+    } else {
+      taxable = price * newQty;
+      gstAmt = (taxable * rate) / 100;
+      total = taxable + gstAmt;
+    }
+
+    updated[idx] = { 
+      ...item, 
+      qty: newQty, 
+      total: taxable, 
+      gstAmt: gstAmt 
+    };
     setBillItems(updated);
   };
 
@@ -378,7 +412,9 @@ const POS = () => {
                         <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
                           <td style={{ padding: "10px 0", fontWeight: "500" }}>
                             {item.name} <br />
-                            <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>₹{item.price} + {item.gstRate}% GST</span>
+                            <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                              ₹{item.price} ({item.price_type}) + {item.gstRate}% GST
+                            </span>
                           </td>
                           <td style={{ padding: "10px 0", textAlign: "center" }}>{item.qty}</td>
                           <td style={{ padding: "10px 0", textAlign: "right", fontWeight: "bold", color: "#0f172a" }}>₹{(item.total + item.gstAmt).toFixed(2)}</td>
@@ -598,19 +634,25 @@ const POS = () => {
                       onClick={() => selectProduct(p, idx)}
                       style={isExpired(p) ? { opacity: 0.5, pointerEvents: "none" } : {}}
                     >
-                      <span>
-                        {p.name}
-                        {isExpired(p) && <span style={{ fontSize: 10, color: "#ef4444", marginLeft: 5 }}>[EXPIRED]</span>}
-                      </span>
-                      <span>₹{p.price}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 700, fontSize: '13px' }}>
+                          {p.product_code && <span style={{ color: 'var(--primary)', marginRight: 6 }}>[{p.product_code}]</span>}
+                          {p.name}
+                          {isExpired(p) && <span style={{ fontSize: 10, color: "#ef4444", marginLeft: 5 }}>[EXPIRED]</span>}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>
+                          ₹{p.price} • Stock: {p.quantity} {p.unit}
+                        </span>
+                      </div>
+                      <div style={{ fontWeight: 700, color: 'var(--primary)' }}>₹{p.price}</div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <div className="pos-cell">
-              <input className="pos-input" value={item.price || ""} readOnly />
+            <div className="pos-cell" style={{ background: '#f8fafc', color: '#64748b' }}>
+              ₹{item.price || "0"}
             </div>
 
             <div className="pos-cell">
