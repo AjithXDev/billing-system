@@ -1,12 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const { v4: uuidv4 } = require('uuid');
 const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
-const { initSupabase, syncToCloud, logNotification } = require("./cloudSync");
 
 let mainWindow = null;
 
