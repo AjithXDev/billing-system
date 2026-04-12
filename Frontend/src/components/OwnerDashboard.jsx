@@ -115,6 +115,53 @@ export default function OwnerDashboard() {
           </div>
         </div>
 
+        {/* AI Consultant Box */}
+        <div className="modern-card" style={{ display: 'flex', flexDirection: 'column', background: 'linear-gradient(135deg, #0284c710 0%, #0284c705 100%)', border: '1px solid #0284c720' }}>
+           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 15, display: 'flex', alignItems: 'center', gap: 8, color: '#0284c7' }}>
+              <TrendingUp size={20} />
+              AI Business Consultant
+           </div>
+           <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 20 }}>Ask me anything about your today's sales, stock status, or top customers.</p>
+           
+           <div style={{ flex: 1, overflowY: 'auto', marginBottom: 15, fontSize: 13 }}>
+              {/* This could be more complex, but simple for now */}
+              <div style={{ background: 'white', padding: 12, borderRadius: 10, border: '1px solid #e2e8f0', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
+                 {stats?.aiResponse || "I am ready to help you optimize your business! Ask below:"}
+              </div>
+           </div>
+
+           <div style={{ display: 'flex', gap: 8 }}>
+              <input 
+                 onKeyDown={async (e) => {
+                    if (e.key === 'Enter') {
+                       const resp = await window.api.askAIConsultant(e.currentTarget.value);
+                       setStats(prev => ({ ...prev, aiResponse: resp }));
+                       e.currentTarget.value = "";
+                    }
+                 }}
+                 placeholder="Type & press Enter..." 
+                 style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, outline: 'none' }} 
+              />
+           </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+        {/* Peak Time Analysis */}
+        <div className="modern-card">
+           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📊 Peak Timing (Hourly)</div>
+           <div style={{ width: '100%', height: 200 }}>
+             <ResponsiveContainer width="100%" height="100%">
+               <BarChart data={stats?.peakHours || []} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                 <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                 <Tooltip />
+                 <Bar dataKey="bills" fill="var(--primary)" radius={[2, 2, 0, 0]} />
+               </BarChart>
+             </ResponsiveContainer>
+           </div>
+        </div>
+
         {/* Top Products */}
         <div className="modern-card">
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>

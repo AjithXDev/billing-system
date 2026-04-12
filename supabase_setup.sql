@@ -1,51 +1,56 @@
--- Run this in your Supabase SQL Editor to prepare your cloud database
+-- ═══ SUPABASE SETUP SCRIPT FOR SMART BILLING ═══
+-- Purpose: Syncs Local SQLite data to Supabase for Mobile Dashboard Access.
 
--- 1. Create Invoices table
+-- 1. Create Invoices Table (Detailed for analytics)
 CREATE TABLE IF NOT EXISTS public.invoices (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     shop_id TEXT NOT NULL,
     local_id INTEGER,
-    bill_no INTEGER,
-    bill_date TEXT,
+    bill_no TEXT,
     customer_name TEXT,
-    payment_mode TEXT,
+    customer_phone TEXT,
     total_amount NUMERIC,
-    items_json JSONB,
+    tax_amount NUMERIC,
+    payment_mode TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 2. Create Products table (Mirror for mobile inventory view)
+-- 2. Create Products Table
 CREATE TABLE IF NOT EXISTS public.products (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     shop_id TEXT NOT NULL,
     local_id INTEGER,
     name TEXT,
+    category_name TEXT,
     price NUMERIC,
-    cost_price NUMERIC,
-    quantity INTEGER,
+    quantity NUMERIC,
+    unit TEXT,
     expiry_date TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 3. Create Notifications table
+-- 3. Create Notifications (Alerts)
 CREATE TABLE IF NOT EXISTS public.notifications (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     shop_id TEXT NOT NULL,
-    type TEXT, -- 'EXPIRY' or 'LOW_STOCK'
+    type TEXT, -- E.g., 'EXPIRY', 'LOW_STOCK', 'DEAD_STOCK'
     message TEXT,
+    is_read BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 4. Enable RLS (Optional - for production, you should set policies)
+-- 4. Security Policies (Bypass RLS for simplicity during setup)
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
--- Note: Since we use the 'Anon' key for now, we create a public policy (for testing)
-DROP POLICY IF EXISTS "Public Access" ON public.invoices;
-CREATE POLICY "Public Access" ON public.invoices FOR ALL USING (true);
-DROP POLICY IF EXISTS "Public Access" ON public.products;
-CREATE POLICY "Public Access" ON public.products FOR ALL USING (true);
-DROP POLICY IF EXISTS "Public Access" ON public.notifications;
-CREATE POLICY "Public Access" ON public.notifications FOR ALL USING (true);
-  
+DROP POLICY IF EXISTS "Allow All" ON public.invoices;
+CREATE POLICY "Allow All" ON public.invoices FOR ALL USING (true);
+DROP POLICY IF EXISTS "Allow All" ON public.products;
+CREATE POLICY "Allow All" ON public.products FOR ALL USING (true);
+DROP POLICY IF EXISTS "Allow All" ON public.notifications;
+CREATE POLICY "Allow All" ON public.notifications FOR ALL USING (true);
+
+-- 5. Real-time Replication (Optional)
+-- alter publication supabase_realtime add table invoices;
+-- alter publication supabase_realtime add table products;

@@ -5,6 +5,38 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
+const { createClient } = require('@supabase/supabase-js');
+
+// ── CLOUD SYNC ENGINE ──
+let supabase = null;
+function initSupabase(url, key) {
+  if (!supabase && url && key) {
+    try { supabase = createClient(url, key); } catch(e) {}
+  }
+}
+async function syncToCloud(shopId) {
+  if (!supabase) return;
+  try {
+    const products = db.prepare("SELECT * FROM products WHERE is_synced = 0").all();
+    for (const p of products) {
+      const { error } = await supabase.from('products').upsert({ ...p, shop_id: shopId, is_synced: 1 });
+      if (!error) db.prepare("UPDATE products SET is_synced = 1 WHERE id = ?").run(p.id);
+    }
+    const invoices = db.prepare("SELECT * FROM invoices WHERE is_synced = 0").all();
+    for (const inv of invoices) {
+      const { error } = await supabase.from('invoices').upsert({ ...inv, shop_id: shopId, is_synced: 1 });
+      if (!error) {
+        db.prepare("UPDATE invoices SET is_synced = 1 WHERE id = ?").run(inv.id);
+        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(inv.id);
+        await supabase.from('invoice_items').upsert(items.map(i => ({ ...i, shop_id: shopId })));
+      }
+    }
+  } catch (e) {}
+}
+async function logNotification(shopId, type, message) {
+  if (!supabase) return;
+  try { await supabase.from('notifications').insert({ shop_id: shopId, type, message }); } catch(e) {}
+}
 
 let mainWindow = null;
 
@@ -72,11 +104,30 @@ function createWindow() {
                 const lowThreshold = settings.lowStockThreshold || 5;
                 const lowStock = db.prepare("SELECT name FROM products WHERE quantity > 0 AND quantity <= ?").all(lowThreshold);
 
+                // Dead Stock (No sales in 30 days)
+                const deadStock = db.prepare(`
+                  SELECT name FROM products 
+                  WHERE quantity > 0 AND id NOT IN (
+                    SELECT DISTINCT product_id FROM invoice_items ii 
+                    JOIN invoices inv ON ii.invoice_id = inv.id 
+                    WHERE inv.created_at >= datetime('now', '-30 days')
+                  )
+                `).all();
+
                 if (expired.length > 0) {
                     await logNotification(currentShopId, 'EXPIRY', `${expired.length} products expired!`);
+                    if (settings.whatsappAlerts) {
+                        sendMessage(settings.ownerPhone, `⚠️ ALERT: ${expired.length} products have expired in your shop.`);
+                    }
                 }
                 if (lowStock.length > 0) {
                     await logNotification(currentShopId, 'LOW_STOCK', `${lowStock.length} products running low!`);
+                    if (settings.whatsappAlerts && lowStock.length > 5) {
+                         sendMessage(settings.ownerPhone, `📉 LOW STOCK: ${lowStock.length} items are running low. Please restock!`);
+                    }
+                }
+                if (deadStock.length > 10) {
+                    await logNotification(currentShopId, 'DEAD_STOCK', `${deadStock.length} products haven't sold in 30 days.`);
                 }
             }
         }
@@ -180,6 +231,26 @@ ipcMain.handle("get-app-settings", (event) => {
     }
   } catch (e) {}
   return null;
+});
+
+ipcMain.handle("ask-ai-consultant", async (event, question) => {
+  const q = question.toLowerCase();
+  let answer = "I'm sorry, I don't have that data yet. Try asking about sales or stock.";
+
+  if (q.includes("sale") || q.includes("revenue")) {
+    const today = db.prepare(`SELECT SUM(total_amount) as t FROM invoices WHERE date(created_at)=date('now')`).get().t || 0;
+    answer = `Today's total sales: ₹${today}.`;
+  } else if (q.includes("best") || q.includes("top")) {
+    const top = db.prepare(`SELECT p.name, SUM(ii.quantity) as q FROM invoice_items ii JOIN products p ON ii.product_id=p.id GROUP BY p.id ORDER BY q DESC LIMIT 1`).get();
+    answer = top ? `Top product is ${top.name} (${top.q} sold).` : "No data.";
+  } else if (q.includes("stock") || q.includes("low")) {
+    const low = db.prepare(`SELECT COUNT(*) as c FROM products WHERE quantity <= 5`).get().c;
+    answer = `You have ${low} items on low stock. Check alerts!`;
+  } else if (q.includes("customer")) {
+    const top = db.prepare(`SELECT customer_name, SUM(total_amount) as t FROM invoices WHERE customer_name != '' GROUP BY customer_phone ORDER BY t DESC LIMIT 1`).get();
+    answer = top ? `Best customer: ${top.customer_name} (Lifetime ₹${top.t}).` : "No data.";
+  }
+  return answer;
 });
 
 ipcMain.handle("get-shop-id", () => {

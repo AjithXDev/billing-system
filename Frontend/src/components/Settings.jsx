@@ -197,14 +197,11 @@ export default function Settings() {
               </div>
            </div>
            <div style={{ background: '#fff', padding: 12, borderRadius: 16, border: '1px solid var(--border)' }}>
-              <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(JSON.stringify({
-                  shopId: cfg.shopId,
-                  masterKey: cfg.masterKey
-                }))}`} 
-                alt="Quick Link QR" 
-                style={{ width: 140, height: 140 }}
-              />
+               <img 
+                 src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(tunnelUrl || 'Waiting for tunnel...')}`} 
+                 alt="Quick Link QR" 
+                 style={{ width: 180, height: 180 }}
+               />
            </div>
         </div>
 

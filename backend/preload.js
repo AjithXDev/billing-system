@@ -37,4 +37,7 @@ contextBridge.exposeInMainWorld("api", {
   // Listen for QR code or status events pushed from main process
   onWhatsappQR:        (cb)           => ipcRenderer.on("whatsapp-qr",     (_e, qr)     => cb(qr)),
   onWhatsappStatus:    (cb)           => ipcRenderer.on("whatsapp-status",  (_e, status) => cb(status)),
+
+  // AI & Analytics
+  askAIConsultant:     (question)     => ipcRenderer.invoke("ask-ai-consultant", question),
 });

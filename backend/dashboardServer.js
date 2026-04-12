@@ -213,14 +213,26 @@ function startDashboardServer(mainWindow) {
         GROUP BY payment_mode ORDER BY cnt DESC
       `).all();
 
+      // Dead Stock (No sales in 60 days)
+      const deadStock = db.prepare(`
+        SELECT name, quantity FROM products
+        WHERE quantity > 0 AND id NOT IN (
+          SELECT DISTINCT product_id FROM invoice_items ii
+          JOIN invoices inv ON ii.invoice_id = inv.id
+          WHERE inv.created_at >= datetime('now', '-60 days')
+        )
+      `).all();
+
       res.json({
         totalProducts, totalCategories,
         todaySales, todayBills, weeklySales, monthlySales,
         expiredCount, nearExpiryCount, lowStockCount, outOfStock,
-        topProducts, dailySales, monthlySalesBreakdown,
+        topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })), 
+        dailySales, monthlySalesBreakdown,
         todayProfit, weeklyProfit, monthlyProfit,
         todayCost, weeklyCost, monthlyCost,
-        peakHours, paymentBreakdown
+        peakHours, paymentBreakdown,
+        deadStock
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -340,44 +352,56 @@ function startDashboardServer(mainWindow) {
   ══════════════════════════════════════════════════════ */
   expressApp.get("/api/analytics", (req, res) => {
     try {
-      // Peak hours (last 30 days)
+      // 1. Peak hours (last 30 days)
       const peakHours = db.prepare(`
         SELECT strftime('%H', created_at,'localtime') as hour,
                COUNT(*) as bills,
-               COALESCE(SUM(total_amount),0) as revenue
+               SUM(total_amount) as revenue
         FROM invoices
-        WHERE created_at>=datetime('now','-30 days')
+        WHERE created_at >= datetime('now', '-30 days')
         GROUP BY hour ORDER BY hour ASC
       `).all();
 
-      // Day of week analysis
-      const dayOfWeek = db.prepare(`
-        SELECT strftime('%w', created_at,'localtime') as dow,
-               COUNT(*) as bills,
-               COALESCE(SUM(total_amount),0) as revenue
-        FROM invoices
-        WHERE created_at>=datetime('now','-30 days')
-        GROUP BY dow ORDER BY dow ASC
-      `).all();
-
-      // Category revenue breakdown
+      // 2. Category revenue breakdown
       const categoryRevenue = db.prepare(`
-        SELECT c.name as category, COALESCE(SUM(ii.price*ii.quantity),0) as revenue, COUNT(DISTINCT ii.invoice_id) as orders
+        SELECT c.name as category, SUM(ii.price * ii.quantity) as revenue
         FROM invoice_items ii
-        JOIN products p ON ii.product_id=p.id
-        LEFT JOIN categories c ON p.category_id=c.id
-        JOIN invoices inv ON ii.invoice_id=inv.id
-        WHERE inv.created_at>=datetime('now','-30 days')
-        GROUP BY c.name ORDER BY revenue DESC LIMIT 10
+        JOIN products p ON ii.product_id = p.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        JOIN invoices inv ON ii.invoice_id = inv.id
+        WHERE inv.created_at >= datetime('now', '-30 days')
+        GROUP BY category ORDER BY revenue DESC
       `).all();
 
-      // Recently added products
-      const recentProducts = db.prepare(`
-        SELECT name, quantity, price, unit, created_at
-        FROM products ORDER BY created_at DESC LIMIT 5
+      // 3. Top 10 selling products (last 30 days)
+      const topSelling = db.prepare(`
+        SELECT p.name, SUM(ii.quantity) as total_sold, SUM(ii.price * ii.quantity) as total_revenue
+        FROM invoice_items ii
+        JOIN products p ON ii.product_id = p.id
+        JOIN invoices inv ON ii.invoice_id = inv.id
+        WHERE inv.created_at >= datetime('now', '-30 days')
+        GROUP BY p.id ORDER BY total_sold DESC LIMIT 10
       `).all();
 
-      res.json({ peakHours, dayOfWeek, categoryRevenue, recentProducts });
+      // 4. Customer behavior (Frequent buyers / High value)
+      const customerBehavior = db.prepare(`
+        SELECT customer_name, customer_phone, COUNT(*) as visit_count, SUM(total_amount) as lifetime_value
+        FROM invoices
+        WHERE customer_phone IS NOT NULL AND customer_phone != ''
+        GROUP BY customer_phone ORDER BY lifetime_value DESC LIMIT 10
+      `).all();
+
+      // 5. Dead Stock: Products with quantity > 0 but no sales in last 60 days
+      const deadStock = db.prepare(`
+        SELECT name, quantity, unit, price FROM products
+        WHERE quantity > 0 AND id NOT IN (
+          SELECT DISTINCT product_id FROM invoice_items ii
+          JOIN invoices inv ON ii.invoice_id = inv.id
+          WHERE inv.created_at >= datetime('now', '-60 days')
+        )
+      `).all();
+
+      res.json({ peakHours, categoryRevenue, topSelling, customerBehavior, deadStock });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -409,9 +433,9 @@ function startDashboardServer(mainWindow) {
 
   expressApp.post("/api/products", (req, res) => {
     try {
-      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url, image_data } = req.body;
-      db.prepare(`INSERT INTO products (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image_url || image_data || null
+      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image } = req.body;
+      db.prepare(`INSERT INTO products (name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null
       );
       res.json({ message: "Product added" });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -419,9 +443,9 @@ function startDashboardServer(mainWindow) {
 
   expressApp.put("/api/products/:id", (req, res) => {
     try {
-      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image_url } = req.body;
-      db.prepare(`UPDATE products SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image_url=? WHERE id=?`).run(
-        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image_url || null, req.params.id
+      const { name, category_id, price, cost_price, quantity, unit, barcode, expiry_date, image } = req.body;
+      db.prepare(`UPDATE products SET name=?, category_id=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=? WHERE id=?`).run(
+        name, category_id || null, price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, req.params.id
       );
       res.json({ message: "Product updated" });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -499,6 +523,40 @@ function startDashboardServer(mainWindow) {
 
   expressApp.delete("/api/held-bills/:id", (req, res) => {
     try { db.prepare("DELETE FROM held_bills WHERE id=?").run(req.params.id); res.json({ message: "Removed" }); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  /* ══════════════════════════════════════════════════════
+     API: AI CHATBOT (Business Insights)
+  ══════════════════════════════════════════════════════ */
+  expressApp.post("/api/ai/ask", (req, res) => {
+    try {
+      const { question } = req.body;
+      const q = question.toLowerCase();
+      let answer = "I'm sorry, I don't have that data yet.";
+
+      if (q.includes("sale") || q.includes("revenue")) {
+        const today = db.prepare(`SELECT SUM(total_amount) as t FROM invoices WHERE date(created_at)=date('now')`).get().t || 0;
+        answer = `Your total sales for today is ₹${today}.`;
+      } else if (q.includes("product") || q.includes("most sold")) {
+        const top = db.prepare(`
+          SELECT p.name, SUM(ii.quantity) as q FROM invoice_items ii JOIN products p ON ii.product_id=p.id GROUP BY p.id ORDER BY q DESC LIMIT 1
+        `).get();
+        answer = top ? `Your top selling product is ${top.name} with ${top.q} units sold.` : "No sales data found.";
+      } else if (q.includes("stock") || q.includes("low")) {
+        const low = db.prepare(`SELECT COUNT(*) as c FROM products WHERE quantity <= 5`).get().c;
+        answer = `You have ${low} products running low on stock. Check the inventory alerts!`;
+      } else if (q.includes("expiry") || q.includes("expired")) {
+        const exp = db.prepare(`SELECT COUNT(*) as c FROM products WHERE expiry_date < date('now')`).get().c;
+        answer = `${exp} products have already expired. Please remove them from the shelves.`;
+      } else if (q.includes("customer") || q.includes("buyer")) {
+        const top = db.prepare(`SELECT customer_name, SUM(total_amount) as t FROM invoices WHERE customer_name != '' GROUP BY customer_phone ORDER BY t DESC LIMIT 1`).get();
+        answer = top ? `Your most valuable customer is ${top.customer_name} with a lifetime spend of ₹${top.t}.` : "No customer data available.";
+      } else {
+        answer = "I can tell you about sales, top products, stock alerts, or your best customers!";
+      }
+
+      res.json({ answer });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   /* ── Start HTTP server ────────────────────────────── */

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS products (
   unit TEXT,
   barcode TEXT UNIQUE,
   expiry_date TEXT DEFAULT NULL,
+  image TEXT DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 `).run();
@@ -81,7 +82,6 @@ try { db.prepare("ALTER TABLE products ADD COLUMN unit TEXT").run(); } catch (e)
 try { db.prepare("ALTER TABLE products ADD COLUMN barcode TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 0").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN product_code TEXT").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN hsn_code TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN price_type TEXT DEFAULT 'exclusive'").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN image TEXT DEFAULT NULL").run(); } catch (e) { }
 
