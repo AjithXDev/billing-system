@@ -49,8 +49,14 @@ function inNdays(n) { return new Date(Date.now() + n * 86400000).toISOString().s
 /* ── Reconnection Logic & Tunnel Management ── */
 async function startTunnel(mainWindow) {
   const settings = getSettings();
-  const shopSlug = (settings.storeName || "iva-billing").toLowerCase().replace(/[^a-z0-9]/g, "-");
-  const subdomain = `${shopSlug}-owner-${Math.floor(1000 + Math.random() * 9000)}`;
+  // Remove words that localtunnel blocks (like billing, bank, pay)
+  const baseName = (settings.storeName || "mystore").toLowerCase().replace(/billing|invoice|pay/g, "app");
+  const shopSlug = baseName.replace(/[^a-z0-9]/g, "-");
+  
+  // Create a persistent, stable identifier so the QR code NEVER changes
+  const stableId = process.env.SHOP_ID || "store123";
+  const stableSuffix = stableId.replace(/[^a-zA-Z0-9]/g, "").slice(-6); 
+  const subdomain = `${shopSlug}-manager-${stableSuffix}`.toLowerCase();
 
   try {
     const localtunnel = require("localtunnel");

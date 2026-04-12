@@ -208,6 +208,18 @@ ipcMain.handle("whatsapp-status", async () => {
   return getStatus();
 });
 
+// 🟢 GET LOCAL IP FOR EXPO QR CODE
+ipcMain.handle("get-local-ip", () => {
+  const os = require('os');
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === "IPv4" && !iface.internal) return iface.address;
+    }
+  }
+  return "127.0.0.1";
+});
+
 // 🟢 GET DASHBOARD URL
 ipcMain.handle("get-dashboard-url", () => {
   return getTunnelURL();

@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("api", {
   getDashboardStats:   ()             => ipcRenderer.invoke("get-dashboard-stats"),
 
   // 🔥 Owner Mobile Dashboard URL & Cloud Sync
+  getLocalIp:          ()             => ipcRenderer.invoke("get-local-ip"),
   getDashboardUrl:     ()             => ipcRenderer.invoke("get-dashboard-url"),
   onTunnelReady:       (cb)           => ipcRenderer.on("tunnel-ready", (_e, data) => cb(data)),
   getShopId:           ()             => ipcRenderer.invoke("get-shop-id"),

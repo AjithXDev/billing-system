@@ -46,6 +46,7 @@ export default function Settings() {
   const [cfg, setCfg] = useState(DEFAULTS);
   const [saved, setSaved] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState("");
+  const [expoUrl, setExpoUrl] = useState("");
   const [showQR, setShowQR] = useState(false);
 
   useEffect(() => {
@@ -55,9 +56,12 @@ export default function Settings() {
     } catch (e) {}
 
     // Get Internet Tunnel URL (for anywhere access)
-    // First try if it's already generated
     window.api?.getDashboardUrl?.().then(url => {
       if (url) setTunnelUrl(url);
+    }).catch(() => {});
+
+    window.api?.getLocalIp?.().then(ip => {
+      if (ip) setExpoUrl(`exp://${ip}:8081`);
     }).catch(() => {});
 
     // Listen for completion
@@ -178,43 +182,6 @@ export default function Settings() {
           </div>
         </SettingRow>
 
-        <SectionTitle icon="☁️" title="Cloud Remote Sync" />
-        
-        <div style={{ padding: "16px 0", borderBottom: "1px solid var(--border)", display: 'flex', gap: 30, alignItems: 'center' }}>
-           <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", marginBottom: 4 }}>Mobile App Quick Link</div>
-              <p style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 6, lineHeight: 1.6 }}>
-                Scan this QR code from your **iVA SmartBill mobile app** to automatically connect this terminal to your phone. 
-                No manual entry required.
-              </p>
-              <div style={{ marginTop: 15, display: 'flex', gap: 10 }}>
-                 <div style={{ padding: '4px 12px', background: 'var(--surface-3)', borderRadius: 20, fontSize: 10, fontWeight: 700 }}>
-                    ID: {cfg.shopId || '...'}
-                 </div>
-                 <div style={{ padding: '4px 12px', background: '#dcfce7', color: '#166534', borderRadius: 20, fontSize: 10, fontWeight: 700 }}>
-                    SYNC ENABLED
-                 </div>
-              </div>
-           </div>
-           <div style={{ background: '#fff', padding: 12, borderRadius: 16, border: '1px solid var(--border)' }}>
-               <img 
-                 src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(tunnelUrl || 'Waiting for tunnel...')}`} 
-                 alt="Quick Link QR" 
-                 style={{ width: 180, height: 180 }}
-               />
-           </div>
-        </div>
-
-        <SettingRow label="Master Access Key">
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <input style={{ ...inputStyle, fontFamily: "monospace" }} type="text" value={cfg.masterKey} onChange={e => set("masterKey", e.target.value)} placeholder="Key for mobile login" />
-            <span style={{ fontSize: 10, color: "var(--text-4)" }}>Required to unlock your dashboard on mobile. Change this for security.</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Background Auto-Sync">
-          <input type="checkbox" checked={cfg.isCloudEnabled} onChange={e => set("isCloudEnabled", e.target.checked)} />
-        </SettingRow>
 
         {/* ── ABOUT BRAND ── */}
         <SectionTitle icon="ℹ️" title="About Software" />
