@@ -165,4 +165,16 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 `).run();
 
 
+// 🟢 NOTIFICATIONS TABLE (Owner Mobile Alerts)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  title TEXT,
+  message TEXT NOT NULL,
+  is_read INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
 module.exports = db;

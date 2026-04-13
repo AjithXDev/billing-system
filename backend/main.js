@@ -93,17 +93,55 @@ function createWindow() {
         const key = settings.supabaseKey || process.env.SUPABASE_KEY;
         const currentShopId = process.env.SHOP_ID || 'billing-shop';
 
+        // ── Local Notification Alerts (always run, independent of cloud) ──
+        const today = new Date().toISOString().split('T')[0];
+        const lowThreshold = settings.lowStockThreshold || 5;
+
+        const expired = db.prepare("SELECT name FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ?").all(today);
+        const lowStock = db.prepare("SELECT name FROM products WHERE quantity > 0 AND quantity <= ?").all(lowThreshold);
+        const outOfStock = db.prepare("SELECT name FROM products WHERE quantity <= 0").all();
+
+        // Check if we already sent notifications in the last hour to avoid spamming
+        const recentNotif = db.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE created_at >= datetime('now', '-1 hour')").get().cnt;
+
+        if (recentNotif === 0) {
+          // Insert local notifications
+          const insertNotif = db.prepare("INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)");
+
+          if (expired.length > 0) {
+            const names = expired.slice(0, 5).map(p => p.name).join(', ');
+            insertNotif.run('EXPIRY', `${expired.length} Products Expired!`, `⚠️ ${names}${expired.length > 5 ? ` and ${expired.length - 5} more...` : ''}`);
+          }
+          if (lowStock.length > 0) {
+            const names = lowStock.slice(0, 5).map(p => p.name).join(', ');
+            insertNotif.run('LOW_STOCK', `${lowStock.length} Products Low Stock`, `📉 ${names}${lowStock.length > 5 ? ` and ${lowStock.length - 5} more...` : ''}`);
+          }
+          if (outOfStock.length > 0) {
+            const names = outOfStock.slice(0, 5).map(p => p.name).join(', ');
+            insertNotif.run('OUT_OF_STOCK', `${outOfStock.length} Products Out of Stock!`, `🚫 ${names}${outOfStock.length > 5 ? ` and ${outOfStock.length - 5} more...` : ''}`);
+          }
+
+          // WhatsApp alerts to owner (if configured)
+          if (settings.whatsappAlerts && settings.ownerPhone) {
+            if (expired.length > 0) {
+              sendMessage(settings.ownerPhone, `⚠️ EXPIRY ALERT: ${expired.length} products have expired in your shop. Please remove them immediately!`);
+            }
+            if (outOfStock.length > 0) {
+              sendMessage(settings.ownerPhone, `🚫 OUT OF STOCK: ${outOfStock.length} products are out of stock. Restock urgently!`);
+            }
+            if (lowStock.length > 5) {
+              sendMessage(settings.ownerPhone, `📉 LOW STOCK: ${lowStock.length} items are running low. Please restock!`);
+            }
+          }
+        }
+
+        // ── Cloud Sync ──
         if (url && key && url.startsWith('http')) {
             initSupabase(url, key);
             await syncToCloud(currentShopId);
 
             // Check for inventory alerts and log to Cloud
             if (settings.isCloudEnabled !== false) {
-                const today = new Date().toISOString().split('T')[0];
-                const expired = db.prepare("SELECT name FROM products WHERE expiry_date < ?").all(today);
-                const lowThreshold = settings.lowStockThreshold || 5;
-                const lowStock = db.prepare("SELECT name FROM products WHERE quantity > 0 AND quantity <= ?").all(lowThreshold);
-
                 // Dead Stock (No sales in 30 days)
                 const deadStock = db.prepare(`
                   SELECT name FROM products 
@@ -116,15 +154,12 @@ function createWindow() {
 
                 if (expired.length > 0) {
                     await logNotification(currentShopId, 'EXPIRY', `${expired.length} products expired!`);
-                    if (settings.whatsappAlerts) {
-                        sendMessage(settings.ownerPhone, `⚠️ ALERT: ${expired.length} products have expired in your shop.`);
-                    }
                 }
                 if (lowStock.length > 0) {
                     await logNotification(currentShopId, 'LOW_STOCK', `${lowStock.length} products running low!`);
-                    if (settings.whatsappAlerts && lowStock.length > 5) {
-                         sendMessage(settings.ownerPhone, `📉 LOW STOCK: ${lowStock.length} items are running low. Please restock!`);
-                    }
+                }
+                if (outOfStock.length > 0) {
+                    await logNotification(currentShopId, 'OUT_OF_STOCK', `${outOfStock.length} products out of stock!`);
                 }
                 if (deadStock.length > 10) {
                     await logNotification(currentShopId, 'DEAD_STOCK', `${deadStock.length} products haven't sold in 30 days.`);
@@ -273,6 +308,36 @@ ipcMain.handle("get-sync-status", () => {
   const pendingInvoices = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE is_synced = 0").get().cnt;
   const pendingProducts = db.prepare("SELECT COUNT(*) as cnt FROM products WHERE is_synced = 0").get().cnt;
   return { pending: pendingInvoices + pendingProducts };
+});
+
+// ============================================================
+// 🔔 NOTIFICATION HANDLERS (Owner Alerts)
+// ============================================================
+
+ipcMain.handle("get-notifications", async (event, opts) => {
+  const limit = opts?.limit || 50;
+  const unreadOnly = opts?.unreadOnly || false;
+  let query = "SELECT * FROM notifications";
+  if (unreadOnly) query += " WHERE is_read = 0";
+  query += " ORDER BY created_at DESC LIMIT ?";
+  const notifications = db.prepare(query).all(limit);
+  const unreadCount = db.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE is_read = 0").get().cnt;
+  return { notifications, unreadCount };
+});
+
+ipcMain.handle("mark-notification-read", async (event, id) => {
+  db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ?").run(id);
+  return { message: "Marked as read" };
+});
+
+ipcMain.handle("mark-all-notif-read", async () => {
+  db.prepare("UPDATE notifications SET is_read = 1 WHERE is_read = 0").run();
+  return { message: "All marked as read" };
+});
+
+ipcMain.handle("delete-notification", async (event, id) => {
+  db.prepare("DELETE FROM notifications WHERE id = ?").run(id);
+  return { message: "Notification deleted" };
 });
 
 

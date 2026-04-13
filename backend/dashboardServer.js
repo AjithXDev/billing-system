@@ -565,6 +565,44 @@ function startDashboardServer(mainWindow) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  /* ══════════════════════════════════════════════════════
+     API: Notifications (Owner Mobile Alerts)
+  ══════════════════════════════════════════════════════ */
+  expressApp.get("/api/notifications", (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const unreadOnly = req.query.unread === 'true';
+      
+      let query = "SELECT * FROM notifications";
+      if (unreadOnly) query += " WHERE is_read = 0";
+      query += " ORDER BY created_at DESC LIMIT ?";
+      
+      const notifications = db.prepare(query).all(limit);
+      const unreadCount = db.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE is_read = 0").get().cnt;
+      
+      res.json({ notifications, unreadCount });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/notifications/read", (req, res) => {
+    try {
+      const { id } = req.body;
+      if (id) {
+        db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ?").run(id);
+      } else {
+        db.prepare("UPDATE notifications SET is_read = 1 WHERE is_read = 0").run();
+      }
+      res.json({ message: "Marked as read" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/notifications/:id", (req, res) => {
+    try {
+      db.prepare("DELETE FROM notifications WHERE id = ?").run(req.params.id);
+      res.json({ message: "Notification deleted" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   /* ── Start HTTP server ────────────────────────────── */
   server = http.createServer(expressApp);
   server.listen(PORT, "0.0.0.0", () => {

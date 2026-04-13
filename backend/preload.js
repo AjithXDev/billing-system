@@ -41,4 +41,11 @@ contextBridge.exposeInMainWorld("api", {
 
   // AI & Analytics
   askAIConsultant:     (question)     => ipcRenderer.invoke("ask-ai-consultant", question),
+
+  // 🔔 Notifications (Owner Alerts)
+  getNotifications:    (opts)         => ipcRenderer.invoke("get-notifications", opts),
+  markNotificationRead:(id)           => ipcRenderer.invoke("mark-notification-read", id),
+  markAllNotifRead:    ()             => ipcRenderer.invoke("mark-all-notif-read"),
+  deleteNotification:  (id)           => ipcRenderer.invoke("delete-notification", id),
+  getSyncStatus:       ()             => ipcRenderer.invoke("get-sync-status"),
 });

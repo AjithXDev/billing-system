@@ -425,6 +425,57 @@
     /* ── Profit color helpers ── */
     .profit-positive { color: var(--green); }
     .profit-negative { color: var(--red); }
+
+    /* ── Notification Items ── */
+    .notif-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .notif-header .section-title { margin: 0; }
+    .notif-mark-all {
+      background: none; border: 1px solid var(--border-2); color: var(--text-3);
+      font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
+      cursor: pointer; font-family: var(--font);
+    }
+    .notif-mark-all:active { background: var(--bg-card-2); }
+    .notif-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 14px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 8px;
+      position: relative;
+      transition: opacity 0.3s;
+    }
+    .notif-item.unread { border-left: 3px solid var(--accent); }
+    .notif-item .notif-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .notif-item .notif-body { flex: 1; min-width: 0; }
+    .notif-item .notif-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .notif-item .notif-msg { font-size: 11px; color: var(--text-3); line-height: 1.4; }
+    .notif-item .notif-time { font-size: 9px; color: var(--text-4); margin-top: 4px; font-weight: 500; }
+    .notif-item .notif-dismiss {
+      background: none; border: none; color: var(--text-4); cursor: pointer;
+      font-size: 16px; padding: 0 4px; line-height: 1;
+    }
+    .notif-item .notif-dismiss:hover { color: var(--red); }
+    .notif-badge-count {
+      position: absolute; top: -4px; right: -4px;
+      background: var(--red); color: white;
+      font-size: 9px; font-weight: 800;
+      min-width: 16px; height: 16px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 4px;
+      border: 2px solid var(--bg);
+    }
+    .header-bell {
+      position: relative; cursor: pointer;
+      background: none; border: none; color: var(--text-2);
+      padding: 4px;
+    }
+    .header-bell:active { opacity: 0.7; }
   </style>
 </head>
 <body>
@@ -461,8 +512,14 @@
   <!-- Header -->
   <header class="app-header">
     <div class="brand">iVA <span>CLOUD</span></div>
-    <div id="status-badge" class="status-badge">
-      <span class="dot"></span> Live
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="header-bell" onclick="switchTab('alerts')" title="Notifications">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span id="notif-badge" class="notif-badge-count" style="display:none;">0</span>
+      </button>
+      <div id="status-badge" class="status-badge">
+        <span class="dot"></span> Live
+      </div>
     </div>
   </header>
 
@@ -559,6 +616,15 @@
   <div id="tab-alerts" class="tab-page">
     <h1 class="page-title">Alerts</h1>
     <p class="page-sub">Stock & Expiry Warnings</p>
+
+    <!-- 🔔 Recent Notifications -->
+    <div id="notif-section" style="margin-bottom:20px;">
+      <div class="notif-header">
+        <div class="section-title">🔔 Recent Notifications</div>
+        <button class="notif-mark-all" onclick="markAllRead()">Mark all read</button>
+      </div>
+      <div id="notif-list"></div>
+    </div>
 
     <div class="metrics-grid">
       <div class="metric-card">
@@ -772,12 +838,13 @@ async function loadAllData() {
   indicator.classList.add("show");
 
   try {
-    const [stats, expiry, stock, invoices, analytics] = await Promise.all([
+    const [stats, expiry, stock, invoices, analytics, notifs] = await Promise.all([
       apiFetch("/api/stats"),
       apiFetch("/api/expiry"),
       apiFetch("/api/stock"),
       apiFetch("/api/invoices"),
       apiFetch("/api/analytics"),
+      apiFetch("/api/notifications?limit=20"),
     ]);
 
     if (stats) renderOverview(stats);
@@ -785,6 +852,7 @@ async function loadAllData() {
     if (stock) renderStock(stock);
     if (invoices) renderInvoices(invoices);
     if (analytics) renderAnalytics(analytics);
+    if (notifs) renderNotifications(notifs);
     if (stats) statsData = stats;
 
     // Update time
@@ -1111,6 +1179,91 @@ async function askAI() {
 document.getElementById("chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") askAI();
 });
+
+/* ══════════════════════════════════════════════════════
+   NOTIFICATIONS
+══════════════════════════════════════════════════════ */
+function renderNotifications(data) {
+  const badge = document.getElementById("notif-badge");
+  const unread = data.unreadCount || 0;
+  if (unread > 0) {
+    badge.textContent = unread > 99 ? '99+' : unread;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  const el = document.getElementById("notif-list");
+  const notifs = data.notifications || [];
+  if (notifs.length === 0) {
+    el.innerHTML = '<div class="empty-state" style="padding:16px;"><div class="msg" style="font-size:12px;">✅ No notifications</div></div>';
+    return;
+  }
+
+  const iconMap = {
+    'EXPIRY': { icon: '⚠️', bg: 'var(--amber-bg)', color: 'var(--amber)' },
+    'LOW_STOCK': { icon: '📉', bg: 'var(--amber-bg)', color: 'var(--amber)' },
+    'OUT_OF_STOCK': { icon: '🚫', bg: 'var(--red-bg)', color: 'var(--red)' },
+    'DEAD_STOCK': { icon: '💤', bg: 'var(--cyan-bg)', color: 'var(--cyan)' },
+  };
+
+  el.innerHTML = notifs.map(n => {
+    const meta = iconMap[n.type] || { icon: '🔔', bg: 'var(--accent-glow)', color: 'var(--accent)' };
+    const isUnread = !n.is_read;
+    const timeAgo = getTimeAgo(n.created_at);
+    return `
+      <div class="notif-item ${isUnread ? 'unread' : ''}" id="notif-${n.id}">
+        <div class="notif-icon" style="background:${meta.bg};">${meta.icon}</div>
+        <div class="notif-body">
+          <div class="notif-title" style="color:${meta.color};">${esc(n.title || n.type)}</div>
+          <div class="notif-msg">${esc(n.message)}</div>
+          <div class="notif-time">${timeAgo}</div>
+        </div>
+        <button class="notif-dismiss" onclick="dismissNotif(${n.id})" title="Dismiss">×</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function getTimeAgo(dateStr) {
+  const now = new Date();
+  const then = new Date(dateStr);
+  const diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return 'Just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+async function dismissNotif(id) {
+  const el = document.getElementById('notif-' + id);
+  if (el) el.style.opacity = '0';
+  try {
+    await fetch(`${API}/api/notifications/${id}`, { method: 'DELETE' });
+    setTimeout(() => { if (el) el.remove(); }, 300);
+    // Refresh badge count
+    const data = await apiFetch('/api/notifications?limit=1');
+    if (data) {
+      const badge = document.getElementById('notif-badge');
+      const unread = data.unreadCount || 0;
+      badge.textContent = unread > 99 ? '99+' : unread;
+      badge.style.display = unread > 0 ? 'flex' : 'none';
+    }
+  } catch(e) {}
+}
+
+async function markAllRead() {
+  try {
+    await fetch(`${API}/api/notifications/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    document.querySelectorAll('.notif-item.unread').forEach(el => el.classList.remove('unread'));
+    const badge = document.getElementById('notif-badge');
+    badge.style.display = 'none';
+  } catch(e) {}
+}
 
 /* ══════════════════════════════════════════════════════
    UTILITIES

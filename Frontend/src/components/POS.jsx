@@ -189,11 +189,22 @@ const POS = () => {
     alert(`✅ Bill held for "${label}". You can resume it anytime.`);
   };
 
+  /* ── Get available stock for a product (accounting for items already in the cart) ── */
+  const getProductStock = (productId) => {
+    const product = allProducts.find(p => p.id === productId);
+    return product ? Number(product.quantity || 0) : 0;
+  };
+
   /* ── Add Product from Grid ── */
   const addProductToCart = (product) => {
     if (!product) return;
     if (isExpired(product)) {
       alert(`🚫 "${product.name}" is EXPIRED (${product.expiry_date})!\nThis product cannot be added to billing.`);
+      return;
+    }
+    const availableStock = Number(product.quantity || 0);
+    if (availableStock <= 0) {
+      alert(`🚫 "${product.name}" is OUT OF STOCK!\nCannot add to billing.`);
       return;
     }
 
@@ -203,7 +214,12 @@ const POS = () => {
 
     const existingIdx = billItems.findIndex(i => i.id === product.id);
     if (existingIdx >= 0) {
-      updateQty(existingIdx, Number(billItems[existingIdx].qty || 0) + 1);
+      const currentQty = Number(billItems[existingIdx].qty || 0);
+      if (currentQty >= availableStock) {
+        alert(`⚠️ Stock limit reached!\n"${product.name}" has only ${availableStock} in stock.`);
+        return;
+      }
+      updateQty(existingIdx, currentQty + 1);
     } else {
       let total, gstAmt;
       const quantity = 1;
@@ -228,7 +244,8 @@ const POS = () => {
         gstRate: catGst,
         gstAmt,
         expiry_date: product.expiry_date || null,
-        image: product.image || null
+        image: product.image || null,
+        maxStock: availableStock
       };
 
       const currentValid = billItems.filter(i => i.id);
@@ -281,13 +298,19 @@ const POS = () => {
     }
   };
 
-  /* ── Select product (with expiry guard) ── */
+  /* ── Select product (with expiry guard + stock check) ── */
   const selectProduct = (product, index) => {
     if (!product) return;
 
     // 🔥 EXPIRY BLOCK
     if (isExpired(product)) {
       alert(`🚫 "${product.name}" is EXPIRED (${product.expiry_date})!\nThis product cannot be added to billing.`);
+      return;
+    }
+
+    const availableStock = Number(product.quantity || 0);
+    if (availableStock <= 0) {
+      alert(`🚫 "${product.name}" is OUT OF STOCK!\nCannot add to billing.`);
       return;
     }
 
@@ -318,12 +341,12 @@ const POS = () => {
       total: priceType === 'inclusive' ? total - gstAmt : price * quantity, 
       gstRate: catGst,
       gstAmt: gstAmt,
-      expiry_date: product.expiry_date || null
+      expiry_date: product.expiry_date || null,
+      maxStock: availableStock
     };
 
     setBillItems(updated);
     setSuggestions([]);
-    setTimeout(() => inputRefs.current[index + "_qty"]?.focus(), 10);
   };
 
   const addNewRow = () => {
@@ -372,8 +395,17 @@ const POS = () => {
 
   const updateQty = (idx, q) => {
     const updated = [...billItems];
-    const newQty = parseFloat(q) || 0;
+    let newQty = parseFloat(q) || 0;
     const item = updated[idx];
+
+    // 🔥 Stock limit enforcement
+    const maxStock = item.maxStock || getProductStock(item.id);
+    if (newQty > maxStock) {
+      newQty = maxStock;
+      // Brief visual feedback — we cap at max
+    }
+    if (newQty < 0) newQty = 0;
+
     const priceType = item.price_type || 'exclusive';
     const rate = Number(item.gstRate || 0);
     const price = Number(item.price || 0);
@@ -402,7 +434,8 @@ const POS = () => {
       cgstRate,
       sgstRate,
       cgstAmt,
-      sgstAmt
+      sgstAmt,
+      maxStock: maxStock
     };
     setBillItems(updated);
   };
@@ -814,18 +847,23 @@ const POS = () => {
           {billingMode === 'photo' ? (
             /* PHOTO GRID */
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "20px", overflowY: "auto", paddingBottom: "30px", alignContent: "flex-start" }}>
-              {filteredProducts.map(p => (
+              {filteredProducts.map(p => {
+              const isOutOfStock = Number(p.quantity || 0) <= 0;
+              const isLowStock = !isOutOfStock && Number(p.quantity || 0) <= 5;
+              const isDisabled = isExpired(p) || isOutOfStock;
+              return (
                 <div 
                   key={p.id} 
                   style={{
                     background: "white",
                     borderRadius: "var(--r-lg)",
-                    border: "1px solid var(--border)",
+                    border: `1px solid ${isOutOfStock ? '#ef444440' : isLowStock ? '#f59e0b40' : 'var(--border)'}`,
                     overflow: "hidden",
                     display: "flex",
                     flexDirection: "column",
                     boxShadow: "var(--shadow-sm)",
-                    opacity: isExpired(p) ? 0.5 : 1
+                    opacity: isDisabled ? 0.5 : 1,
+                    transition: "all 0.2s ease"
                   }}
                 >
                   <div style={{ height: "140px", background: "#f8fafc", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "1px solid var(--border)" }}>
@@ -839,26 +877,42 @@ const POS = () => {
                         EXPIRED
                       </div>
                     )}
+                    {isOutOfStock && !isExpired(p) && (
+                      <div style={{ position: "absolute", top: 10, right: 10, background: "#ef4444", color: "white", fontSize: "10px", fontWeight: "bold", padding: "2px 6px", borderRadius: "10px" }}>
+                        OUT OF STOCK
+                      </div>
+                    )}
+                    {isLowStock && (
+                      <div style={{ position: "absolute", top: 10, right: 10, background: "#f59e0b", color: "white", fontSize: "10px", fontWeight: "bold", padding: "2px 6px", borderRadius: "10px" }}>
+                        LOW STOCK
+                      </div>
+                    )}
                   </div>
                   <div style={{ padding: "15px", display: "flex", flexDirection: "column", flex: 1, justifyContent: "space-between" }}>
                     <div>
                       <div style={{ fontWeight: "600", fontSize: "14px", color: "var(--text-1)", marginBottom: "4px", lineHeight: "1.3" }}>{p.name}</div>
-                      <div style={{ fontSize: "11px", color: "var(--text-3)", marginBottom: "10px" }}>Stock: {p.quantity} {p.unit}</div>
+                      <div style={{ fontSize: "11px", color: isOutOfStock ? '#ef4444' : isLowStock ? '#f59e0b' : 'var(--text-3)', fontWeight: isOutOfStock || isLowStock ? 600 : 400, marginBottom: "10px" }}>
+                        Stock: {p.quantity} {p.unit}
+                      </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <div style={{ fontWeight: "700", color: "var(--primary)", fontSize: "15px" }}>₹{p.price}</div>
                       <button 
                         onClick={() => addProductToCart(p)}
+                        disabled={isDisabled}
                         style={{
-                          background: "var(--primary)", color: "white", border: "none",
+                          background: isDisabled ? '#94a3b8' : 'var(--primary)', color: "white", border: "none",
                           width: "32px", height: "32px", borderRadius: "50%",
-                          fontSize: "20px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer"
+                          fontSize: "20px", display: "flex", alignItems: "center", justifyContent: "center", 
+                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.15s ease'
                         }}
                       >+</button>
                     </div>
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           ) : (
             /* TALLY LIST VIEW */
@@ -921,16 +975,24 @@ const POS = () => {
                     <div className="pos-cell" style={{ color: "var(--text-3)" }}>{item.price ? `₹${item.price}` : ""}</div>
                     
                     <div className="pos-cell">
-                      <input 
-                        ref={el => inputRefs.current[`${idx}_qty`] = el}
-                        className="pos-input"
-                        type="number"
-                        placeholder="0"
-                        value={item.qty || ""}
-                        onChange={(e) => updateQty(idx, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(e, idx, "qty")}
-                        disabled={!item.id}
-                      />
+                      {item.id ? (
+                        <div className="qty-stepper">
+                          <button 
+                            className="qty-btn qty-minus"
+                            onClick={() => updateQty(idx, (item.qty || 0) - 1)}
+                            disabled={!item.qty || item.qty <= 0}
+                          >–</button>
+                          <span className="qty-display">{item.qty || 0}</span>
+                          <button 
+                            className="qty-btn qty-plus"
+                            onClick={() => updateQty(idx, (item.qty || 0) + 1)}
+                            disabled={item.qty >= (item.maxStock || getProductStock(item.id))}
+                          >+</button>
+                          {item.id && <span className="qty-stock-hint">/{item.maxStock || getProductStock(item.id)}</span>}
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--text-4)', fontSize: 12 }}>—</span>
+                      )}
                     </div>
 
                     <div className="pos-cell" style={{ color: "var(--text-4)" }}>{item.id ? `${item.gstRate}%` : "0"}</div>
@@ -991,7 +1053,10 @@ const POS = () => {
 
             {/* Cart Items List */}
             <div style={{ flex: 1, overflowY: "auto", padding: "15px", display: "flex", flexDirection: "column", gap: "15px" }}>
-              {billItems.filter(i => i.id).map((item, idx) => (
+              {billItems.filter(i => i.id).map((item, idx) => {
+                const stock = item.maxStock || getProductStock(item.id);
+                const atMax = item.qty >= stock;
+                return (
                 <div key={item.tempId} style={{ display: "flex", gap: "12px", background: "var(--surface-2)", padding: "10px", borderRadius: "var(--r-md)" }}>
                   <div style={{ width: "50px", height: "50px", borderRadius: "6px", overflow: "hidden", background: "var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                      {item.image ? (
@@ -1003,23 +1068,34 @@ const POS = () => {
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                      <div style={{ fontWeight: "600", fontSize: "13.5px", color: "var(--text-1)", lineHeight: "1.2" }}>{item.name}</div>
                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", alignItems: "center" }}>
-                        <div style={{ fontSize: "12px", color: "var(--text-3)" }}>
-                           ₹{item.price} x <input 
-                             type="number" 
-                             value={item.qty} 
-                             onChange={(e) => updateQty(idx, e.target.value)} 
-                             style={{ width: "40px", padding: "2px 4px", fontSize: "12px", border: "1px solid var(--border)", borderRadius: "4px", textAlign: "center" }} 
-                           />
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                           <span style={{ fontSize: "12px", color: "var(--text-3)" }}>₹{item.price}</span>
+                           <div className="cart-qty-stepper">
+                             <button
+                               className="cart-qty-btn"
+                               onClick={() => updateQty(idx, (item.qty || 0) - 1)}
+                               disabled={!item.qty || item.qty <= 0}
+                             >–</button>
+                             <span className="cart-qty-val">{item.qty}</span>
+                             <button
+                               className="cart-qty-btn"
+                               onClick={() => updateQty(idx, (item.qty || 0) + 1)}
+                               disabled={atMax}
+                               title={atMax ? `Max stock: ${stock}` : ''}
+                             >+</button>
+                           </div>
                         </div>
                         <div style={{ fontWeight: "700", fontSize: "13px", color: "var(--text-1)" }}>₹{(item.total + item.gstAmt).toFixed(2)}</div>
                      </div>
+                     {atMax && <div style={{ fontSize: "10px", color: "#f59e0b", fontWeight: 600, marginTop: 2 }}>⚠ Max stock ({stock})</div>}
                   </div>
                   <button 
                     onClick={() => removeRow(idx)}
                     style={{ width: "24px", height: "24px", borderRadius: "50%", background: "#ef444415", color: "#ef4444", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", alignSelf: "center", fontSize: "14px" }}
                   >×</button>
                 </div>
-              ))}
+              );
+              })}
               {billItems.filter(i => i.id).length === 0 && (
                 <div style={{ textAlign: "center", color: "var(--text-4)", marginTop: "40px", fontSize: "14px" }}>
                    <div style={{ fontSize: "40px", marginBottom: "10px" }}>🛒</div>
