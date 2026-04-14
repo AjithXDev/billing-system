@@ -86,7 +86,7 @@ function HeldBillsPanel({ onResume, onClose }) {
 
 /* ─────────────────── Main POS Component ────────────── */
 const POS = () => {
-  const emptyRow = () => ({ tempId: Date.now() + Math.random(), name: "", price: 0, qty: 0, total: 0, gstRate: 0, gstAmt: 0 });
+  const emptyRow = () => ({ tempId: Date.now() + Math.random(), name: "", price: 0, qty: 0, total: 0, gstRate: 0, gstAmt: 0, discountPercent: 0, discountAmt: 0 });
 
   const [billItems, setBillItems] = useState([emptyRow()]);
   const [currentRow, setCurrentRow] = useState(0);
@@ -104,6 +104,7 @@ const POS = () => {
   const [heldCount, setHeldCount] = useState(0);
   const [settings, setSettings] = useState({ storeName: "iVA BILLING", storeAddress: "123 Business Road...", storePhone: "+91 90000 00000", gstNumber: "" });
   const [syncPending, setSyncPending] = useState(0);
+  const [activeOffers, setActiveOffers] = useState([]);
   
   // ── NEW TERMINAL STATES ──
   const [terminalActive, setTerminalActive] = useState(false);
@@ -147,23 +148,56 @@ const POS = () => {
     } catch (e) {}
   };
 
-  /* ── Load products & held bill count ── */
+  /* ── Load products, held bills, offers ── */
   useEffect(() => {
-    if (window.api?.getProductsFull) {
-      window.api.getProductsFull()
-        .then(data => setAllProducts(Array.isArray(data) ? data : []))
-        .catch(() => setAllProducts([]));
-    }
-    refreshHeldCount();
-    loadSettings();
+    const fetchData = async () => {
+      if (window.api?.getProductsFull) {
+        try {
+          const prods = await window.api.getProductsFull();
+          setAllProducts(Array.isArray(prods) ? prods : []);
+        } catch(e) { setAllProducts([]); }
+      }
+      if (window.api?.getOffers) {
+        try {
+          const offers = await window.api.getOffers();
+          setActiveOffers(offers.filter(o => o.status === 1));
+        } catch(e) {}
+      }
+      refreshHeldCount();
+      loadSettings();
+    };
+    fetchData();
 
     // Focus first row on start
     setTimeout(() => inputRefs.current["0_name"]?.focus(), 100);
 
+    const doRefresh = async () => {
+      if (window.api?.getProductsFull) {
+        try {
+          const prods = await window.api.getProductsFull();
+          setAllProducts(Array.isArray(prods) ? prods : []);
+        } catch(e) { setAllProducts([]); }
+      }
+      if (window.api?.getOffers) {
+        try {
+          const offers = await window.api.getOffers();
+          setActiveOffers(offers.filter(o => o.status === 1));
+        } catch(e) {}
+      }
+      refreshHeldCount();
+      loadSettings();
+    };
+
     const syncCheck = setInterval(() => {
       window.api?.getSyncStatus?.().then(res => setSyncPending(res.pending));
     }, 10000);
-    return () => clearInterval(syncCheck);
+
+    window.addEventListener('soft_refresh', doRefresh);
+
+    return () => {
+      clearInterval(syncCheck);
+      window.removeEventListener('soft_refresh', doRefresh);
+    };
   }, []);
 
   const refreshHeldCount = async () => {
@@ -221,17 +255,20 @@ const POS = () => {
       }
       updateQty(existingIdx, currentQty + 1);
     } else {
-      let total, gstAmt;
+      let total, gstAmt, gross_taxable;
       const quantity = 1;
+      const dp = Number(product.default_discount) || 0;
+      
       if (priceType === 'inclusive') {
         total = price * quantity;
-        const taxable = total / (1 + catGst / 100);
-        gstAmt = total - taxable;
+        gross_taxable = total / (1 + catGst / 100);
       } else {
-        const taxable = price * quantity;
-        gstAmt = (taxable * catGst) / 100;
-        total = taxable + gstAmt;
+        gross_taxable = price * quantity;
       }
+
+      const discAmt = (gross_taxable * dp) / 100;
+      const net_taxable = gross_taxable - discAmt;
+      gstAmt = (net_taxable * catGst) / 100;
       
       const newRow = {
         tempId: Date.now() + Math.random(),
@@ -240,12 +277,14 @@ const POS = () => {
         price,
         price_type: priceType,
         qty: quantity,
-        total: priceType === 'inclusive' ? total - gstAmt : price * quantity,
+        total: gross_taxable,
         gstRate: catGst,
         gstAmt,
         expiry_date: product.expiry_date || null,
         image: product.image || null,
-        maxStock: availableStock
+        maxStock: availableStock,
+        discountPercent: dp,
+        discountAmt: discAmt
       };
 
       const currentValid = billItems.filter(i => i.id);
@@ -320,16 +359,18 @@ const POS = () => {
     const quantity = 1;
     const priceType = product.price_type || 'exclusive';
 
-    let total, gstAmt;
+    const dp = Number(product.default_discount) || 0;
+    let total, gstAmt, gross_taxable;
     if (priceType === 'inclusive') {
       total = price * quantity;
-      const taxable = total / (1 + catGst / 100);
-      gstAmt = total - taxable;
+      gross_taxable = total / (1 + catGst / 100);
     } else {
-      const taxable = price * quantity;
-      gstAmt = (taxable * catGst) / 100;
-      total = taxable + gstAmt;
+      gross_taxable = price * quantity;
     }
+
+    const discAmt = (gross_taxable * dp) / 100;
+    const net_taxable = gross_taxable - discAmt;
+    gstAmt = (net_taxable * catGst) / 100;
 
     updated[index] = {
       ...updated[index],
@@ -338,11 +379,13 @@ const POS = () => {
       price,
       price_type: priceType,
       qty: quantity,
-      total: priceType === 'inclusive' ? total - gstAmt : price * quantity, 
+      total: gross_taxable, 
       gstRate: catGst,
       gstAmt: gstAmt,
       expiry_date: product.expiry_date || null,
-      maxStock: availableStock
+      maxStock: availableStock,
+      discountPercent: dp,
+      discountAmt: discAmt
     };
 
     setBillItems(updated);
@@ -410,16 +453,19 @@ const POS = () => {
     const rate = Number(item.gstRate || 0);
     const price = Number(item.price || 0);
 
-    let total, gstAmt, taxable;
+    const dp = item.discountPercent || 0;
+    let total, gstAmt, gross_taxable;
+
     if (priceType === 'inclusive') {
       total = price * newQty;
-      taxable = total / (1 + rate / 100);
-      gstAmt = total - taxable;
+      gross_taxable = total / (1 + rate / 100);
     } else {
-      taxable = price * newQty;
-      gstAmt = (taxable * rate) / 100;
-      total = taxable + gstAmt;
+      gross_taxable = price * newQty;
     }
+
+    const discAmt = (gross_taxable * dp) / 100;
+    const net_taxable = gross_taxable - discAmt;
+    gstAmt = (net_taxable * rate) / 100;
 
     const cgstRate = rate / 2;
     const sgstRate = rate / 2;
@@ -429,13 +475,36 @@ const POS = () => {
     updated[idx] = { 
       ...item, 
       qty: newQty, 
-      total: taxable, 
+      total: gross_taxable, 
       gstAmt: gstAmt,
       cgstRate,
       sgstRate,
       cgstAmt,
       sgstAmt,
-      maxStock: maxStock
+      maxStock: maxStock,
+      discountAmt: discAmt
+    };
+    setBillItems(updated);
+  };
+
+  /* ── Update discount percent ── */
+  const updateDiscount = (idx, pct) => {
+    const updated = [...billItems];
+    const item = updated[idx];
+    const dp = Math.max(0, Math.min(100, parseFloat(pct) || 0));
+    const gross_taxable = Number(item.total || 0);
+    const discAmt = (gross_taxable * dp) / 100;
+    const net_taxable = gross_taxable - discAmt;
+    const rate = Number(item.gstRate || 0);
+    const gstAmt = (net_taxable * rate) / 100;
+
+    updated[idx] = { 
+      ...item, 
+      discountPercent: dp, 
+      discountAmt: discAmt,
+      gstAmt: gstAmt,
+      cgstAmt: gstAmt / 2,
+      sgstAmt: gstAmt / 2
     };
     setBillItems(updated);
   };
@@ -446,12 +515,49 @@ const POS = () => {
     setBillItems(updated.length ? updated : [emptyRow()]);
   };
 
-  const qtyTotal = billItems.reduce((s, i) => s + Number(i.qty || 0), 0);
+  /* ── Compute Free Items ── */
+  const freeItems = React.useMemo(() => {
+    let list = [];
+    activeOffers.forEach(offer => {
+      const buyItemsCount = billItems.filter(i => i.id === offer.buy_product_id).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+      if (buyItemsCount >= offer.buy_quantity) {
+        const multiplier = Math.floor(buyItemsCount / offer.buy_quantity);
+        if (multiplier > 0) {
+          const freeProduct = allProducts.find(p => p.id === offer.free_product_id);
+          if (freeProduct) {
+            const freeQty = multiplier * offer.free_quantity;
+            list.push({
+              tempId: 'free_' + freeProduct.id + '_' + Date.now() + Math.random(),
+              id: freeProduct.id,
+              name: freeProduct.name,
+              qty: freeQty,
+              price: 0,
+              price_type: freeProduct.price_type || 'exclusive',
+              total: 0,
+              gstRate: 0,
+              gstAmt: 0,
+              discountPercent: 0,
+              discountAmt: 0,
+              cgstAmt: 0,
+              sgstAmt: 0,
+              isFree: true,
+              offerName: offer.name,
+              image: freeProduct.image
+            });
+          }
+        }
+      }
+    });
+    return list;
+  }, [billItems, activeOffers, allProducts]);
+
+  const qtyTotal = billItems.reduce((s, i) => s + Number(i.qty || 0), 0) + freeItems.reduce((s, i) => s + Number(i.qty || 0), 0);
   const subtotal = billItems.reduce((s, i) => s + Number(i.total || 0), 0);
   const taxTotal = billItems.reduce((s, i) => s + Number(i.gstAmt || 0), 0);
   const totalCGST = billItems.reduce((s, i) => s + Number(i.cgstAmt || 0), 0);
   const totalSGST = billItems.reduce((s, i) => s + Number(i.sgstAmt || 0), 0);
-  const grandTotal = Number(subtotal + taxTotal).toFixed(2);
+  const totalDiscount = billItems.reduce((s, i) => s + Number(i.discountAmt || 0), 0);
+  const grandTotal = Number(subtotal + taxTotal - totalDiscount).toFixed(2);
 
   const handlePhoneChange = async (e) => {
     const p = e.target.value;
@@ -469,7 +575,7 @@ const POS = () => {
       return;
     }
 
-    const validItems = billItems.filter(i => i.qty > 0 && i.id);
+    const validItems = [...billItems.filter(i => i.qty > 0 && i.id), ...freeItems];
     if (validItems.length === 0) { alert("Please add at least one item before generating a bill."); return; }
     setAmountReceived("");
     setPaymentMode("Cash");
@@ -478,7 +584,7 @@ const POS = () => {
   };
 
   const finalizeInvoice = async () => {
-    const validItems = billItems.filter(i => i.qty > 0 && i.id);
+    const validItems = [...billItems.filter(i => i.qty > 0 && i.id), ...freeItems];
     if (validItems.length === 0) return;
     if (paymentMode === "Cash" && Math.round(Number(amountReceived) * 100) < Math.round(Number(grandTotal) * 100)) {
       alert(`Insufficient Cash! Need ₹${(Number(grandTotal) - Number(amountReceived)).toFixed(2)} more.`);
@@ -508,12 +614,13 @@ const POS = () => {
     return (
       <div style={{
         height: "100%", display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center", background: "var(--bg)",
+        alignItems: "center", justifyContent: "center", 
+        background: "#ffffff", /* Simple minimal B&W background */
         gap: 40, padding: 40
       }}>
         <div style={{ textAlign: "center" }}>
-          <h1 style={{ fontSize: 32, fontWeight: 900, color: "var(--text-1)", marginBottom: 10 }}>Select Billing Terminal</h1>
-          <p style={{ color: "var(--text-3)", fontSize: 16 }}>Choose your preferred method to start billing</p>
+          <h1 style={{ fontSize: 36, fontWeight: 900, color: "#2563eb", marginBottom: 10 }}>Select Billing Terminal</h1>
+          <p style={{ color: "var(--text-2)", fontSize: 18, fontWeight: 500 }}>Choose your preferred method to start billing</p>
         </div>
         
         <div style={{ display: "flex", gap: 30, width: "100%", maxWidth: 900 }}>
@@ -521,18 +628,19 @@ const POS = () => {
           <div 
             onClick={() => startTerminal('photo')}
             style={{
-              flex: 1, background: "white", borderRadius: 24, padding: 40,
-              border: "2px solid var(--border)", cursor: "pointer",
+              flex: 1, background: "#ffffff", borderRadius: 32, padding: 50,
+              border: "1px solid #e5e7eb", cursor: "pointer",
               display: "flex", flexDirection: "column", alignItems: "center",
-              transition: "transform 0.2s, border-color 0.2s",
-              boxShadow: "0 10px 40px rgba(0,0,0,0.05)"
+              transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.05)",
+              position: "relative"
             }}
-            onMouseOver={e => { e.currentTarget.style.borderColor = "var(--primary)"; e.currentTarget.style.transform = "translateY(-5px)"; }}
-            onMouseOut={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "none"; }}
+            onMouseOver={e => { e.currentTarget.style.borderColor = "#9ca3af"; e.currentTarget.style.transform = "translateY(-8px) scale(1.02)"; e.currentTarget.style.boxShadow = "0 30px 60px rgba(0, 0, 0, 0.1)"; }}
+            onMouseOut={e => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 20px 40px rgba(0, 0, 0, 0.05)"; }}
           >
-            <div style={{ fontSize: 60, marginBottom: 20 }}>📸</div>
-            <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text-1)" }}>Photo Method</h2>
-            <p style={{ textAlign: "center", color: "var(--text-4)", fontSize: 14, marginTop: 10 }}>
+            <div style={{ width: 100, height: 100, borderRadius: 24, background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 50, marginBottom: 25, boxShadow: "0 10px 20px rgba(0, 0, 0, 0.05)" }}>🖼️</div>
+            <h2 style={{ fontSize: 26, fontWeight: 800, color: "var(--text-1)" }}>Image Method</h2>
+            <p style={{ textAlign: "center", color: "var(--text-3)", fontSize: 15, marginTop: 15, lineHeight: 1.5 }}>
               Visual grid selection. Best for touchscreens and quick identification of items.
             </p>
           </div>
@@ -541,24 +649,24 @@ const POS = () => {
           <div 
             onClick={() => startTerminal('tally')}
             style={{
-              flex: 1, background: "white", borderRadius: 24, padding: 40,
-              border: "2px solid var(--border)", cursor: "pointer",
+              flex: 1, background: "#ffffff", borderRadius: 32, padding: 50,
+              border: "1px solid #e5e7eb", cursor: "pointer",
               display: "flex", flexDirection: "column", alignItems: "center",
-              transition: "transform 0.2s, border-color 0.2s",
-              boxShadow: "0 10px 40px rgba(0,0,0,0.05)"
+              transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.05)"
             }}
-            onMouseOver={e => { e.currentTarget.style.borderColor = "#10b981"; e.currentTarget.style.transform = "translateY(-5px)"; }}
-            onMouseOut={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "none"; }}
+            onMouseOver={e => { e.currentTarget.style.borderColor = "#9ca3af"; e.currentTarget.style.transform = "translateY(-8px) scale(1.02)"; e.currentTarget.style.boxShadow = "0 30px 60px rgba(0, 0, 0, 0.1)"; }}
+            onMouseOut={e => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 20px 40px rgba(0, 0, 0, 0.05)"; }}
           >
-            <div style={{ fontSize: 60, marginBottom: 20 }}>⌨️</div>
-            <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text-1)" }}>Tally Method</h2>
-            <p style={{ textAlign: "center", color: "var(--text-4)", fontSize: 14, marginTop: 10 }}>
+            <div style={{ width: 100, height: 100, borderRadius: 24, background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 50, marginBottom: 25, boxShadow: "0 10px 20px rgba(0, 0, 0, 0.05)" }}>⌨️</div>
+            <h2 style={{ fontSize: 26, fontWeight: 800, color: "var(--text-1)" }}>Tally Method</h2>
+            <p style={{ textAlign: "center", color: "var(--text-3)", fontSize: 15, marginTop: 15, lineHeight: 1.5 }}>
               Keyboard-first list interface. Best for barcodes and rapid bulk entry.
             </p>
           </div>
         </div>
         
-        <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 20 }}>
+        <div style={{ fontSize: 13, color: "var(--text-3)", marginTop: 10, fontWeight: 600, background: "#f3f4f6", border: "1px solid #e5e7eb", padding: "10px 20px", borderRadius: 20 }}>
           Terminal will automatically enter Full-Screen mode after selection.
         </div>
       </div>
@@ -615,20 +723,25 @@ const POS = () => {
                       <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#1e293b" }}>
                         <th style={{ padding: "8px 0" }}>Item</th>
                         <th style={{ padding: "8px 0", textAlign: "center" }}>Qty</th>
+                        <th style={{ padding: "8px 0", textAlign: "center" }}>Disc%</th>
                         <th style={{ padding: "8px 0", textAlign: "right" }}>Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {billItems.filter(i => i.qty > 0 && i.id).map((item, idx) => (
+                      {[...billItems.filter(i => i.qty > 0 && i.id), ...freeItems].map((item, idx) => (
                         <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
                           <td style={{ padding: "10px 0", fontWeight: "500" }}>
-                            {item.name} <br />
+                            {item.name} {item.isFree && <span style={{ color: "white", backgroundColor: "#10b981", fontSize: "0.7rem", padding: "2px 6px", borderRadius: "4px", marginLeft: "6px" }}>FREE</span>} <br />
                             <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-                              ₹{item.price} ({item.price_type}) + {item.gstRate}% GST
+                              {item.isFree ? `Offer: ${item.offerName}` : `₹${item.price} (${item.price_type}) + ${item.gstRate}% GST`}
                             </span>
                           </td>
                           <td style={{ padding: "10px 0", textAlign: "center" }}>{item.qty}</td>
-                          <td style={{ padding: "10px 0", textAlign: "right", fontWeight: "bold", color: "#0f172a" }}>₹{(item.total + item.gstAmt).toFixed(2)}</td>
+                          <td style={{ padding: "10px 0", textAlign: "center", color: item.discountPercent > 0 ? '#10b981' : '#94a3b8' }}>
+                            {item.discountPercent > 0 ? `${item.discountPercent}%` : '—'}
+                            {item.discountAmt > 0 && <div style={{ fontSize: '0.7rem' }}>-₹{item.discountAmt.toFixed(2)}</div>}
+                          </td>
+                          <td style={{ padding: "10px 0", textAlign: "right", fontWeight: "bold", color: "#0f172a" }}>₹{(item.total + item.gstAmt - (item.discountAmt || 0)).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -639,6 +752,7 @@ const POS = () => {
                       Subtotal: ₹{subtotal.toFixed(2)}<br/>
                       CGST (Total): ₹{totalCGST.toFixed(2)}<br/>
                       SGST (Total): ₹{totalSGST.toFixed(2)}
+                      {totalDiscount > 0 && <><br/><span style={{ color: '#10b981' }}>Discount: -₹{totalDiscount.toFixed(2)}</span></>}
                     </div>
                     <div style={{ textAlign: "right", fontSize: "1.4rem", fontWeight: "800", color: "var(--primary)" }}>
                       Payable: ₹{grandTotal}
@@ -718,16 +832,21 @@ const POS = () => {
           ) : (
             /* ── PRINTABLE INVOICE ─ */
             <div className="printable-invoice" style={{ background: "white", maxWidth: "800px", margin: "40px auto", padding: "40px", boxShadow: "0 10px 30px rgba(0,0,0,0.1)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "2px solid #333", paddingBottom: "20px", marginBottom: "30px" }}>
-                <div>
-                  <h1 style={{ margin: "0 0 5px 0", fontSize: "2.5rem", fontFamily: "Inter, sans-serif" }}>
-                    <span style={{ color: "#111", letterSpacing: "-1px", textTransform: "uppercase" }}>{settings.storeName || "iVA BILLING"}</span>
-                  </h1>
-                  <div style={{ color: "#555", fontSize: "0.9rem" }}>{settings.storeAddress}</div>
-                  <div style={{ color: "#555", fontSize: "0.9rem" }}>Phone: {settings.storePhone}</div>
-                  {settings.gstNumber && <div style={{ color: "#555", fontSize: "0.9rem", fontWeight: "bold", marginTop: 5 }}>GSTIN: {settings.gstNumber}</div>}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "2px solid #333", paddingBottom: "20px", marginBottom: "30px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {settings.billLogo && (
+                    <img src={settings.billLogo} alt="Logo" style={{ width: 80, height: 80, objectFit: "contain", filter: "grayscale(100%)", marginBottom: 5 }} />
+                  )}
+                  <div>
+                    <h1 style={{ margin: "0 0 5px 0", fontSize: "2.2rem", fontFamily: "Inter, sans-serif" }}>
+                      <span style={{ color: "#111", letterSpacing: "-1px", textTransform: "uppercase" }}>{settings.storeName || "iVA BILLING"}</span>
+                    </h1>
+                    {settings.gstNumber && <div style={{ color: "#333", fontSize: "0.95rem", fontWeight: "bold", marginBottom: 2 }}>GSTIN: {settings.gstNumber}</div>}
+                    <div style={{ color: "#555", fontSize: "0.9rem" }}>{settings.storeAddress}</div>
+                    <div style={{ color: "#555", fontSize: "0.9rem" }}>Phone: {settings.storePhone}</div>
+                  </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
+                <div style={{ textAlign: "right", marginTop: settings.billLogo ? 85 : 0 }}>
                   <h2 style={{ margin: "0 0 10px 0", color: "#333", letterSpacing: "2px" }}>TAX INVOICE</h2>
                   <div><strong>Bill No:</strong> #{lastInvoiceId}</div>
                   <div><strong>Date:</strong> {new Date().toLocaleDateString()}</div>
@@ -750,19 +869,26 @@ const POS = () => {
                     <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #333" }}>Item Description</th>
                     <th style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>Qty</th>
                     <th style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>Rate</th>
+                    <th style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>Disc%</th>
                     <th style={{ padding: "12px", textAlign: "right" }}>Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {billItems.filter(i => i.qty > 0 && i.id).map((item, idx) => (
+                  {[...billItems.filter(i => i.qty > 0 && i.id), ...freeItems].map((item, idx) => (
                     <tr key={idx} style={{ borderBottom: "1px solid #ccc" }}>
                       <td style={{ padding: "12px", borderRight: "1px solid #333" }}>
-                        {item.name}
-                        <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>+ {item.gstRate}% GST (₹{item.gstAmt.toFixed(2)})</div>
+                        {item.name} {item.isFree && <span style={{ padding: "2px 5px", background: "#333", color: "white", fontSize: "0.7rem", borderRadius: "3px", marginLeft: "5px" }}>FREE</span>}
+                        <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>
+                          {item.isFree ? `Offer: ${item.offerName}` : `+ ${item.gstRate}% GST (₹${item.gstAmt.toFixed(2)})`}
+                        </div>
                       </td>
                       <td style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>{item.qty}</td>
                       <td style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>₹{item.price.toFixed(2)}</td>
-                      <td style={{ padding: "12px", textAlign: "right" }}>₹{(item.total + item.gstAmt).toFixed(2)}</td>
+                      <td style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333", color: item.discountPercent > 0 ? '#10b981' : '#999' }}>
+                        {item.discountPercent > 0 ? `${item.discountPercent}%` : '—'}
+                        {item.discountAmt > 0 && <div style={{ fontSize: '0.7rem' }}>-₹{item.discountAmt.toFixed(2)}</div>}
+                      </td>
+                      <td style={{ padding: "12px", textAlign: "right" }}>₹{(item.total + item.gstAmt - (item.discountAmt || 0)).toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -806,9 +932,14 @@ const POS = () => {
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
                     <span>Total CGST:</span><span>₹{totalCGST.toFixed(2)}</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #333", fontSize: "0.9rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
                     <span>Total SGST:</span><span>₹{totalSGST.toFixed(2)}</span>
                   </div>
+                  {totalDiscount > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem", color: "#10b981" }}>
+                      <span>Discount:</span><span>-₹{totalDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", fontWeight: "900", fontSize: "1.4rem", color: "#000" }}>
                     <span>TOTAL:</span><span>₹{grandTotal}</span>
                   </div>
@@ -838,7 +969,7 @@ const POS = () => {
           
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{billingMode === 'photo' ? '🖼️ Photo Billing' : '⌨️ Tally Billing'}</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{billingMode === 'photo' ? '🖼️ Image Billing' : '⌨️ Tally Billing'}</h2>
               <div style={{ fontSize: 12, color: "var(--text-4)" }}>Terminal Active · Full Screen Mode</div>
             </div>
             <button onClick={() => { setTerminalActive(false); if(document.exitFullscreen) document.exitFullscreen(); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>Exit Terminal</button>
@@ -926,6 +1057,7 @@ const POS = () => {
                 <div>DESCRIPTION</div>
                 <div>RATE (₹)</div>
                 <div>QTY</div>
+                <div>DISC %</div>
                 <div>GST %</div>
                 <div>GST (₹)</div>
                 <div>AMOUNT (₹)</div>
@@ -995,9 +1127,44 @@ const POS = () => {
                       )}
                     </div>
 
+                    <div className="pos-cell">
+                      {item.id ? (
+                        <input
+                          type="number"
+                          className="pos-input"
+                          style={{ width: 50, textAlign: "center", fontSize: 12 }}
+                          value={item.discountPercent || ""}
+                          placeholder="0"
+                          min={0}
+                          max={100}
+                          onChange={(e) => updateDiscount(idx, e.target.value)}
+                        />
+                      ) : (
+                        <span style={{ color: 'var(--text-4)', fontSize: 12 }}>—</span>
+                      )}
+                    </div>
+
                     <div className="pos-cell" style={{ color: "var(--text-4)" }}>{item.id ? `${item.gstRate}%` : "0"}</div>
                     <div className="pos-cell" style={{ color: "var(--text-3)" }}>{item.gstAmt ? item.gstAmt.toFixed(2) : "0.00"}</div>
-                    <div className="pos-cell" style={{ fontWeight: 800, color: "var(--text-1)" }}>{item.total ? (item.total + item.gstAmt).toFixed(2) : "0.00"}</div>
+                    <div className="pos-cell" style={{ fontWeight: 800, color: "var(--text-1)" }}>{item.total ? (item.total + item.gstAmt - (item.discountAmt || 0)).toFixed(2) : "0.00"}</div>
+                  </div>
+                ))}
+
+                {/* Free Items List (Tally Mode) */}
+                {freeItems.map((item, idx) => (
+                  <div key={item.tempId} className="pos-row" style={{ background: "rgba(16, 185, 129, 0.05)" }}>
+                    <div className="pos-cell" style={{ color: "#10b981", fontSize: 11, fontWeight: "bold" }}>F{idx + 1}</div>
+                    <div className="pos-cell" style={{ textAlign: "left" }}>
+                      <span style={{ fontWeight: 700, color: "var(--text-1)" }}>{item.name}</span>
+                      <span style={{ marginLeft: 8, background: "#10b981", color: "white", padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>FREE</span>
+                      <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>Offer: {item.offerName}</div>
+                    </div>
+                    <div className="pos-cell" style={{ color: "var(--text-3)" }}>₹0.00</div>
+                    <div className="pos-cell" style={{ fontWeight: 700 }}>{item.qty}</div>
+                    <div className="pos-cell" style={{ color: "var(--text-4)" }}>—</div>
+                    <div className="pos-cell" style={{ color: "var(--text-4)" }}>0%</div>
+                    <div className="pos-cell" style={{ color: "var(--text-4)" }}>0.00</div>
+                    <div className="pos-cell" style={{ fontWeight: 800, color: "#10b981" }}>0.00</div>
                   </div>
                 ))}
                 
@@ -1025,6 +1192,11 @@ const POS = () => {
                  <div className="pos-footer-col">
                     <span className="footer-label">Total GST</span>
                     <span className="footer-val">₹{taxTotal.toFixed(2)}</span>
+                 </div>
+
+                 <div className="pos-footer-col">
+                    <span className="footer-label">Discount</span>
+                    <span className="footer-val" style={{ color: totalDiscount > 0 ? '#10b981' : undefined }}>-₹{totalDiscount.toFixed(2)}</span>
                  </div>
 
                  <div className="pos-footer-col">
@@ -1085,7 +1257,7 @@ const POS = () => {
                              >+</button>
                            </div>
                         </div>
-                        <div style={{ fontWeight: "700", fontSize: "13px", color: "var(--text-1)" }}>₹{(item.total + item.gstAmt).toFixed(2)}</div>
+                        <div style={{ fontWeight: "700", fontSize: "13px", color: "var(--text-1)" }}>₹{(item.total + item.gstAmt - (item.discountAmt || 0)).toFixed(2)}</div>
                      </div>
                      {atMax && <div style={{ fontSize: "10px", color: "#f59e0b", fontWeight: 600, marginTop: 2 }}>⚠ Max stock ({stock})</div>}
                   </div>
@@ -1096,7 +1268,32 @@ const POS = () => {
                 </div>
               );
               })}
-              {billItems.filter(i => i.id).length === 0 && (
+
+              {/* Free Items List (Photo Mode Cart) */}
+              {freeItems.map(item => (
+                <div key={item.tempId} style={{ display: "flex", gap: "12px", background: "rgba(16, 185, 129, 0.05)", padding: "10px", borderRadius: "var(--r-md)", border: "1px solid rgba(16, 185, 129, 0.2)" }}>
+                  <div style={{ width: "50px", height: "50px", borderRadius: "6px", overflow: "hidden", background: "#10b98120", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                     {item.image ? (
+                        <img src={item.image} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                     ) : (
+                        <span style={{ fontSize: "20px" }}>🎁</span>
+                     )}
+                  </div>
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                     <div style={{ fontWeight: "600", fontSize: "13.5px", color: "var(--text-1)", lineHeight: "1.2", display: "flex", alignItems: "center", gap: "6px" }}>
+                       {item.name} 
+                       <span style={{ background: "#10b981", color: "white", padding: "2px 6px", borderRadius: "4px", fontSize: "9px", fontWeight: "bold" }}>FREE</span>
+                     </div>
+                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", alignItems: "center" }}>
+                        <div style={{ fontSize: "11px", color: "var(--text-3)", fontStyle: "italic" }}>Offer: {item.offerName}</div>
+                        <div style={{ fontWeight: "700", fontSize: "13px", color: "#10b981" }}>{item.qty} items</div>
+                     </div>
+                  </div>
+                  <div style={{ width: "24px", display: "flex", alignItems: "center", justifyContent: "center" }}>🔒</div>
+                </div>
+              ))}
+
+              {billItems.filter(i => i.id).length === 0 && freeItems.length === 0 && (
                 <div style={{ textAlign: "center", color: "var(--text-4)", marginTop: "40px", fontSize: "14px" }}>
                    <div style={{ fontSize: "40px", marginBottom: "10px" }}>🛒</div>
                    Cart is empty.<br/>Add products from the left.
@@ -1110,10 +1307,16 @@ const POS = () => {
                  <span>Taxable Amount</span>
                  <span>₹{subtotal.toFixed(2)}</span>
                </div>
-               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "15px", fontSize: "13px", color: "var(--text-3)" }}>
+               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "13px", color: "var(--text-3)" }}>
                  <span>Total GST</span>
                  <span>₹{taxTotal.toFixed(2)}</span>
                </div>
+               {totalDiscount > 0 && (
+                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "13px", color: "#10b981", fontWeight: 600 }}>
+                   <span>Discount</span>
+                   <span>-₹{totalDiscount.toFixed(2)}</span>
+                 </div>
+               )}
                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px", fontSize: "18px", fontWeight: "800", color: "var(--text-1)" }}>
                  <span>Net Payable</span>
                  <span style={{ color: "var(--primary)" }}>₹{grandTotal}</span>

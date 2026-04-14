@@ -124,7 +124,6 @@ function startDashboardServer(mainWindow) {
   expressApp.get("/api/stats", (req, res) => {
     try {
       const today = todayStr();
-      const in7 = in7days();
       const in30 = inNdays(30);
 
       const totalProducts = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
@@ -137,10 +136,21 @@ function startDashboardServer(mainWindow) {
       const monthlySales = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-30 days')`).get().t;
 
       // Alerts
+      const settings = getSettings();
+      const lowThreshold = settings.lowStockThreshold || 10;
+      const expiryAlertDays = settings.expiryAlertDays || 3;
+      const inExpiry = inNdays(expiryAlertDays);
+
       const expiredCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date<?`).get(today).cnt;
-      const nearExpiryCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?`).get(today, in7).cnt;
-      const lowStockCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity>0 AND quantity<=5`).get().cnt;
+      const nearExpiryCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?`).get(today, inExpiry).cnt;
+      const lowStockCount = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity>0 AND quantity<=?`).get(lowThreshold).cnt;
       const outOfStock = db.prepare(`SELECT COUNT(*) as cnt FROM products WHERE quantity<=0`).get().cnt;
+
+      // Product lists for drilldown
+      const lowStockProducts = db.prepare(`SELECT p.name, p.quantity, p.unit FROM products p WHERE p.quantity>0 AND p.quantity<=? ORDER BY p.quantity ASC`).all(lowThreshold);
+      const outOfStockProducts = db.prepare(`SELECT p.name, p.unit FROM products p WHERE p.quantity<=0`).all();
+      const expiringProducts = db.prepare(`SELECT p.name, p.expiry_date, p.quantity FROM products p WHERE p.expiry_date IS NOT NULL AND p.expiry_date>=? AND p.expiry_date<=? ORDER BY p.expiry_date ASC`).all(today, inExpiry);
+      const expiredProducts = db.prepare(`SELECT p.name, p.expiry_date, p.quantity FROM products p WHERE p.expiry_date IS NOT NULL AND p.expiry_date<? ORDER BY p.expiry_date ASC`).all(today);
 
       // Top 5 products this month
       const topProducts = db.prepare(`
@@ -238,7 +248,8 @@ function startDashboardServer(mainWindow) {
         todayProfit, weeklyProfit, monthlyProfit,
         todayCost, weeklyCost, monthlyCost,
         peakHours, paymentBreakdown,
-        deadStock
+        deadStock,
+        lowStockProducts, outOfStockProducts, expiringProducts, expiredProducts
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -324,12 +335,15 @@ function startDashboardServer(mainWindow) {
   ══════════════════════════════════════════════════════ */
   expressApp.get("/api/stock", (req, res) => {
     try {
+      const settings = getSettings();
+      const lowThreshold = settings.lowStockThreshold || 10;
+
       const lowStock = db.prepare(`
         SELECT p.*,c.name as category_name
         FROM products p LEFT JOIN categories c ON p.category_id=c.id
-        WHERE p.quantity>0 AND p.quantity<=5
+        WHERE p.quantity>0 AND p.quantity<=?
         ORDER BY p.quantity ASC
-      `).all();
+      `).all(lowThreshold);
 
       const deadStock = db.prepare(`
         SELECT p.*,c.name as category_name

@@ -5,9 +5,8 @@ import ProductList from "./components/ProductList";
 import BulkUpdate from "./components/BulkUpdate";
 import Settings from "./components/Settings";
 import History from "./components/History";
-import OwnerDashboard from "./components/OwnerDashboard";
+import Offers from "./components/Offers";
 import logoUrl from "./assets/logo.png";
-import { Search } from "lucide-react";
 import "./App.css";
 
 /* ── Error Boundary ──────────────────────────────────────────── */
@@ -61,12 +60,21 @@ function App() {
   const [waStatus,    setWaStatus]      = useState('connecting');
   const [qrData,      setQrData]        = useState(null);
   const [showQR,      setShowQR]        = useState(false);
-  const [alertState,  setAlertState]    = useState({ lowStock: [], deadStock: [] });
-  const [showAlertModal, setShowAlertModal] = useState(false);
-  const [lastNotified, setLastNotified] = useState(0);
+  const [appSettings, setAppSettings]   = useState({});
 
   useEffect(() => {
-    if (!window.api) return;
+    const loadSettings = () => {
+      try {
+        const raw = localStorage.getItem("smart_billing_settings");
+        if (raw) setAppSettings(JSON.parse(raw));
+      } catch(e) {}
+    };
+    loadSettings();
+    window.addEventListener('settings_updated', loadSettings);
+
+    if (!window.api) {
+      return () => window.removeEventListener('settings_updated', loadSettings);
+    }
 
     window.api.onWhatsappQR(qr => {
       setQrData(qr);
@@ -79,47 +87,12 @@ function App() {
       if (status === 'ready') setShowQR(false);
     });
 
-    const checkAlerts = async () => {
-      try {
-        const raw = localStorage.getItem("smart_billing_settings");
-        const cfg = raw ? JSON.parse(raw) : { lowStockThreshold: 5, deadStockThresholdDays: 30 };
-        
-        const stockAlerts = await window.api.getStockAlerts({
-          lowStock: cfg.lowStockThreshold,
-          deadStockDays: cfg.deadStockThresholdDays
-        });
-
-        const newLow = stockAlerts.lowStock.filter(p => !alertState.lowStock.find(ap => ap.id === p.id));
-        const newDead = stockAlerts.deadStock.filter(p => !alertState.deadStock.find(ap => ap.id === p.id));
-
-        if (newLow.length > 0 || newDead.length > 0) {
-          setShowAlertModal(true);
-          
-          const now = Date.now();
-          if (cfg.ownerPhone && now - lastNotified > 3600000) {
-            let msg = `⚠️ *Smart Billing Alert*\n\n`;
-            if (newLow.length > 0) msg += `📉 *Low Stock:* ${newLow.map(p => p.name).join(', ')}\n`;
-            if (newDead.length > 0) msg += `💀 *Dead Stock:* ${newDead.map(p => p.name).join(', ')}\n`;
-            msg += `\nPlease check your inventory.`;
-
-            window.api.sendWhatsapp(cfg.ownerPhone, msg).catch(console.error);
-            setLastNotified(now);
-          }
-        }
-
-        setAlertState(stockAlerts);
-      } catch (err) {
-        console.error("Alert check failed:", err);
-      }
+    return () => {
+      window.removeEventListener('settings_updated', loadSettings);
     };
-
-    checkAlerts();
-    const interval = setInterval(checkAlerts, 300000);
-    return () => clearInterval(interval);
-  }, [alertState, lastNotified]);
+  }, []);
 
   const navItems = [
-    { id: 'dashboard',    label: 'Dashboard',         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg> },
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> },
     { id: 'product_list', label: 'Master Inventory',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg> },
     { id: 'add_product',  label: 'Register Product',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> },
@@ -132,40 +105,72 @@ function App() {
     <ErrorBoundary>
       <div className="app-container">
 
-        {/* ── Sidebar ─────────────────────────────────────────── */}
+        {/* ── Sidebar (Shadcn Dashboard Style) ──────────────── */}
         <aside className="enterprise-sidebar">
+          {/* Workpace/Tenant Switcher */}
           <div className="sidebar-brand">
-            <span style={{ fontSize: 20, fontWeight: 900, color: '#3b82f6', letterSpacing: -0.5 }}>iVA</span>
-            <span style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: -0.5 }}>POS</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, overflow: 'hidden' }}>
+              {appSettings.billLogo ? (
+                <img src={appSettings.billLogo} alt="Logo" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'contain', flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: 28, height: 28, borderRadius: 6, background: '#4f46e5', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: 16, flexShrink: 0 }}>
+                  {(appSettings.storeName || "i").charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0, overflow: 'hidden' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appSettings.storeName || "iVA Retail"}</span>
+                <span style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appSettings.tagline || "Supermarket Pro"}</span>
+              </div>
+            </div>
           </div>
 
           <div className="sidebar-menu">
-            <div className="sidebar-heading">MAIN MENU</div>
-            {navItems.map(item => (
-              <div key={item.id}
-                className={`sidebar-item ${currentView === item.id ? 'active' : ''}`}
-                onClick={() => setCurrentView(item.id)}>
-                <div className="sidebar-icon">
-                  {item.icon}
-                </div>
-                <span className="sidebar-label">{item.label}</span>
+            <div className="sidebar-group">
+              <div className="sidebar-heading">Point of Sale</div>
+              <div className={`sidebar-item ${currentView === 'pos' ? 'active' : ''}`} onClick={() => setCurrentView('pos')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></div>
+                <span className="sidebar-label">Billing Terminal</span>
               </div>
-            ))}
+              <div className={`sidebar-item ${currentView === 'history' ? 'active' : ''}`} onClick={() => setCurrentView('history')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+                <span className="sidebar-label">Invoice History</span>
+              </div>
+            </div>
+
+            <div className="sidebar-group">
+              <div className="sidebar-heading">Inventory Management</div>
+              <div className={`sidebar-item ${currentView === 'product_list' ? 'active' : ''}`} onClick={() => setCurrentView('product_list')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></div>
+                <span className="sidebar-label">Master Inventory</span>
+              </div>
+              <div className={`sidebar-item ${currentView === 'add_product' ? 'active' : ''}`} onClick={() => setCurrentView('add_product')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></div>
+                <span className="sidebar-label">Register Product</span>
+              </div>
+              <div className={`sidebar-item ${currentView === 'bulk_update' ? 'active' : ''}`} onClick={() => setCurrentView('bulk_update')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></div>
+                <span className="sidebar-label">Bulk Stock Inward</span>
+              </div>
+              <div className={`sidebar-item ${currentView === 'offers' ? 'active' : ''}`} onClick={() => setCurrentView('offers')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 12 20 22 4 22 4 12"></polyline><rect x="2" y="7" width="20" height="5"></rect><line x1="12" y1="22" x2="12" y2="7"></line><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"></path><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"></path></svg></div>
+                <span className="sidebar-label">Offers & Promos</span>
+              </div>
+            </div>
+
+            <div className="sidebar-group">
+              <div className="sidebar-heading">System</div>
+              <div className={`sidebar-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
+                <div className="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></div>
+                <span className="sidebar-label">General Settings</span>
+              </div>
+            </div>
           </div>
 
           {/* Bottom Area */}
           <div className="sidebar-bottom">
-            <button onClick={() => waStatus === 'qr' ? setShowQR(true) : undefined} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '8px 12px', borderRadius: 8,
-              background: '#f0fdf4', color: '#16a34a',
-              border: `1px solid #16a34a30`, clear: 'both',
-              fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
-              justifyContent: 'center', transition: 'opacity .15s',
-              marginTop: 4
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
-              {waStatus === 'connecting' ? 'Connecting...' : waStatus === 'qr' ? 'Scan to Link' : 'WhatsApp Connected'}
+            <button onClick={() => waStatus === 'qr' ? setShowQR(true) : undefined} className="btn-whatsapp-status" style={{ color: waStatus === 'ready' ? '#16a34a' : undefined }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
+              {waStatus === 'connecting' ? 'Connecting...' : waStatus === 'qr' ? 'Scan to Link' : 'WhatsApp Synced'}
             </button>
           </div>
         </aside>
@@ -173,34 +178,45 @@ function App() {
         {/* ── Main Workspace ──────────────────────────────────── */}
         <main className="enterprise-main">
           
-          {/* Top Global Header */}
+          {/* Dashboard Header */}
           <header className="enterprise-header">
-            <div className="header-title-area">
-              <span className="header-app-title">Supermarket POS</span>
-              <div className="header-search">
-                <Search />
-                <input type="text" placeholder="Search customer, products..." />
-              </div>
+            <div className="header-breadcrumbs">
+              <span className="breadcrumb-muted">iVA Retail</span>
+              <span className="breadcrumb-separator">/</span>
+              <span className="breadcrumb-active">
+                {currentView === 'pos' ? 'Billing Terminal' :
+                 currentView === 'history' ? 'Invoice History' :
+                 currentView === 'product_list' ? 'Master Inventory' :
+                 currentView === 'add_product' ? 'Register Product' :
+                 currentView === 'bulk_update' ? 'Bulk inward' : 
+                 currentView === 'offers' ? 'Offers & Promos' : 'Settings'}
+              </span>
             </div>
 
             <div className="header-right">
-              <div className="header-user-info">
-                <div className="header-user-name">
-                  <div className="name">Store Admin</div>
-                  <div className="role">Manager</div>
-                </div>
-                <div className="header-avatar">A</div>
-              </div>
+              <button 
+                onClick={() => window.dispatchEvent(new Event('soft_refresh'))} 
+                title="Refresh current page data"
+                style={{
+                  background: 'none', border: '1px solid #e2e8f0', borderRadius: '6px', 
+                  padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
+                  color: '#475569', fontSize: '13px', fontWeight: '500', transition: 'all 0.2s'
+                }}
+                onMouseOver={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+                onMouseOut={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Refresh
+              </button>
             </div>
           </header>
           
           <div className="enterprise-workspace">
-            {currentView === 'dashboard'    && <OwnerDashboard />} {/* Fallback if missing OwnerDashboard separately */}
-            {currentView === 'owner'        && <OwnerDashboard />}
             {currentView === 'pos'          && <POS />}
             {currentView === 'add_product'  && <Inventory />}
             {currentView === 'product_list' && <ProductList />}
             {currentView === 'bulk_update'  && <BulkUpdate />}
+            {currentView === 'offers'       && <Offers />}
             {currentView === 'settings'     && <Settings />}
             {currentView === 'history'      && <History />}
           </div>
@@ -208,34 +224,6 @@ function App() {
 
         {/* ── WhatsApp QR Modal ─────────────────────────────── */}
         {showQR && qrData && <WhatsAppQRModal qrData={qrData} onClose={() => setShowQR(false)} />}
-
-        {/* 🚨 Stock Alert Modal */}
-        {showAlertModal && (alertState.lowStock.length > 0 || alertState.deadStock.length > 0) && (
-          <div className="modal-overlay" onClick={() => setShowAlertModal(false)}>
-            <div className="invoice-modal" style={{ maxWidth: 450, textAlign: 'center', color: 'var(--text-1)' }} onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
-              <h2 style={{ margin: '0 0 10px 0', color: 'var(--text-1)' }}>Inventory Warning</h2>
-              <div style={{ fontSize: 14, color: 'var(--text-3)', lineHeight: 1.6, marginBottom: 20 }}>
-                {alertState.lowStock.length > 0 && (
-                  <div style={{ marginBottom: 8 }}>
-                    📉 <b>{alertState.lowStock.length} items</b> are running low on stock.
-                  </div>
-                )}
-                {alertState.deadStock.length > 0 && (
-                  <div>
-                    💀 <b>{alertState.deadStock.length} items</b> identified as dead stock (not sold recently).
-                  </div>
-                )}
-                <div style={{ marginTop: 12, padding: 10, background: 'var(--surface-2)', borderRadius: 8, fontSize: 12 }}>
-                  Owner has been notified via WhatsApp (if configured).
-                </div>
-              </div>
-              <button className="btn-primary" style={{ width: '100%' }} onClick={() => setShowAlertModal(false)}>
-                Okay, I'll Check
-              </button>
-            </div>
-          </div>
-        )}
 
       </div>
     </ErrorBoundary>

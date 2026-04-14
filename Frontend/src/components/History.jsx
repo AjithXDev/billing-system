@@ -21,7 +21,12 @@ export default function History() {
     }
   }, []);
 
-  useEffect(() => { loadInvoices(); }, [loadInvoices]);
+  useEffect(() => {
+    loadInvoices();
+    const onRefresh = () => loadInvoices();
+    window.addEventListener('soft_refresh', onRefresh);
+    return () => window.removeEventListener('soft_refresh', onRefresh);
+  }, [loadInvoices]);
 
   // Group invoices into Today, This Week, This Month, Older
   const groupInvoices = (list) => {

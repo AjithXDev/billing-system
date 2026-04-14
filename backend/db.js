@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS products (
   barcode TEXT UNIQUE,
   expiry_date TEXT DEFAULT NULL,
   image TEXT DEFAULT NULL,
+  default_discount REAL DEFAULT 0,
+  flag_low_stock INTEGER DEFAULT 0,
+  flag_out_of_stock INTEGER DEFAULT 0,
+  flag_expiry INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 `).run();
@@ -84,6 +88,11 @@ try { db.prepare("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 0").run(
 try { db.prepare("ALTER TABLE products ADD COLUMN product_code TEXT").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN price_type TEXT DEFAULT 'exclusive'").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN image TEXT DEFAULT NULL").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN default_discount REAL DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN flag_low_stock INTEGER DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN flag_out_of_stock INTEGER DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN flag_expiry INTEGER DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN flag_dead_stock INTEGER DEFAULT 0").run(); } catch (e) { }
 
 // Migration: If gst_rate is 0 and category_id exists, copy gst from categories
 try {
@@ -160,9 +169,15 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   quantity INTEGER,
   price REAL,
   gst_rate INTEGER,
-  gst_amount REAL
+  gst_amount REAL,
+  discount_percent REAL DEFAULT 0,
+  discount_amount REAL DEFAULT 0
 )
 `).run();
+
+// Migration: add discount columns if missing
+try { db.prepare("ALTER TABLE invoice_items ADD COLUMN discount_percent REAL DEFAULT 0").run(); } catch(e){}
+try { db.prepare("ALTER TABLE invoice_items ADD COLUMN discount_amount REAL DEFAULT 0").run(); } catch(e){}
 
 
 // 🟢 NOTIFICATIONS TABLE (Owner Mobile Alerts)
@@ -177,4 +192,18 @@ CREATE TABLE IF NOT EXISTS notifications (
 )
 `).run();
 
-module.exports = db;
+// 🟢 OFFERS TABLE (Buy X Get Y Free)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS offers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  status INTEGER DEFAULT 1, -- 1 for Active, 0 for Inactive
+  buy_product_id INTEGER NOT NULL,
+  buy_quantity INTEGER NOT NULL,
+  free_product_id INTEGER NOT NULL,
+  free_quantity INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
+module.exports = db;

@@ -95,43 +95,80 @@ function createWindow() {
 
         // ── Local Notification Alerts (always run, independent of cloud) ──
         const today = new Date().toISOString().split('T')[0];
-        const lowThreshold = settings.lowStockThreshold || 5;
+        const lowThreshold = settings.lowStockThreshold || 10;
+        const expiryDays = settings.expiryAlertDays || 3;
+        const deadThresholdDays = settings.deadStockThresholdDays || 30;
+        const nearExpiryDate = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
 
-        const expired = db.prepare("SELECT name FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ?").all(today);
-        const lowStock = db.prepare("SELECT name FROM products WHERE quantity > 0 AND quantity <= ?").all(lowThreshold);
-        const outOfStock = db.prepare("SELECT name FROM products WHERE quantity <= 0").all();
+        // Fetch products requiring notifications (combining check and flags)
+        const expired = db.prepare("SELECT id, name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ? AND flag_expiry != 2").all(today);
+        const nearExpiry = db.prepare("SELECT id, name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ? AND flag_expiry = 0").all(today, nearExpiryDate);
+        const lowStock = db.prepare("SELECT id, name, quantity FROM products WHERE quantity > 0 AND quantity <= ? AND flag_low_stock = 0").all(lowThreshold);
+        const outOfStock = db.prepare("SELECT id, name FROM products WHERE quantity <= 0 AND flag_out_of_stock = 0").all();
+        
+        // Dead Stock (No sales in user-defined threshold days)
+        const deadStock = db.prepare(`
+          SELECT id, name FROM products 
+          WHERE quantity > 0 AND flag_dead_stock = 0 AND id NOT IN (
+            SELECT DISTINCT product_id FROM invoice_items ii 
+            JOIN invoices inv ON ii.invoice_id = inv.id 
+            WHERE inv.created_at >= datetime('now', '-${deadThresholdDays} days')
+          )
+        `).all();
 
-        // Check if we already sent notifications in the last hour to avoid spamming
-        const recentNotif = db.prepare("SELECT COUNT(*) as cnt FROM notifications WHERE created_at >= datetime('now', '-1 hour')").get().cnt;
+        // ── Local Notifications (Dashboard) ──
+        const insertNotif = db.prepare("INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)");
+        
+        if (expired.length > 0) {
+          const names = expired.slice(0, 5).map(p => p.name).join(', ');
+          insertNotif.run('EXPIRY', `${expired.length} Products Expired!`, `⚠️ ${names}${expired.length > 5 ? ` and ${expired.length - 5} more...` : ''}`);
+        }
+        if (nearExpiry.length > 0) {
+          const names = nearExpiry.slice(0, 5).map(p => p.name).join(', ');
+          insertNotif.run('NEAR_EXPIRY', `${nearExpiry.length} Products Expiring Soon!`, `⏰ ${names}${nearExpiry.length > 5 ? ` and ${nearExpiry.length - 5} more...` : ''}`);
+        }
+        if (lowStock.length > 0) {
+          const names = lowStock.slice(0, 5).map(p => p.name).join(', ');
+          insertNotif.run('LOW_STOCK', `${lowStock.length} Products Low Stock`, `📉 ${names}${lowStock.length > 5 ? ` and ${lowStock.length - 5} more...` : ''}`);
+        }
+        if (outOfStock.length > 0) {
+          const names = outOfStock.slice(0, 5).map(p => p.name).join(', ');
+          insertNotif.run('OUT_OF_STOCK', `${outOfStock.length} Products Out of Stock!`, `🚫 ${names}${outOfStock.length > 5 ? ` and ${outOfStock.length - 5} more...` : ''}`);
+        }
+        if (deadStock.length > 10) {
+          insertNotif.run('DEAD_STOCK', `${deadStock.length} Products Dead Stock!`, `💤 Have not been sold in ${deadThresholdDays} days.`);
+        }
 
-        if (recentNotif === 0) {
-          // Insert local notifications
-          const insertNotif = db.prepare("INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)");
-
-          if (expired.length > 0) {
-            const names = expired.slice(0, 5).map(p => p.name).join(', ');
-            insertNotif.run('EXPIRY', `${expired.length} Products Expired!`, `⚠️ ${names}${expired.length > 5 ? ` and ${expired.length - 5} more...` : ''}`);
+        // WhatsApp alerts to owner — ONLY ONCE per product
+        if (settings.ownerPhone) {
+          // Low stock
+          for (const p of lowStock) {
+            sendMessage(settings.ownerPhone, `📉 ${p.name} is low in stock. Only ${p.quantity} items remaining.`);
+            db.prepare("UPDATE products SET flag_low_stock = 1 WHERE id = ?").run(p.id);
           }
-          if (lowStock.length > 0) {
-            const names = lowStock.slice(0, 5).map(p => p.name).join(', ');
-            insertNotif.run('LOW_STOCK', `${lowStock.length} Products Low Stock`, `📉 ${names}${lowStock.length > 5 ? ` and ${lowStock.length - 5} more...` : ''}`);
+          // Out of stock
+          for (const p of outOfStock) {
+            sendMessage(settings.ownerPhone, `🚫 ${p.name} is out of stock.`);
+            db.prepare("UPDATE products SET flag_out_of_stock = 1 WHERE id = ?").run(p.id);
           }
-          if (outOfStock.length > 0) {
-            const names = outOfStock.slice(0, 5).map(p => p.name).join(', ');
-            insertNotif.run('OUT_OF_STOCK', `${outOfStock.length} Products Out of Stock!`, `🚫 ${names}${outOfStock.length > 5 ? ` and ${outOfStock.length - 5} more...` : ''}`);
+          // Near expiry
+          for (const p of nearExpiry) {
+            const expDate = new Date(p.expiry_date);
+            const daysLeft = Math.ceil((expDate - new Date()) / 86400000);
+            const formattedDate = expDate.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            sendMessage(settings.ownerPhone, `⏰ ${p.name} will expire in ${daysLeft} days (Expiry: ${formattedDate}).`);
+            db.prepare("UPDATE products SET flag_expiry = 1 WHERE id = ?").run(p.id);
           }
-
-          // WhatsApp alerts to owner (if configured)
-          if (settings.whatsappAlerts && settings.ownerPhone) {
-            if (expired.length > 0) {
-              sendMessage(settings.ownerPhone, `⚠️ EXPIRY ALERT: ${expired.length} products have expired in your shop. Please remove them immediately!`);
-            }
-            if (outOfStock.length > 0) {
-              sendMessage(settings.ownerPhone, `🚫 OUT OF STOCK: ${outOfStock.length} products are out of stock. Restock urgently!`);
-            }
-            if (lowStock.length > 5) {
-              sendMessage(settings.ownerPhone, `📉 LOW STOCK: ${lowStock.length} items are running low. Please restock!`);
-            }
+          // Expired
+          for (const p of expired) {
+            const formattedDate = new Date(p.expiry_date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            sendMessage(settings.ownerPhone, `⚠️ ${p.name} has EXPIRED (Expiry: ${formattedDate}). Remove immediately!`);
+            db.prepare("UPDATE products SET flag_expiry = 2 WHERE id = ?").run(p.id);
+          }
+          // Dead Stock
+          for (const p of deadStock) {
+            sendMessage(settings.ownerPhone, `💤 ${p.name} is DEAD STOCK. Has not been sold in ${deadThresholdDays} days.`);
+            db.prepare("UPDATE products SET flag_dead_stock = 1 WHERE id = ?").run(p.id);
           }
         }
 
@@ -154,6 +191,9 @@ function createWindow() {
 
                 if (expired.length > 0) {
                     await logNotification(currentShopId, 'EXPIRY', `${expired.length} products expired!`);
+                }
+                if (nearExpiry.length > 0) {
+                    await logNotification(currentShopId, 'NEAR_EXPIRY', `${nearExpiry.length} products expiring within ${expiryDays} days!`);
                 }
                 if (lowStock.length > 0) {
                     await logNotification(currentShopId, 'LOW_STOCK', `${lowStock.length} products running low!`);
@@ -191,13 +231,14 @@ ipcMain.handle("add-product", async (event, product) => {
     unit,
     barcode,
     expiry_date,
-    image
+    image,
+    default_discount
   } = product;
 
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
@@ -210,7 +251,8 @@ ipcMain.handle("add-product", async (event, product) => {
     unit,
     barcode ? String(barcode) : null,
     expiry_date || null,
-    image || null
+    image || null,
+    default_discount || 0
   );
 
   return { message: "Product added" };
@@ -218,12 +260,21 @@ ipcMain.handle("add-product", async (event, product) => {
 
 // 🟢 EDIT PRODUCT (with expiry_date)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image } = product;
+  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount } = product;
+  
+  // Fetch current to optionally reset flags if restocked
+  const oldP = db.prepare("SELECT quantity, expiry_date FROM products WHERE id=?").get(id);
+  let resetStock = quantity > 10 && oldP && oldP.quantity <= 10; // Simple restocking reset rule 
+  let resetExpiry = oldP && (oldP.expiry_date !== expiry_date);
+
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?,
+        flag_low_stock = CASE WHEN ? THEN 0 ELSE flag_low_stock END,
+        flag_out_of_stock = CASE WHEN ? THEN 0 ELSE flag_out_of_stock END,
+        flag_expiry = CASE WHEN ? THEN 0 ELSE flag_expiry END
     WHERE id=?
-  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, id);
+  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, default_discount || 0, resetStock ? 1 : 0, resetStock ? 1 : 0, resetExpiry ? 1 : 0, id);
   return { message: "Product updated" };
 });
 
@@ -380,13 +431,14 @@ ipcMain.handle("search-customer", async (event, phone) => {
   return db.prepare("SELECT * FROM customers WHERE phone = ?").get(phone);
 });
 
-// 🟢 CREATE INVOICE (CUSTOMER + PAYMENT)
+// 🟢 CREATE INVOICE (CUSTOMER + PAYMENT + DISCOUNT)
 ipcMain.handle("create-invoice", async (event, data) => {
   const { cart, customer, paymentMode } = data;
   let total = 0;
 
   cart.forEach(item => {
-    total += (item.total + item.gstAmt);
+    const discountAmt = Number(item.discountAmt || 0);
+    total += (item.total + item.gstAmt - discountAmt);
   });
 
   // Handle Customer Save/Update
@@ -425,13 +477,12 @@ ipcMain.handle("create-invoice", async (event, data) => {
   );
 
   const invoiceId = result.lastInsertRowid;
-  // We return both to the frontend
   const responseData = { message: "Invoice created successfully! 🔥", invoiceId, billNo: nextBillNo };
 
   const insertItem = db.prepare(`
     INSERT INTO invoice_items 
-    (invoice_id, product_id, quantity, price, gst_rate, gst_amount)
-    VALUES (?, ?, ?, ?, ?, ?)
+    (invoice_id, product_id, quantity, price, gst_rate, gst_amount, discount_percent, discount_amount)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateStock = db.prepare(`
@@ -448,7 +499,9 @@ ipcMain.handle("create-invoice", async (event, data) => {
         item.qty,
         item.price,
         item.gstRate,
-        item.gstAmt
+        item.gstAmt,
+        item.discountPercent || 0,
+        item.discountAmt || 0
       );
 
       updateStock.run(item.qty, item.id);
@@ -540,10 +593,19 @@ ipcMain.handle("delete-held-bill", async (event, id) => {
 // 🔥 EXPIRY & STOCK DASHBOARD REPORTS
 // ============================================================
 
-// Get expiry alerts (expired + near-expiry within 7 days)
+// Get expiry alerts (expired + near-expiry within configurable days, default 3)
 ipcMain.handle("get-expiry-alerts", async () => {
   const today = new Date().toISOString().split('T')[0];
-  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  // Read settings for expiry alert days
+  let expiryDays = 3;
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      expiryDays = settings.expiryAlertDays || 3;
+    }
+  } catch(e) {}
+  const inN = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
 
   const expired = db.prepare(`
     SELECT p.*, c.name as category_name, c.gst as category_gst
@@ -557,7 +619,7 @@ ipcMain.handle("get-expiry-alerts", async () => {
     FROM products p LEFT JOIN categories c ON p.category_id = c.id
     WHERE p.expiry_date IS NOT NULL AND p.expiry_date >= ? AND p.expiry_date <= ?
     ORDER BY p.expiry_date ASC
-  `).all(today, in7);
+  `).all(today, inN);
 
   return { expired, nearExpiry };
 });
@@ -595,9 +657,18 @@ ipcMain.handle("get-stock-alerts", async (event, limits) => {
 // Get dashboard summary stats
 ipcMain.handle("get-dashboard-stats", async () => {
   const today = new Date().toISOString().split('T')[0];
-  const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-
-  const lowThreshold = 5;
+  // Read settings
+  let lowThreshold = 10;
+  let expiryDays = 3;
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      lowThreshold = settings.lowStockThreshold || 10;
+      expiryDays = settings.expiryAlertDays || 3;
+    }
+  } catch(e) {}
+  const inN = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
 
   const totalProducts = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
   const totalCategories = db.prepare("SELECT COUNT(*) as cnt FROM categories").get().cnt;
@@ -614,13 +685,44 @@ ipcMain.handle("get-dashboard-stats", async () => {
   `).get(today).cnt;
   const nearExpiryCount = db.prepare(`
     SELECT COUNT(*) as cnt FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ?
-  `).get(today, in7).cnt;
+  `).get(today, inN).cnt;
   const lowStockCount = db.prepare(`
     SELECT COUNT(*) as cnt FROM products WHERE quantity > 0 AND quantity <= ?
   `).get(lowThreshold).cnt;
   const outOfStock = db.prepare(`
     SELECT COUNT(*) as cnt FROM products WHERE quantity <= 0
   `).get().cnt;
+
+  // Low stock product list for dashboard drilldown
+  const lowStockProducts = db.prepare(`
+    SELECT p.name, p.quantity, p.unit, c.name as category_name
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.quantity > 0 AND p.quantity <= ?
+    ORDER BY p.quantity ASC
+  `).all(lowThreshold);
+
+  // Out of stock product list
+  const outOfStockProducts = db.prepare(`
+    SELECT p.name, p.unit, c.name as category_name
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.quantity <= 0
+  `).all();
+
+  // Expiring product list
+  const expiringProducts = db.prepare(`
+    SELECT p.name, p.expiry_date, p.quantity, c.name as category_name
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.expiry_date IS NOT NULL AND p.expiry_date >= ? AND p.expiry_date <= ?
+    ORDER BY p.expiry_date ASC
+  `).all(today, inN);
+
+  // Expired product list
+  const expiredProducts = db.prepare(`
+    SELECT p.name, p.expiry_date, p.quantity, c.name as category_name
+    FROM products p LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.expiry_date IS NOT NULL AND p.expiry_date < ?
+    ORDER BY p.expiry_date ASC
+  `).all(today);
 
   // Profit Calculations: (Selling Price - Cost Price) * Quantity
   const calculateProfit = (timeframeStr) => {
@@ -669,6 +771,53 @@ ipcMain.handle("get-dashboard-stats", async () => {
     totalProducts, totalCategories, todaySales, todayBills,
     expiredCount, nearExpiryCount, lowStockCount, outOfStock,
     topProducts, todayProfit, weeklyProfit, monthlyProfit,
-    dailySales, monthlySalesBreakdown
+    dailySales, monthlySalesBreakdown,
+    lowStockProducts, outOfStockProducts, expiringProducts, expiredProducts
   };
 });
+
+// ============================================================
+// 🔥 OFFERS HANDLERS
+// ============================================================
+
+ipcMain.handle("get-offers", async () => {
+  return db.prepare(`
+    SELECT o.*, 
+           b.name as buy_product_name, 
+           f.name as free_product_name
+    FROM offers o
+    JOIN products b ON o.buy_product_id = b.id
+    JOIN products f ON o.free_product_id = f.id
+    ORDER BY o.created_at DESC
+  `).all();
+});
+
+ipcMain.handle("add-offer", async (event, offer) => {
+  const { name, status, buy_product_id, buy_quantity, free_product_id, free_quantity } = offer;
+  db.prepare(`
+    INSERT INTO offers (name, status, buy_product_id, buy_quantity, free_product_id, free_quantity)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(name, status === undefined ? 1 : status, buy_product_id, buy_quantity, free_product_id, free_quantity);
+  return { message: "Offer added" };
+});
+
+ipcMain.handle("edit-offer", async (event, offer) => {
+  const { id, name, status, buy_product_id, buy_quantity, free_product_id, free_quantity } = offer;
+  db.prepare(`
+    UPDATE offers SET name=?, status=?, buy_product_id=?, buy_quantity=?, free_product_id=?, free_quantity=?
+    WHERE id=?
+  `).run(name, status, buy_product_id, buy_quantity, free_product_id, free_quantity, id);
+  return { message: "Offer updated" };
+});
+
+ipcMain.handle("delete-offer", async (event, id) => {
+  db.prepare("DELETE FROM offers WHERE id=?").run(id);
+  return { message: "Offer deleted" };
+});
+
+ipcMain.handle("toggle-offer-status", async (event, { id, status }) => {
+  db.prepare("UPDATE offers SET status=? WHERE id=?").run(status, id);
+  return { message: "Offer status updated" };
+});
+
+

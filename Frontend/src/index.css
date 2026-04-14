@@ -1,58 +1,59 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-  /* Primary Brand — Deep Blue */
-  --primary:          #0052cc;
-  --primary-hover:    #0043aa;
-  --primary-light:    #e6f0ff;
+  /* Vibrant SaaS Primary (Deep Indigo/Blue) */
+  --primary:          #4f46e5; /* Indigo 600 */
+  --primary-hover:    #4338ca; /* Indigo 700 */
+  --primary-light:    #e0e7ff; /* Indigo 100 */
   --primary-fg:       #ffffff;
 
-  /* Backgrounds */
-  --bg:               #f1f5f9;
+  /* App Backgrounds */
+  --bg:               #f3f6f9; /* Premium Soft Blue-Gray */
   --surface:          #ffffff;
   --surface-hover:    #f8fafc;
-  --surface-2:        #f8fafc;
-  --surface-3:        #f1f5f9;
+  --surface-2:        #f9fafb;
+  --surface-3:        #f3f4f6;
 
-  /* Sidebar — Dark Navy */
-  --sidebar-bg:       #0f1d36;
-  --sidebar-hover:    #172a4a;
-  --sidebar-active:   #0052cc;
-  --sidebar-text:     #8b9cc2;
-  --sidebar-text-active: #ffffff;
-  --sidebar-border:   #1c2e4a;
+  /* Sidebar — Clean, Bright, Premium White SaaS Sidebar */
+  --sidebar-bg:       #ffffff;
+  --sidebar-hover:    #f3f4f6;
+  --sidebar-active:   #eef2ff; /* Vibrant soft active background */
+  --sidebar-text:     #64748b;
+  --sidebar-text-active: #4f46e5; /* Vibrant active text */
+  --sidebar-border:   #eaedf1;
 
-  /* Text */
-  --text-1:           #0f172a;
-  --text-2:           #334155;
-  --text-3:           #64748b;
-  --text-4:           #94a3b8;
+  /* Text Colors */
+  --text-1:           #0f172a; /* Slate 900 */
+  --text-2:           #334155; /* Slate 700 */
+  --text-3:           #64748b; /* Slate 500 (Muted) */
+  --text-4:           #94a3b8; /* Slate 400 (Placeholder/Disabled) */
 
   /* Borders */
-  --border:           #e2e8f0;
-  --border-2:         #cbd5e1;
+  --border:           #e2e8f0; /* Slate 200 */
+  --border-2:         #cbd5e1; /* Slate 300 */
   
-  /* Semantic */
+  /* Semantic Colors */
   --success:          #10b981;
   --success-bg:       #d1fae5;
   --warning:          #f59e0b;
   --warning-bg:       #fef3c7;
   --danger:           #ef4444;
-  --danger-bg:        #fee2e2;
+  --danger-bg:        #fef2f2;
 
-  /* Shadows */
-  --shadow-xs:        0 1px 2px 0 rgb(0 0 0 / 0.03);
-  --shadow-sm:        0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md:        0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg:        0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --shadow-card:      0 8px 16px rgba(0, 0, 0, 0.04);
+  /* Premium Soft SaaS Shadows (Linear / Stripe aesthetic) */
+  --shadow-xs:        0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm:        0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md:        0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
+  --shadow-lg:        0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.03);
+  --shadow-card:      0px 4px 20px rgba(0, 0, 0, 0.03), 0px 1px 3px rgba(0, 0, 0, 0.02);
+  --shadow-float:     0px 16px 32px rgba(0, 0, 0, 0.06), 0px 4px 8px rgba(0, 0, 0, 0.03);
   
-  /* Radius */
-  --r-sm:             6px;
-  --r-md:             8px;
-  --r-lg:             12px;
-  --r-xl:             16px;
-  --r-2xl:            24px;
+  /* Shadcn Standard Border Radius */
+  --r-sm:             0.25rem; /* 4px */
+  --r-md:             0.375rem; /* 6px */
+  --r-lg:             0.5rem; /* 8px */
+  --r-xl:             0.75rem; /* 12px */
+  --r-2xl:            1rem; /* 16px */
 }
 
 *, *::before, *::after {

@@ -20,7 +20,12 @@ export default function BulkUpdate() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const onRefresh = () => load();
+    window.addEventListener('soft_refresh', onRefresh);
+    return () => window.removeEventListener('soft_refresh', onRefresh);
+  }, []);
 
   const handleChange = (id, value) => {
     setUpdates(prev => ({ ...prev, [id]: value }));

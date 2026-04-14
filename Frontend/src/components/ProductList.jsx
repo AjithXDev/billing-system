@@ -16,7 +16,12 @@ const ProductList = () => {
     }
   };
   
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const onRefresh = () => load();
+    window.addEventListener('soft_refresh', onRefresh);
+    return () => window.removeEventListener('soft_refresh', onRefresh);
+  }, []);
 
   const handleDelete = async (id, name) => {
     if (window.confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) {
@@ -42,7 +47,8 @@ const ProductList = () => {
         ...editingProduct,
         gst_rate: Number(editingProduct.gst_rate) || 0,
         product_code: editingProduct.product_code || null,
-        price_type: editingProduct.price_type || 'exclusive'
+        price_type: editingProduct.price_type || 'exclusive',
+        default_discount: Number(editingProduct.default_discount) || 0
       });
       setEditModalOpen(false);
       load();
@@ -262,6 +268,10 @@ const ProductList = () => {
             <div className="form-group" style={{ marginTop: '10px' }}>
               <label className="form-label">Barcode</label>
               <input className="form-input" value={editingProduct.barcode || ""} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
+            </div>
+            <div className="form-group" style={{ marginTop: '10px' }}>
+              <label className="form-label">Default Discount (%)</label>
+              <input type="number" step="0.5" className="form-input" value={editingProduct.default_discount || ""} onChange={e => setEditingProduct({...editingProduct, default_discount: parseFloat(e.target.value)})} />
             </div>
             <div className="form-group">
               <label className="form-label">Category</label>

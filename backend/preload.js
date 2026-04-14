@@ -18,6 +18,14 @@ contextBridge.exposeInMainWorld("api", {
   getHeldBills:        ()             => ipcRenderer.invoke("get-held-bills"),
   deleteHeldBill:      (id)           => ipcRenderer.invoke("delete-held-bill", id),
 
+  // 🔥 Offers & Promotions
+  getOffers:           ()             => ipcRenderer.invoke("get-offers"),
+  addOffer:            (data)         => ipcRenderer.invoke("add-offer", data),
+  editOffer:           (data)         => ipcRenderer.invoke("edit-offer", data),
+  deleteOffer:         (id)           => ipcRenderer.invoke("delete-offer", id),
+  toggleOfferStatus:   (data)         => ipcRenderer.invoke("toggle-offer-status", data),
+
+
   // 🔥 Expiry & Stock Reports
   getExpiryAlerts:     ()             => ipcRenderer.invoke("get-expiry-alerts"),
   getStockAlerts:      ()             => ipcRenderer.invoke("get-stock-alerts"),

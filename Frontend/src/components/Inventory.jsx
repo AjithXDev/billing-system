@@ -14,7 +14,8 @@ const Inventory = () => {
     unit: "Pcs",
     barcode: "",
     expiry_date: "",
-    image: ""
+    image: "",
+    default_discount: ""
   });
 
   const loadCategories = async () => {
@@ -27,7 +28,12 @@ const Inventory = () => {
     }
   };
 
-  useEffect(() => { loadCategories(); }, []);
+  useEffect(() => {
+    loadCategories();
+    const onRefresh = () => loadCategories();
+    window.addEventListener('soft_refresh', onRefresh);
+    return () => window.removeEventListener('soft_refresh', onRefresh);
+  }, []);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -60,7 +66,8 @@ const Inventory = () => {
           unit: "Pcs",
           barcode: "",
           expiry_date: "",
-          image: ""
+          image: "",
+          default_discount: ""
         });
       } catch (err) {
         alert("❌ Error saving product: " + err.message);
@@ -164,6 +171,10 @@ const Inventory = () => {
               <div className="form-group">
                 <label className="form-label">Opening Stock Qty</label>
                 <input className="form-input" name="quantity" type="number" value={form.quantity} onChange={handleChange} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Default Discount (%)</label>
+                <input className="form-input" name="default_discount" type="number" step="0.5" value={form.default_discount} onChange={handleChange} placeholder="e.g. 5" />
               </div>
             </div>
 

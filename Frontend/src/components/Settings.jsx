@@ -7,23 +7,28 @@ const DEFAULTS = {
   storeAddress: "",
   gstNumber: "",
   invoicePrefix: "INV",
-  lowStockThreshold: 5,
+  lowStockThreshold: 10,
   deadStockThresholdDays: 30,
-  expiryAlertDays: 7,
+  expiryAlertDays: 3,
   ownerPhone: "",
+  whatsappAlerts: true,
   isCloudEnabled: false,
   masterKey: "owner123",
   supabaseUrl: "",
   supabaseKey: "",
+  billLogo: "",
 };
 
-function SettingRow({ label, children }) {
+function SettingRow({ label, children, hint }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "16px 0", borderBottom: "1px solid var(--border)", gap: 20
     }}>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)", flex: 1 }}>{label}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-1)" }}>{label}</div>
+        {hint && <div style={{ fontSize: 10.5, color: "var(--text-4)", marginTop: 2 }}>{hint}</div>}
+      </div>
       <div style={{ flexShrink: 0, minWidth: 200 }}>{children}</div>
     </div>
   );
@@ -49,13 +54,12 @@ export default function Settings() {
   const [expoUrl, setExpoUrl] = useState("");
   const [showQR, setShowQR] = useState(false);
 
-  useEffect(() => {
+  const loadSettingsData = () => {
     try {
       const raw = localStorage.getItem("smart_billing_settings");
-      if (raw) setCfg({ ...DEFAULTS, ...JSON.parse(raw) });
+      if (raw) setCfg(prev => ({ ...prev, ...JSON.parse(raw) }));
     } catch (e) {}
 
-    // Get Internet Tunnel URL (for anywhere access)
     window.api?.getDashboardUrl?.().then(url => {
       if (url) setTunnelUrl(url);
     }).catch(() => {});
@@ -64,15 +68,21 @@ export default function Settings() {
       if (ip) setExpoUrl(`exp://${ip}:8081`);
     }).catch(() => {});
 
+    window.api?.getShopId?.().then(id => {
+      if (id) setCfg(prev => ({ ...prev, shopId: id }));
+    });
+  };
+
+  useEffect(() => {
+    loadSettingsData();
+
     // Listen for completion
     window.api?.onTunnelReady?.(data => {
       setTunnelUrl(data.url);
     });
 
-    // Get Auto-generated Shop ID
-    window.api?.getShopId?.().then(id => {
-      if (id) setCfg(prev => ({ ...prev, shopId: id }));
-    });
+    window.addEventListener('soft_refresh', loadSettingsData);
+    return () => window.removeEventListener('soft_refresh', loadSettingsData);
   }, []);
 
   const set = (key, val) => setCfg(prev => ({ ...prev, [key]: val }));
@@ -82,6 +92,17 @@ export default function Settings() {
     window.api?.saveAppSettings?.(cfg);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+    window.dispatchEvent(new Event('settings_updated'));
+  };
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      set("billLogo", reader.result);
+    };
+    reader.readAsDataURL(file);
   };
 
   const inputStyle = {
@@ -93,6 +114,20 @@ export default function Settings() {
   };
 
   const numInputStyle = { ...inputStyle, width: 100 };
+
+  const toggleStyle = (active) => ({
+    width: 44, height: 24, borderRadius: 12,
+    background: active ? "var(--primary)" : "#cbd5e1",
+    border: "none", cursor: "pointer", position: "relative",
+    transition: "background 0.2s", padding: 0
+  });
+
+  const toggleKnob = (active) => ({
+    width: 18, height: 18, borderRadius: "50%",
+    background: "#fff", position: "absolute",
+    top: 3, left: active ? 23 : 3,
+    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+  });
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -146,10 +181,62 @@ export default function Settings() {
           <input style={{ ...inputStyle, width: 100 }} value={cfg.invoicePrefix} onChange={e => set("invoicePrefix", e.target.value.toUpperCase())} placeholder="INV" maxLength={6} />
         </SettingRow>
 
+        {/* ── LOGO FOR BILL ── */}
+        <SectionTitle icon="🖼️" title="Bill Logo" />
+
+        <SettingRow label="Upload Store Logo" hint="Displayed on printed bills/receipts (black & white format)">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {cfg.billLogo ? (
+              <div style={{ position: "relative" }}>
+                <img
+                  src={cfg.billLogo}
+                  alt="Logo"
+                  style={{
+                    width: 60, height: 60, objectFit: "contain",
+                    borderRadius: 8, border: "1px solid var(--border)",
+                    filter: "grayscale(100%)"
+                  }}
+                />
+                <button
+                  onClick={() => set("billLogo", "")}
+                  style={{
+                    position: "absolute", top: -6, right: -6,
+                    width: 18, height: 18, borderRadius: "50%",
+                    background: "#ef4444", color: "white", border: "none",
+                    fontSize: 10, cursor: "pointer", display: "flex",
+                    alignItems: "center", justifyContent: "center"
+                  }}
+                >×</button>
+              </div>
+            ) : (
+              <label style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 60, height: 60, borderRadius: 8,
+                border: "2px dashed var(--border)", cursor: "pointer",
+                background: "var(--surface-2)", fontSize: 24, color: "var(--text-4)"
+              }}>
+                📷
+                <input type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: "none" }} />
+              </label>
+            )}
+            {!cfg.billLogo && (
+              <label style={{
+                padding: "6px 14px", borderRadius: 8,
+                background: "var(--primary)", color: "#fff",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                border: "none"
+              }}>
+                Choose File
+                <input type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: "none" }} />
+              </label>
+            )}
+          </div>
+        </SettingRow>
+
         {/* ── ALERT SETTINGS ── */}
         <SectionTitle icon="🔔" title="System Alerts" />
 
-        <SettingRow label="Low Stock Alert Level">
+        <SettingRow label="Low Stock Alert Level" hint="Products with stock ≤ this value trigger alerts">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="number" style={numInputStyle} value={cfg.lowStockThreshold} min={1} max={100}
               onChange={e => set("lowStockThreshold", Number(e.target.value))} />
@@ -165,7 +252,7 @@ export default function Settings() {
           </div>
         </SettingRow>
 
-        <SettingRow label="Expiry Warning Days">
+        <SettingRow label="Expiry Warning Days" hint="Alert when a product has ≤ this many days to expire">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="number" style={numInputStyle} value={cfg.expiryAlertDays} min={1} max={90}
               onChange={e => set("expiryAlertDays", Number(e.target.value))} />
@@ -175,11 +262,17 @@ export default function Settings() {
 
         <SectionTitle icon="📱" title="Automation & Notifications" />
 
-        <SettingRow label="Owner WhatsApp Number">
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
-            <input style={inputStyle} value={cfg.ownerPhone} onChange={e => set("ownerPhone", e.target.value)} placeholder="919876543210 (with country code)" />
-            <span style={{ fontSize: 10, color: "var(--text-4)" }}>For automated stock/expiry alerts via WhatsApp.</span>
-          </div>
+        <SettingRow label="Owner WhatsApp Number" hint="For automated stock/expiry alerts via WhatsApp">
+          <input style={inputStyle} value={cfg.ownerPhone} onChange={e => set("ownerPhone", e.target.value)} placeholder="919876543210 (with country code)" />
+        </SettingRow>
+
+        <SettingRow label="WhatsApp Alerts" hint="Send automated alerts for low stock, out of stock, and expiry">
+          <button
+            onClick={() => set("whatsappAlerts", !cfg.whatsappAlerts)}
+            style={toggleStyle(cfg.whatsappAlerts)}
+          >
+            <div style={toggleKnob(cfg.whatsappAlerts)} />
+          </button>
         </SettingRow>
 
 
@@ -199,10 +292,10 @@ export default function Settings() {
           <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 400, margin: "0 auto" }}>
             <div style={{ color: "var(--text-2)", fontWeight: 600, marginBottom: 8 }}>Next-Gen Business Analytics & Retail Systems</div>
             We empower local businesses with hyper-fast offline billing coupled with real-time cloud analytics.<br/><br/>
-            <i>“Turning raw data into smarter decisions.”</i>
+            <i>"Turning raw data into smarter decisions."</i>
           </div>
           <div style={{ marginTop: 16, fontSize: 10.5, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>
-            Version 2.0.0 · Local-First Architecture
+            Version 2.1.0 · Local-First Architecture
           </div>
         </div>
 
