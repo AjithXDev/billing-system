@@ -110,7 +110,7 @@ const Inventory = () => {
                <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px' }}>
                  <div className="form-group">
                    <label className="form-label">Product Name</label>
-                   <input className="form-input" name="name" value={form.name} onChange={handleChange} required />
+                   <input className="form-input" name="name" value={form.name} onChange={handleChange} required autoFocus />
                  </div>
                  <div className="form-group">
                    <label className="form-label">Category</label>

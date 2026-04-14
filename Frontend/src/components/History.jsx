@@ -7,6 +7,8 @@ export default function History() {
   const [viewInvoice, setViewInvoice] = useState(null);
   const [viewItems, setViewItems] = useState([]);
   const [viewLoading, setViewLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const loadInvoices = useCallback(() => {
     setLoading(true);
@@ -74,7 +76,16 @@ export default function History() {
     loadInvoices();
   };
 
-  const grouped = groupInvoices(invoices);
+  // Filter invoices by date range
+  const filteredInvoices = invoices.filter(inv => {
+    if (!dateFrom && !dateTo) return true;
+    const d = new Date(inv.created_at).toISOString().split("T")[0];
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  });
+
+  const grouped = groupInvoices(filteredInvoices);
 
   const renderGroup = (label, bills) => {
     if (bills.length === 0) return null;
@@ -145,12 +156,28 @@ export default function History() {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <Receipt size={24} color="var(--primary)" />
         Billing History
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-3)', marginLeft: 'auto' }}>
-          {invoices.length} total bills
-        </span>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Date Range Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'white', border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px' }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)' }}>From</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              style={{ border: 'none', outline: 'none', fontSize: 12, fontFamily: 'inherit', colorScheme: 'light', padding: '4px', background: 'transparent' }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)' }}>To</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              style={{ border: 'none', outline: 'none', fontSize: 12, fontFamily: 'inherit', colorScheme: 'light', padding: '4px', background: 'transparent' }} />
+            {(dateFrom || dateTo) && (
+              <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+                style={{ background: '#ef444415', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Clear</button>
+            )}
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-3)' }}>
+            {filteredInvoices.length}{filteredInvoices.length !== invoices.length ? ` / ${invoices.length}` : ''} bills
+          </span>
+        </div>
       </div>
 
       <div className="modern-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>

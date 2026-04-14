@@ -218,8 +218,8 @@ const ProductList = () => {
   return (
     <div className="admin-scroll-area">
       {isEditModalOpen && editingProduct && (
-        <div className="modal-overlay">
-          <div className="invoice-modal">
+        <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
+          <div className="invoice-modal" onClick={e => e.stopPropagation()}>
             <h2 style={{ marginBottom: '20px', color: '#0f172a' }}>Edit Product</h2>
             <div className="form-group">
               <label className="form-label">Product Name</label>
@@ -343,6 +343,7 @@ const ProductList = () => {
               <input
                 type="text"
                 placeholder="Search products..."
+                autoFocus
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{

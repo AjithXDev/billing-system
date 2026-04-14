@@ -77,10 +77,17 @@ export default function BulkUpdate() {
       <div className="modern-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         
         {/* Search Bar matching history filter approach */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-          <div className="header-search" style={{ width: 400 }}>
-            <Search size={18} />
-            <input type="text" placeholder="Search product to update stock..." value={filter} onChange={e => setFilter(e.target.value)} />
+        <div style={{ padding: '14px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
+          <div style={{ position: 'relative', width: 400 }}>
+            <input
+              type="text"
+              autoFocus
+              className="form-input"
+              placeholder="🔍 Search product to update stock..."
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              style={{ width: '100%', paddingLeft: 14, height: 40, fontSize: 13 }}
+            />
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-3)', fontSize: 13, fontWeight: 500 }}>
             Fast bulk entry ({filteredProducts.length} items)

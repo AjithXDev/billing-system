@@ -116,6 +116,10 @@ const POS = () => {
   // 🟢 Keyboard Shortcuts
   useEffect(() => {
     const handleGlobalKeys = (e) => {
+      // Don't hijack keys if we are in a modal or typing in a non-billing input
+      if (showInvoice || showHeldBills || showQR) return;
+      if (e.target.tagName === 'INPUT' && !e.target.classList.contains('pos-input')) return;
+
       // F2 or Ctrl+F to focus search in Tally mode
       if ((e.key === 'F2' || (e.ctrlKey && e.key === 'f')) && billingMode === 'tally') {
         e.preventDefault();
@@ -138,6 +142,9 @@ const POS = () => {
     setBillingMode(mode);
     setTerminalActive(true);
     enterFullScreen();
+    setTimeout(() => {
+      inputRefs.current["0_name"]?.focus();
+    }, 300);
   };
 
   /* ── Load settings ── */
@@ -197,6 +204,9 @@ const POS = () => {
     return () => {
       clearInterval(syncCheck);
       window.removeEventListener('soft_refresh', doRefresh);
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => console.log("Exit fullscreen error:", err));
+      }
     };
   }, []);
 
@@ -604,7 +614,11 @@ const POS = () => {
     setBillItems([emptyRow()]);
     setCustomer({ name: "", phone: "", address: "" });
     setShowInvoice(false);
-    setTimeout(() => setInvoiceSuccess(false), 300);
+    setTimeout(() => {
+      setInvoiceSuccess(false);
+      // Restore focus to first row after closing
+      inputRefs.current["0_name"]?.focus();
+    }, 300);
   };
 
   /* ════════════════════════════════════════════════════════
@@ -788,7 +802,7 @@ const POS = () => {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "15px" }}>
                         <div>
                           <label className="form-label">Amount Given By Customer (₹)</label>
-                          <input type="text" inputMode="decimal" className="form-input" style={{ fontSize: "1.2rem", padding: "12px" }}
+                          <input type="text" inputMode="decimal" className="form-input" autoFocus style={{ fontSize: "1.2rem", padding: "12px" }}
                             value={amountReceived} onChange={e => setAmountReceived(e.target.value.replace(/[^0-9.]/g, ''))} placeholder={`₹ ${grandTotal}`} />
                         </div>
                         {amountReceived && Number(amountReceived) >= Number(grandTotal) && (
@@ -972,7 +986,10 @@ const POS = () => {
               <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{billingMode === 'photo' ? '🖼️ Image Billing' : '⌨️ Tally Billing'}</h2>
               <div style={{ fontSize: 12, color: "var(--text-4)" }}>Terminal Active · Full Screen Mode</div>
             </div>
-            <button onClick={() => { setTerminalActive(false); if(document.exitFullscreen) document.exitFullscreen(); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>Exit Terminal</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { window.dispatchEvent(new Event('soft_refresh')); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>🔄 Refresh</button>
+              <button onClick={() => { setTerminalActive(false); if(document.exitFullscreen) document.exitFullscreen(); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>Exit Terminal</button>
+            </div>
           </div>
 
           {billingMode === 'photo' ? (
@@ -1205,8 +1222,11 @@ const POS = () => {
                  </div>
 
                  <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-                    <button onClick={holdBill} className="btn-outline" style={{ background: "transparent", border: "1px solid #f59e0b", color: "#f59e0b", padding: "0 20px" }}>⏸ Hold</button>
-                    <button onClick={() => setShowHeldBills(true)} className="btn-outline" style={{ background: "#4f46e520", border: "1px solid #4f46e540", color: "#c7d2fe", padding: "0 20px" }}>▶ Resume</button>
+                    <button onClick={holdBill} className="btn-outline" style={{ background: "white", border: "1.5px solid #f59e0b", color: "#f59e0b", padding: "0 20px", height: 42, borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>⏸ Hold</button>
+                    <button onClick={() => setShowHeldBills(true)} className="btn-outline" style={{ position: "relative", background: "#ede9fe", border: "1.5px solid #c4b5fd", color: "#7c3aed", padding: "0 20px", height: 42, borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                      ▶ Resume
+                      {heldCount > 0 && <span style={{ position: "absolute", top: "-5px", right: "-5px", background: "#ef4444", color: "white", borderRadius: "50%", padding: "2px 6px", fontSize: "10px" }}>{heldCount}</span>}
+                    </button>
                     <button onClick={handleGenerateClick} className="btn-invoice" style={{ height: 42, background: "#2563eb", borderRadius: 8 }}>GENERATE BILL</button>
                  </div>
               </div>
@@ -1325,11 +1345,11 @@ const POS = () => {
                <div style={{ display: "flex", gap: "10px" }}>
                  <button 
                    onClick={holdBill}
-                   style={{ flex: 1, padding: "12px", background: "white", border: "1px solid #f59e0b", color: "#f59e0b", borderRadius: "var(--r-md)", fontWeight: "700", cursor: "pointer" }}
-                 >⏸️ Hold</button>
+                   style={{ flex: 1, padding: "12px", background: "white", border: "1.5px solid #f59e0b", color: "#f59e0b", borderRadius: "var(--r-md)", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                 >⏸ Hold</button>
                  <button 
                    onClick={() => setShowHeldBills(true)}
-                   style={{ flex: 1, position: "relative", padding: "12px", background: "white", border: "1px solid #7c3aed", color: "#7c3aed", borderRadius: "var(--r-md)", fontWeight: "700", cursor: "pointer" }}
+                   style={{ flex: 1, position: "relative", padding: "12px", background: "#ede9fe", border: "1.5px solid #c4b5fd", color: "#7c3aed", borderRadius: "var(--r-md)", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
                  >
                    ▶ Resume
                    {heldCount > 0 && <span style={{ position: "absolute", top: "-5px", right: "-5px", background: "#ef4444", color: "white", borderRadius: "50%", padding: "2px 6px", fontSize: "10px" }}>{heldCount}</span>}

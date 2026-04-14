@@ -107,6 +107,7 @@ const Offers = () => {
     free_quantity: 1,
   });
   const [isEditing, setIsEditing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchOffers = async () => {
     try {
@@ -294,7 +295,16 @@ const Offers = () => {
       <div className="admin-card" style={{ maxWidth: "100%" }}>
         <div className="admin-card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Offers & Promotions ({offers.length})</span>
-          <button className="btn-action" onClick={() => { resetForm(); setShowModal(true); }}>+ New Offer</button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="Search offers..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '13px', width: '200px' }}
+            />
+            <button className="btn-action" onClick={() => { resetForm(); setShowModal(true); }}>+ New Offer</button>
+          </div>
         </div>
 
         <div className="admin-card-body" style={{ padding: 0 }}>
@@ -312,14 +322,21 @@ const Offers = () => {
               </tr>
             </thead>
             <tbody>
-              {offers.length === 0 ? (
-                <tr>
-                  <td colSpan="8" style={{ textAlign: "center", padding: 50, color: "#94a3b8" }}>
-                    No offers defined yet. Click "+ New Offer" to create a promotion.
-                  </td>
-                </tr>
-              ) : (
-                offers.map((offer, idx) => (
+              {(() => {
+                const filtered = offers.filter(o =>
+                  !searchQuery ||
+                  o.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  o.buy_product_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  o.free_product_name?.toLowerCase().includes(searchQuery.toLowerCase())
+                );
+                return filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" style={{ textAlign: "center", padding: 50, color: "#94a3b8" }}>
+                      {offers.length === 0 ? 'No offers defined yet. Click "+ New Offer" to create a promotion.' : `No offers matching "${searchQuery}"`}
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((offer, idx) => (
                   <tr key={offer.id} style={{ opacity: offer.status ? 1 : 0.55 }}>
                     <td style={{ paddingLeft: 25, fontWeight: 800, color: "#0284c7" }}>{idx + 1}</td>
                     <td style={{ fontWeight: 600 }}>{offer.name}</td>
@@ -362,7 +379,8 @@ const Offers = () => {
                     </td>
                   </tr>
                 ))
-              )}
+                );
+              })()}
             </tbody>
           </table>
         </div>
