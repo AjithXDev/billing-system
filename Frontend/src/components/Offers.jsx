@@ -1,6 +1,99 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
-export default function Offers() {
+/* ── Autocomplete Input Component ── */
+function AutocompleteProduct({ products, selectedId, onSelect, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  // Sync display text when selectedId changes (e.g. on edit)
+  useEffect(() => {
+    if (selectedId) {
+      const p = products.find(pr => pr.id === Number(selectedId));
+      if (p) setQuery(p.name);
+    } else {
+      setQuery("");
+    }
+  }, [selectedId, products]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(query.toLowerCase())
+  );
+
+  return (
+    <div ref={wrapperRef} style={{ position: "relative" }}>
+      <input
+        type="text"
+        className="form-input"
+        placeholder={placeholder || "Type to search..."}
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          // Clear selection if user edits text
+          onSelect("");
+        }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0,
+          background: "white", border: "1px solid var(--border)",
+          borderRadius: 8, marginTop: 4, zIndex: 9999,
+          maxHeight: 200, overflowY: "auto",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)"
+        }}>
+          {filtered.map(p => (
+            <div
+              key={p.id}
+              style={{
+                padding: "9px 14px", fontSize: 13, cursor: "pointer",
+                borderBottom: "1px solid #f1f5f9",
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault(); // prevent blur before click registers
+                setQuery(p.name);
+                onSelect(p.id);
+                setOpen(false);
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = "#f8fafc"}
+              onMouseOut={(e) => e.currentTarget.style.background = "white"}
+            >
+              <span style={{ fontWeight: 600, color: "#1e293b" }}>{p.name}</span>
+              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>Stock: {p.quantity} {p.unit}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {open && query && filtered.length === 0 && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0,
+          background: "white", border: "1px solid var(--border)",
+          borderRadius: 8, marginTop: 4, zIndex: 9999,
+          padding: "14px", textAlign: "center", color: "#94a3b8", fontSize: 13,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)"
+        }}>
+          No products matching "{query}"
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Main Offers Component ── */
+const Offers = () => {
   const [offers, setOffers] = useState([]);
   const [products, setProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -9,95 +102,11 @@ export default function Offers() {
     name: "",
     status: 1,
     buy_product_id: "",
-    buy_product_name: "",
     buy_quantity: 1,
     free_product_id: "",
-    free_product_name: "",
     free_quantity: 1,
   });
   const [isEditing, setIsEditing] = useState(false);
-
-  // Custom Searchable Dropdown component
-  const SearchableSelect = ({ options, value, onChange, placeholder, style }) => {
-    const [searchTerm, setSearchTerm] = useState("");
-    const [isOpen, setIsOpen] = useState(false);
-    const [filteredOptions, setFilteredOptions] = useState(options);
-    const dropdownRef = React.useRef(null);
-
-    useEffect(() => {
-      setFilteredOptions(options.filter(o => o.label.toLowerCase().includes(searchTerm.toLowerCase())));
-    }, [searchTerm, options]);
-
-    useEffect(() => {
-      const opt = options.find(o => o.value === value);
-      if (opt) setSearchTerm(opt.label);
-      else if (!value) setSearchTerm("");
-    }, [value, options]);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-        }
-      };
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
-
-    return (
-      <div style={{ position: "relative", width: "100%" }} ref={dropdownRef}>
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => {
-            setSearchTerm(e.target.value);
-            setIsOpen(true);
-            onChange(""); 
-          }}
-          onFocus={() => setIsOpen(true)}
-          placeholder={placeholder}
-          style={style}
-          required={!value} // Require selection for form validation
-        />
-        {isOpen && filteredOptions.length > 0 && (
-          <div style={{
-            position: "absolute", top: "100%", left: 0, right: 0,
-            background: "white", border: "1px solid #e2e8f0", 
-            borderRadius: 8, marginTop: 4, zIndex: 1000, 
-            maxHeight: 200, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
-          }}>
-            {filteredOptions.map((opt) => (
-              <div
-                key={opt.value}
-                style={{
-                  padding: "8px 12px", fontSize: 13, cursor: "pointer",
-                  borderBottom: "1px solid #f1f5f9", background: "white", color: "#1e293b"
-                }}
-                onMouseOver={e => e.currentTarget.style.background = "#f8fafc"}
-                onMouseOut={e => e.currentTarget.style.background = "white"}
-                onMouseDown={() => {
-                  setSearchTerm(opt.label);
-                  onChange(opt.value);
-                  setIsOpen(false);
-                }}
-              >
-                {opt.label} <span style={{ color: "#94a3b8", fontSize: "11px", marginLeft: 4 }}>(Stock: {opt.quantity})</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  useEffect(() => {
-    fetchOffers();
-    fetchProducts();
-
-    const onRefresh = () => { fetchOffers(); fetchProducts(); };
-    window.addEventListener("soft_refresh", onRefresh);
-    return () => window.removeEventListener("soft_refresh", onRefresh);
-  }, []);
 
   const fetchOffers = async () => {
     try {
@@ -121,26 +130,30 @@ export default function Offers() {
     }
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: name.includes("id") || name.includes("quantity") ? Number(value) : value,
-    }));
-  };
+  useEffect(() => {
+    fetchOffers();
+    fetchProducts();
+    const onRefresh = () => { fetchOffers(); fetchProducts(); };
+    window.addEventListener("soft_refresh", onRefresh);
+    return () => window.removeEventListener("soft_refresh", onRefresh);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.buy_product_id || !formData.free_product_id) {
-      alert("Please select valid products from the list");
+      alert("Please select both Buy and Free products from the suggestions.");
       return;
     }
-    
+    const buyProd = products.find(p => p.id === Number(formData.buy_product_id));
+    const freeProd = products.find(p => p.id === Number(formData.free_product_id));
     const finalData = {
       ...formData,
-      name: `Buy ${formData.buy_quantity} ${formData.buy_product_name} Get ${formData.free_quantity} ${formData.free_product_name} Free`
+      buy_product_id: Number(formData.buy_product_id),
+      free_product_id: Number(formData.free_product_id),
+      buy_quantity: Number(formData.buy_quantity),
+      free_quantity: Number(formData.free_quantity),
+      name: `Buy ${formData.buy_quantity} ${buyProd?.name || "?"} Get ${formData.free_quantity} ${freeProd?.name || "?"} Free`
     };
-
     try {
       if (isEditing) {
         await window.api.editOffer(finalData);
@@ -152,6 +165,7 @@ export default function Offers() {
       resetForm();
     } catch (error) {
       console.error("Failed to save offer", error);
+      alert("Error saving offer: " + error.message);
     }
   };
 
@@ -170,9 +184,13 @@ export default function Offers() {
 
   const openEditModal = (offer) => {
     setFormData({
-      ...offer,
-      buy_product_name: offer.buy_product_name || "",
-      free_product_name: offer.free_product_name || ""
+      id: offer.id,
+      name: offer.name,
+      status: offer.status,
+      buy_product_id: offer.buy_product_id,
+      buy_quantity: offer.buy_quantity,
+      free_product_id: offer.free_product_id,
+      free_quantity: offer.free_quantity,
     });
     setIsEditing(true);
     setShowModal(true);
@@ -184,540 +202,173 @@ export default function Offers() {
       name: "",
       status: 1,
       buy_product_id: "",
-      buy_product_name: "",
       buy_quantity: 1,
       free_product_id: "",
-      free_product_name: "",
       free_quantity: 1,
     });
     setIsEditing(false);
   };
 
-  /* ─── Inline Styles (matching existing project design system) ─── */
-  const styles = {
-    page: {
-      padding: "30px 40px 40px 40px",
-      maxWidth: 1200,
-      margin: "0 auto",
-      height: "100%",
-      display: "flex",
-      flexDirection: "column",
-      fontFamily: "Inter, system-ui, sans-serif",
-    },
-    headerCard: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-end",
-      background: "white",
-      padding: "24px 28px",
-      borderRadius: 16,
-      boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-      border: "1px solid #e2e8f0",
-      marginBottom: 28,
-    },
-    title: {
-      fontSize: 26,
-      fontWeight: 800,
-      color: "#1e293b",
-      letterSpacing: "-0.5px",
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-      margin: 0,
-    },
-    titleIcon: {
-      width: 32,
-      height: 32,
-      borderRadius: 8,
-      background: "linear-gradient(135deg, #4f46e5, #6366f1)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "white",
-      fontSize: 18,
-    },
-    subtitle: {
-      color: "#64748b",
-      marginTop: 6,
-      fontWeight: 500,
-      fontSize: 14,
-    },
-    btnPrimary: {
-      background: "linear-gradient(135deg, #4f46e5, #6366f1)",
-      color: "white",
-      border: "none",
-      padding: "12px 24px",
-      borderRadius: 12,
-      fontWeight: 700,
-      fontSize: 14,
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      boxShadow: "0 4px 14px rgba(79, 70, 229, 0.3)",
-      transition: "all 0.2s ease",
-    },
-    grid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-      gap: 20,
-      overflowY: "auto",
-      paddingBottom: 30,
-    },
-    emptyState: {
-      gridColumn: "1 / -1",
-      border: "2px dashed #e2e8f0",
-      borderRadius: 16,
-      padding: "60px 40px",
-      textAlign: "center",
-      color: "#94a3b8",
-      background: "white",
-    },
-    emptyIcon: {
-      fontSize: 52,
-      marginBottom: 16,
-      opacity: 0.5,
-    },
-    card: (isActive) => ({
-      background: "white",
-      borderRadius: 16,
-      padding: "24px",
-      border: `1px solid ${isActive ? "#e0e7ff" : "#e2e8f0"}`,
-      boxShadow: isActive ? "0 4px 16px rgba(79, 70, 229, 0.08)" : "0 1px 3px rgba(0,0,0,0.04)",
-      position: "relative",
-      transition: "all 0.25s ease",
-      opacity: isActive ? 1 : 0.7,
-    }),
-    cardTitle: {
-      fontSize: 18,
-      fontWeight: 800,
-      color: "#1e293b",
-      paddingRight: 36,
-      marginBottom: 14,
-      lineHeight: "1.3",
-    },
-    toggleBtn: (isActive) => ({
-      position: "absolute",
-      top: 24,
-      right: 24,
-      background: "none",
-      border: "none",
-      cursor: "pointer",
-      fontSize: 13,
-      fontWeight: 700,
-      padding: "4px 12px",
-      borderRadius: 20,
-      color: isActive ? "#16a34a" : "#94a3b8",
-      backgroundColor: isActive ? "#dcfce7" : "#f1f5f9",
-      transition: "all 0.2s",
-    }),
-    conditionBox: {
-      background: "#f8fafc",
-      borderRadius: 12,
-      padding: "14px 16px",
-      marginBottom: 18,
-      border: "1px solid #f1f5f9",
-    },
-    condRow: {
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      fontSize: 14,
-      color: "#475569",
-      marginBottom: 6,
-    },
-    condLabel: {
-      fontWeight: 800,
-      color: "#1e293b",
-      fontSize: 13,
-    },
-    condQty: (color) => ({
-      background: color === "green" ? "#dcfce7" : "#e0e7ff",
-      color: color === "green" ? "#16a34a" : "#4338ca",
-      padding: "2px 8px",
-      borderRadius: 4,
-      fontSize: 12,
-      fontWeight: 800,
-    }),
-    freeBadge: {
-      marginLeft: "auto",
-      fontSize: 11,
-      fontWeight: 800,
-      color: "white",
-      background: "linear-gradient(135deg, #10b981, #059669)",
-      padding: "3px 10px",
-      borderRadius: 4,
-    },
-    disabledBadge: {
-      position: "absolute",
-      top: -10,
-      left: -10,
-      background: "#64748b",
-      color: "white",
-      fontSize: 10,
-      fontWeight: 800,
-      padding: "4px 12px",
-      borderRadius: 20,
-      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-      border: "2px solid white",
-      zIndex: 1,
-    },
-    cardActions: {
-      display: "flex",
-      gap: 8,
-      justifyContent: "flex-end",
-      borderTop: "1px solid #f1f5f9",
-      paddingTop: 14,
-    },
-    actionBtn: (hoverColor) => ({
-      background: "none",
-      border: "1px solid #e2e8f0",
-      borderRadius: 8,
-      padding: "6px 14px",
-      cursor: "pointer",
-      fontSize: 12,
-      fontWeight: 600,
-      color: "#64748b",
-      display: "flex",
-      alignItems: "center",
-      gap: 5,
-      transition: "all 0.2s",
-    }),
-    /* Modal */
-    modalOverlay: {
-      position: "fixed",
-      inset: 0,
-      background: "rgba(15, 23, 42, 0.5)",
-      backdropFilter: "blur(4px)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 20,
-      zIndex: 999,
-    },
-    modalBox: {
-      background: "white",
-      borderRadius: 20,
-      boxShadow: "0 25px 60px rgba(0,0,0,0.2)",
-      width: "100%",
-      maxWidth: 520,
-      overflow: "hidden",
-      animation: "slideUp 0.25s ease",
-    },
-    modalHeader: {
-      padding: "20px 24px",
-      borderBottom: "1px solid #f1f5f9",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      background: "#f8fafc",
-    },
-    modalTitle: {
-      fontSize: 20,
-      fontWeight: 800,
-      color: "#1e293b",
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-    },
-    modalClose: {
-      background: "none",
-      border: "none",
-      fontSize: 20,
-      color: "#94a3b8",
-      cursor: "pointer",
-      padding: "4px 8px",
-      borderRadius: 6,
-    },
-    formBody: {
-      padding: "24px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 18,
-    },
-    formLabel: {
-      display: "block",
-      fontSize: 12,
-      fontWeight: 700,
-      color: "#475569",
-      marginBottom: 6,
-      textTransform: "uppercase",
-      letterSpacing: 0.5,
-    },
-    formInput: {
-      width: "100%",
-      border: "2px solid #e2e8f0",
-      padding: "10px 14px",
-      borderRadius: 10,
-      fontSize: 14,
-      outline: "none",
-      transition: "border-color 0.2s",
-      boxSizing: "border-box",
-      fontFamily: "inherit",
-    },
-    formSelect: {
-      width: "100%",
-      border: "1px solid #cbd5e1",
-      padding: "10px 12px",
-      borderRadius: 8,
-      fontSize: 13,
-      outline: "none",
-      background: "white",
-      boxSizing: "border-box",
-      fontFamily: "inherit",
-    },
-    formSection: (isBuy) => ({
-      background: isBuy ? "#f8fafc" : "#eff6ff",
-      padding: "16px",
-      borderRadius: 12,
-      border: `1px solid ${isBuy ? "#e2e8f0" : "#dbeafe"}`,
-      position: "relative",
-    }),
-    sectionTitle: {
-      fontWeight: 800,
-      fontSize: 14,
-      color: "#334155",
-      marginBottom: 12,
-      display: "flex",
-      alignItems: "center",
-      gap: 6,
-    },
-    rewardTag: {
-      position: "absolute",
-      top: -10,
-      right: 14,
-      background: "linear-gradient(135deg, #10b981, #059669)",
-      color: "white",
-      fontSize: 10,
-      fontWeight: 800,
-      padding: "3px 10px",
-      borderRadius: 4,
-      boxShadow: "0 2px 6px rgba(16, 185, 129, 0.3)",
-    },
-    formRow: {
-      display: "grid",
-      gridTemplateColumns: "1fr 100px",
-      gap: 12,
-    },
-    formActions: {
-      display: "flex",
-      justifyContent: "flex-end",
-      gap: 12,
-      paddingTop: 6,
-    },
-    btnCancel: {
-      padding: "10px 20px",
-      background: "none",
-      border: "none",
-      color: "#64748b",
-      fontWeight: 600,
-      fontSize: 14,
-      cursor: "pointer",
-      borderRadius: 10,
-    },
-    btnSubmit: {
-      padding: "10px 24px",
-      background: "linear-gradient(135deg, #4f46e5, #6366f1)",
-      color: "white",
-      border: "none",
-      fontWeight: 800,
-      fontSize: 14,
-      borderRadius: 10,
-      cursor: "pointer",
-      boxShadow: "0 4px 14px rgba(79, 70, 229, 0.3)",
-      transition: "all 0.2s",
-    },
-  };
-
   return (
-    <div style={styles.page}>
-      {/* Header */}
-      <div style={styles.headerCard}>
-        <div>
-          <h1 style={styles.title}>
-            <div style={styles.titleIcon}>🎁</div>
-            Offers & Promotions
-          </h1>
-          <p style={styles.subtitle}>Create and manage Buy-X-Get-Y offers</p>
-        </div>
-        <button
-          style={styles.btnPrimary}
-          onClick={() => { resetForm(); setShowModal(true); }}
-          onMouseOver={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(79, 70, 229, 0.4)"; }}
-          onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(79, 70, 229, 0.3)"; }}
-        >
-          + New Offer
-        </button>
-      </div>
-
-      {/* Offers Grid */}
-      <div style={styles.grid}>
-        {offers.length === 0 ? (
-          <div style={styles.emptyState}>
-            <div style={styles.emptyIcon}>🎁</div>
-            <p style={{ fontSize: 17, fontWeight: 700, margin: "0 0 6px 0" }}>No offers defined yet.</p>
-            <p style={{ fontSize: 14, margin: 0 }}>Click "New Offer" to create a promotion.</p>
-          </div>
-        ) : (
-          offers.map(offer => (
-            <div
-              key={offer.id}
-              style={styles.card(!!offer.status)}
-              onMouseOver={e => { if (offer.status) { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.08)"; } }}
-              onMouseOut={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = offer.status ? "0 4px 16px rgba(79, 70, 229, 0.08)" : "0 1px 3px rgba(0,0,0,0.04)"; }}
-            >
-              {!offer.status && <div style={styles.disabledBadge}>DISABLED</div>}
-
-              <div style={styles.cardTitle}>{offer.name}</div>
-
-              <button
-                style={styles.toggleBtn(!!offer.status)}
-                onClick={() => toggleStatus(offer)}
-              >
-                {offer.status ? "● ON" : "○ OFF"}
-              </button>
-
-              <div style={styles.conditionBox}>
-                <div style={styles.condRow}>
-                  <span style={styles.condLabel}>Buy</span>
-                  <span style={styles.condQty("blue")}>{offer.buy_quantity}</span>
-                  <span style={{ fontWeight: 500 }}>{offer.buy_product_name}</span>
-                </div>
-                <div style={{ ...styles.condRow, marginBottom: 0 }}>
-                  <span style={{ ...styles.condLabel, color: "#16a34a" }}>🎁 Get</span>
-                  <span style={styles.condQty("green")}>{offer.free_quantity}</span>
-                  <span style={{ fontWeight: 500 }}>{offer.free_product_name}</span>
-                  <span style={styles.freeBadge}>FREE</span>
-                </div>
-              </div>
-
-              <div style={styles.cardActions}>
-                <button
-                  style={styles.actionBtn("#4f46e5")}
-                  onClick={() => openEditModal(offer)}
-                  onMouseOver={e => { e.currentTarget.style.color = "#4f46e5"; e.currentTarget.style.borderColor = "#c7d2fe"; }}
-                  onMouseOut={e => { e.currentTarget.style.color = "#64748b"; e.currentTarget.style.borderColor = "#e2e8f0"; }}
-                >
-                  ✏️ Edit
-                </button>
-                <button
-                  style={styles.actionBtn("#ef4444")}
-                  onClick={() => handleDelete(offer.id)}
-                  onMouseOver={e => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.borderColor = "#fca5a5"; }}
-                  onMouseOut={e => { e.currentTarget.style.color = "#64748b"; e.currentTarget.style.borderColor = "#e2e8f0"; }}
-                >
-                  🗑️ Delete
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Modal */}
+    <div className="admin-scroll-area">
+      {/* ── Modal ── */}
       {showModal && (
-        <div style={styles.modalOverlay} onClick={() => setShowModal(false)}>
-          <div style={styles.modalBox} onClick={e => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <div style={styles.modalTitle}>
-                🎁 {isEditing ? "Edit Offer" : "Create New Offer"}
-              </div>
-              <button style={styles.modalClose} onClick={() => setShowModal(false)}>✕</button>
-            </div>
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="invoice-modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginBottom: 20, color: "#0f172a" }}>
+              {isEditing ? "Edit Offer" : "Create New Offer"}
+            </h2>
 
-            <form onSubmit={handleSubmit} style={styles.formBody}>
+            <form onSubmit={handleSubmit}>
               {/* Buy Condition */}
-              <div style={styles.formSection(true)}>
-                <div style={styles.sectionTitle}>🛒 Condition (Buy)</div>
-                <div style={styles.formRow}>
-                  <div>
-                    <label style={styles.formLabel}>Select Product</label>
-                    <SearchableSelect
-                      options={products.map(p => ({ label: p.name, value: p.id, quantity: p.quantity }))}
-                      value={formData.buy_product_id}
-                      onChange={(id) => {
-                        const prod = products.find(p => p.id === id);
-                        setFormData(prev => ({
-                          ...prev,
-                          buy_product_id: id,
-                          buy_product_name: prod ? prod.name : ""
-                        }));
-                      }}
-                      placeholder="Type or select product..."
-                      style={styles.formInput}
+              <div style={{ background: "#f8fafc", borderRadius: 10, padding: 16, marginBottom: 16, border: "1px solid #e2e8f0" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#334155", marginBottom: 12 }}>🛒 Condition (Buy)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Select Product</label>
+                    <AutocompleteProduct
+                      products={products}
+                      selectedId={formData.buy_product_id}
+                      onSelect={(id) => setFormData(prev => ({ ...prev, buy_product_id: id }))}
+                      placeholder="Type to search product..."
                     />
                   </div>
-                  <div>
-                    <label style={styles.formLabel}>Req. Qty</label>
+                  <div className="form-group">
+                    <label className="form-label">Req. Qty</label>
                     <input
                       type="number"
-                      name="buy_quantity"
+                      className="form-input"
                       min="1"
                       value={formData.buy_quantity}
-                      onChange={handleInputChange}
+                      onChange={e => setFormData(prev => ({ ...prev, buy_quantity: e.target.value }))}
                       required
-                      style={{ ...styles.formInput, textAlign: "center" }}
-                      onFocus={e => e.target.style.borderColor = "#4f46e5"}
-                      onBlur={e => e.target.style.borderColor = "#e2e8f0"}
                     />
                   </div>
                 </div>
               </div>
 
               {/* Reward */}
-              <div style={styles.formSection(false)}>
-                <div style={styles.rewardTag}>REWARD</div>
-                <div style={styles.sectionTitle}>🎁 Reward (Get Free)</div>
-                <div style={styles.formRow}>
-                  <div>
-                    <label style={styles.formLabel}>Select Free Product</label>
-                    <SearchableSelect
-                      options={products.map(p => ({ label: p.name, value: p.id, quantity: p.quantity }))}
-                      value={formData.free_product_id}
-                      onChange={(id) => {
-                        const prod = products.find(p => p.id === id);
-                        setFormData(prev => ({
-                          ...prev,
-                          free_product_id: id,
-                          free_product_name: prod ? prod.name : ""
-                        }));
-                      }}
-                      placeholder="Type or select free item..."
-                      style={styles.formInput}
+              <div style={{ background: "#eff6ff", borderRadius: 10, padding: 16, marginBottom: 20, border: "1px solid #dbeafe", position: "relative" }}>
+                <div style={{
+                  position: "absolute", top: -10, right: 14,
+                  background: "linear-gradient(135deg, #10b981, #059669)",
+                  color: "white", fontSize: 10, fontWeight: 800,
+                  padding: "3px 10px", borderRadius: 4,
+                  boxShadow: "0 2px 6px rgba(16, 185, 129, 0.3)"
+                }}>REWARD</div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#334155", marginBottom: 12 }}>🎁 Reward (Get Free)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Select Free Product</label>
+                    <AutocompleteProduct
+                      products={products}
+                      selectedId={formData.free_product_id}
+                      onSelect={(id) => setFormData(prev => ({ ...prev, free_product_id: id }))}
+                      placeholder="Type to search free item..."
                     />
                   </div>
-                  <div>
-                    <label style={styles.formLabel}>Free Qty</label>
+                  <div className="form-group">
+                    <label className="form-label">Free Qty</label>
                     <input
                       type="number"
-                      name="free_quantity"
+                      className="form-input"
                       min="1"
                       value={formData.free_quantity}
-                      onChange={handleInputChange}
+                      onChange={e => setFormData(prev => ({ ...prev, free_quantity: e.target.value }))}
                       required
-                      style={{ ...styles.formInput, textAlign: "center" }}
-                      onFocus={e => e.target.style.borderColor = "#4f46e5"}
-                      onBlur={e => e.target.style.borderColor = "#e2e8f0"}
                     />
                   </div>
                 </div>
               </div>
 
-              <div style={styles.formActions}>
-                <button type="button" style={styles.btnCancel} onClick={() => setShowModal(false)}>Cancel</button>
-                <button
-                  type="submit"
-                  style={styles.btnSubmit}
-                  onMouseOver={e => { e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseOut={e => { e.currentTarget.style.transform = "none"; }}
-                >
-                  {isEditing ? "Update Offer" : "Create Offer"}
-                </button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 10 }}>
+                <button type="button" className="btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn-action">{isEditing ? "Update Offer" : "Create Offer"}</button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* ── Main Card ── */}
+      <div className="admin-card" style={{ maxWidth: "100%" }}>
+        <div className="admin-card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Offers & Promotions ({offers.length})</span>
+          <button className="btn-action" onClick={() => { resetForm(); setShowModal(true); }}>+ New Offer</button>
+        </div>
+
+        <div className="admin-card-body" style={{ padding: 0 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ paddingLeft: 25 }}>#</th>
+                <th>Offer Name</th>
+                <th>Buy Product</th>
+                <th style={{ textAlign: "center" }}>Buy Qty</th>
+                <th>Free Product</th>
+                <th style={{ textAlign: "center" }}>Free Qty</th>
+                <th style={{ textAlign: "center" }}>Status</th>
+                <th style={{ textAlign: "right", paddingRight: 25 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {offers.length === 0 ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: "center", padding: 50, color: "#94a3b8" }}>
+                    No offers defined yet. Click "+ New Offer" to create a promotion.
+                  </td>
+                </tr>
+              ) : (
+                offers.map((offer, idx) => (
+                  <tr key={offer.id} style={{ opacity: offer.status ? 1 : 0.55 }}>
+                    <td style={{ paddingLeft: 25, fontWeight: 800, color: "#0284c7" }}>{idx + 1}</td>
+                    <td style={{ fontWeight: 600 }}>{offer.name}</td>
+                    <td>{offer.buy_product_name || "—"}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <span style={{
+                        background: "#e0e7ff", color: "#4338ca",
+                        padding: "2px 10px", borderRadius: 4,
+                        fontSize: 12, fontWeight: 800
+                      }}>{offer.buy_quantity}</span>
+                    </td>
+                    <td>{offer.free_product_name || "—"}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <span style={{
+                        background: "#dcfce7", color: "#16a34a",
+                        padding: "2px 10px", borderRadius: 4,
+                        fontSize: 12, fontWeight: 800
+                      }}>{offer.free_quantity}</span>
+                      <span style={{
+                        marginLeft: 6, background: "linear-gradient(135deg, #10b981, #059669)",
+                        color: "white", padding: "2px 8px", borderRadius: 4,
+                        fontSize: 10, fontWeight: 700
+                      }}>FREE</span>
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        onClick={() => toggleStatus(offer)}
+                        style={{
+                          border: "none", cursor: "pointer",
+                          padding: "4px 14px", borderRadius: 20,
+                          fontSize: 12, fontWeight: 700,
+                          background: offer.status ? "#dcfce7" : "#f1f5f9",
+                          color: offer.status ? "#16a34a" : "#94a3b8",
+                        }}
+                      >{offer.status ? "● ON" : "○ OFF"}</button>
+                    </td>
+                    <td style={{ textAlign: "right", paddingRight: 25, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                      <button className="btn-outline" style={{ padding: "6px 12px", fontSize: "0.85rem" }} onClick={() => openEditModal(offer)}>Edit</button>
+                      <button className="btn-outline" style={{ padding: "6px 12px", fontSize: "0.85rem", color: "#dc2626", borderColor: "#fecaca", background: "#fef2f2" }} onClick={() => handleDelete(offer.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default Offers;
