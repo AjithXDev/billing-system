@@ -29,7 +29,16 @@ if (!window.api) {
     onWhatsappStatus: () => { },
     onDashboardReady: () => { },
     onTunnelReady: () => { },
-    getDashboardUrl: () => Promise.resolve(null)
+    getDashboardUrl: () => Promise.resolve(null),
+    getOffers: () => fetch(`${API_URL}/offers`).then(r => r.json()),
+    addOffer: (d) => fetch(`${API_URL}/offers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }).then(r => r.json()),
+    editOffer: (d) => fetch(`${API_URL}/offers/${d.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }).then(r => r.json()),
+    deleteOffer: (id) => fetch(`${API_URL}/offers/${id}`, { method: "DELETE" }).then(r => r.json()),
+    toggleOfferStatus: (d) => fetch(`${API_URL}/offers/${d.id}/toggle`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }).then(r => r.json()),
+    getNotifications: (o) => fetch(`${API_URL}/notifications?unread=${!!o?.unreadOnly}`).then(r => r.json()),
+    saveAppSettings: (d) => { localStorage.setItem("smart_billing_settings", JSON.stringify(d)); return Promise.resolve({ success: true }); },
+    getAppSettings: () => Promise.resolve(JSON.parse(localStorage.getItem("smart_billing_settings") || "{}")),
+    getSyncStatus: () => Promise.resolve({ pending: 0 })
   };
 }
 

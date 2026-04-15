@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
+const { v4: uuidv4 } = require("uuid");
 const { createClient } = require('@supabase/supabase-js');
 
 // ── CLOUD SYNC ENGINE ──

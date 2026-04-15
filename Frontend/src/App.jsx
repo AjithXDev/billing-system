@@ -81,7 +81,17 @@ function App() {
     }, 200);
   }, [currentView]);
 
-  // 2. Debounced Refresh Logic
+  // 2. Load Settings Logic
+  const loadSettings = () => {
+    try {
+      const raw = localStorage.getItem("smart_billing_settings");
+      if (raw) setAppSettings(JSON.parse(raw));
+    } catch (e) {
+      console.error("Failed to load settings:", e);
+    }
+  };
+
+  // 3. Debounced Refresh Logic
   const handleRefresh = () => {
     if (window._isRefreshing) return;
     window._isRefreshing = true;
@@ -90,6 +100,8 @@ function App() {
   };
 
   useEffect(() => {
+    loadSettings();
+    window.addEventListener('settings_updated', loadSettings);
 
     if (!window.api) {
       return () => window.removeEventListener('settings_updated', loadSettings);
@@ -184,7 +196,7 @@ function App() {
           </header>
           
           <div className="enterprise-workspace">
-            {currentView === 'pos'          && <POS />}
+            {currentView === 'pos'          && <POS showQR={showQR} />}
             {currentView === 'add_product'  && <Inventory />}
             {currentView === 'product_list' && <ProductList />}
             {currentView === 'bulk_update'  && <BulkUpdate />}

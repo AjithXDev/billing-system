@@ -85,7 +85,7 @@ function HeldBillsPanel({ onResume, onClose }) {
 }
 
 /* ─────────────────── Main POS Component ────────────── */
-const POS = () => {
+const POS = ({ showQR }) => {
   const emptyRow = () => ({ tempId: Date.now() + Math.random(), name: "", price: 0, qty: 0, total: 0, gstRate: 0, gstAmt: 0, discountPercent: 0, discountAmt: 0 });
 
   const [billItems, setBillItems] = useState([emptyRow()]);

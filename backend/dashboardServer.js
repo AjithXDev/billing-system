@@ -546,6 +546,53 @@ function startDashboardServer(mainWindow) {
   });
 
   /* ══════════════════════════════════════════════════════
+     API: Offers & Promotions
+  ══════════════════════════════════════════════════════ */
+  expressApp.get("/api/offers", (req, res) => {
+    try {
+      res.json(db.prepare(`
+        SELECT o.*, b.name as buy_product_name, f.name as free_product_name
+        FROM offers o
+        JOIN products b ON o.buy_product_id = b.id
+        JOIN products f ON o.free_product_id = f.id
+        ORDER BY o.created_at DESC
+      `).all());
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/offers", (req, res) => {
+    try {
+      const { name, status, buy_product_id, buy_quantity, free_product_id, free_quantity } = req.body;
+      db.prepare(`INSERT INTO offers (name, status, buy_product_id, buy_quantity, free_product_id, free_quantity) VALUES (?, ?, ?, ?, ?, ?)`).run(
+        name, status === undefined ? 1 : status, buy_product_id, buy_quantity, free_product_id, free_quantity
+      );
+      res.json({ message: "Offer added" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.put("/api/offers/:id", (req, res) => {
+    try {
+      const { name, status, buy_product_id, buy_quantity, free_product_id, free_quantity } = req.body;
+      db.prepare(`UPDATE offers SET name=?, status=?, buy_product_id=?, buy_quantity=?, free_product_id=?, free_quantity=? WHERE id=?`).run(
+        name, status, buy_product_id, buy_quantity, free_product_id, free_quantity, req.params.id
+      );
+      res.json({ message: "Offer updated" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.delete("/api/offers/:id", (req, res) => {
+    try { db.prepare("DELETE FROM offers WHERE id=?").run(req.params.id); res.json({ message: "Offer deleted" }); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/offers/:id/toggle", (req, res) => {
+    try {
+      const { status } = req.body;
+      db.prepare("UPDATE offers SET status=? WHERE id=?").run(status, req.params.id);
+      res.json({ message: "Status toggled" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  /* ══════════════════════════════════════════════════════
      API: AI CHATBOT (Business Insights)
   ══════════════════════════════════════════════════════ */
   expressApp.post("/api/ai/ask", (req, res) => {
