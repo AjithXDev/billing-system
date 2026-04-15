@@ -13,6 +13,8 @@
   <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1055/1055644.png" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <!-- Supabase JS Client (for direct cloud access from anywhere) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
   <style>
     /* ══════════════════════════════════════════════════════
@@ -115,6 +117,15 @@
     .login-btn:active { transform: scale(0.98); opacity: 0.9; }
     .login-error { color: var(--red); font-size: 12px; margin-top: 12px; display: none; font-weight: 600; }
 
+    /* ── Connection mode indicator on login ── */
+    .login-mode {
+      margin-top: 20px; padding: 10px 16px;
+      border-radius: 10px; font-size: 11px;
+      font-weight: 600; text-align: center;
+    }
+    .login-mode.cloud { background: var(--green-bg); color: var(--green); }
+    .login-mode.local { background: var(--cyan-bg); color: var(--cyan); }
+
     /* ══════════════════════════════════════════════════════
        APP CONTAINER
     ══════════════════════════════════════════════════════ */
@@ -146,6 +157,8 @@
     .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
     .status-badge.offline { background: var(--red-bg); color: var(--red); }
     .status-badge.offline .dot { background: var(--red); animation: none; }
+    .status-badge.cloud { background: var(--cyan-bg); color: var(--cyan); }
+    .status-badge.cloud .dot { background: var(--cyan); }
 
     @keyframes pulse-dot {
       0%, 100% { opacity: 1; }
@@ -495,6 +508,7 @@
     <input id="master-key-input" type="password" class="login-input" placeholder="Access Key" />
     <button id="login-btn" class="login-btn" onclick="attemptLogin()">Unlock Dashboard</button>
     <div id="login-error" class="login-error">❌ Invalid key. Please try again.</div>
+    <div id="login-mode" class="login-mode" style="display:none;"></div>
   </div>
 </div>
 
@@ -513,7 +527,7 @@
   <header class="app-header">
     <div class="brand">iVA <span>CLOUD</span></div>
     <div style="display:flex;align-items:center;gap:12px;">
-      <button class="header-bell" onclick="window.location.reload()" title="Refresh">
+      <button class="header-bell" onclick="loadAllData()" title="Refresh">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.58 5.58"/></svg>
       </button>
       <button class="header-bell" onclick="switchTab('alerts')" title="Notifications">
@@ -589,10 +603,10 @@
       </div>
     </div>
 
-    <!-- Profit Summary -->
+    <!-- Profit Summary (Now with OVERALL) -->
     <div class="card" style="margin-bottom:20px;">
       <div class="chart-title">Profit Summary</div>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; text-align:center;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; text-align:center;">
         <div>
           <div style="font-size:9px; color:var(--text-4); text-transform:uppercase; letter-spacing:0.06em; font-weight:700; margin-bottom:6px;">Today</div>
           <div id="profit-today" style="font-size:18px; font-weight:800;" class="profit-positive">₹0</div>
@@ -604,6 +618,10 @@
         <div>
           <div style="font-size:9px; color:var(--text-4); text-transform:uppercase; letter-spacing:0.06em; font-weight:700; margin-bottom:6px;">This Month</div>
           <div id="profit-month" style="font-size:18px; font-weight:800;" class="profit-positive">₹0</div>
+        </div>
+        <div>
+          <div style="font-size:9px; color:var(--text-4); text-transform:uppercase; letter-spacing:0.06em; font-weight:700; margin-bottom:6px;">Overall</div>
+          <div id="profit-overall" style="font-size:18px; font-weight:800;" class="profit-positive">₹0</div>
         </div>
       </div>
     </div>
@@ -731,11 +749,84 @@
 /* ══════════════════════════════════════════════════════
    STATE & CONFIGURATION
 ══════════════════════════════════════════════════════ */
-const API = window.location.origin;
+
+// Server-injected values (replaced when served from local API)
+const INJECTED_SUPABASE_URL = "__SUPABASE_URL__";
+const INJECTED_SUPABASE_KEY = "__SUPABASE_KEY__";
+const INJECTED_SHOP_ID      = "__SHOP_ID__";
+const INJECTED_MASTER_KEY   = "__MASTER_KEY__";
+const INJECTED_LOCAL_API    = "__LOCAL_API__";
+
+// Data source mode: 'local' (same WiFi) or 'cloud' (Supabase direct)
+let dataMode = 'local';
+let localAPI = '';
+let supabaseClient = null;
+let shopId = '';
 let isOnline = navigator.onLine;
 let charts = {};
 let statsData = {};
 let refreshInterval = null;
+
+/* ══════════════════════════════════════════════════════
+   SMART INIT — Detect local vs cloud mode
+══════════════════════════════════════════════════════ */
+function initDataSource() {
+  // 1. Check if page was served with injected values (local WiFi access)
+  const hasInjected = INJECTED_SUPABASE_URL && !INJECTED_SUPABASE_URL.includes("__SUPABASE_URL__") && INJECTED_SUPABASE_URL.startsWith("http");
+
+  if (hasInjected) {
+    // Save Supabase config to localStorage for future remote access
+    localStorage.setItem("iva_supabase_url", INJECTED_SUPABASE_URL);
+    localStorage.setItem("iva_supabase_key", INJECTED_SUPABASE_KEY);
+    localStorage.setItem("iva_shop_id", INJECTED_SHOP_ID);
+    if (INJECTED_LOCAL_API && !INJECTED_LOCAL_API.includes("__LOCAL_API__")) {
+      localStorage.setItem("iva_local_api", INJECTED_LOCAL_API);
+    }
+  }
+
+  // 2. Try to determine data source
+  const savedUrl = localStorage.getItem("iva_supabase_url");
+  const savedKey = localStorage.getItem("iva_supabase_key");
+  shopId = localStorage.getItem("iva_shop_id") || "";
+
+  // If we have a local API origin (page served from local server)
+  const isServedLocally = window.location.port === "4567" || (INJECTED_LOCAL_API && !INJECTED_LOCAL_API.includes("__LOCAL_API__"));
+
+  if (isServedLocally) {
+    localAPI = window.location.origin;
+    dataMode = 'local';
+    console.log("[Init] Mode: LOCAL — reading from API server at", localAPI);
+  }
+
+  // Also init Supabase client for cloud fallback / remote access
+  if (savedUrl && savedKey && savedUrl.startsWith("http")) {
+    try {
+      supabaseClient = supabase.createClient(savedUrl, savedKey);
+      console.log("[Init] Supabase client ready for cloud access");
+      // If NOT served locally, use cloud mode
+      if (!isServedLocally) {
+        dataMode = 'cloud';
+        console.log("[Init] Mode: CLOUD — reading from Supabase directly");
+      }
+    } catch (e) {
+      console.warn("[Init] Supabase init failed:", e.message);
+    }
+  }
+
+  // Update login screen mode indicator
+  const modeEl = document.getElementById("login-mode");
+  if (dataMode === 'cloud') {
+    modeEl.className = "login-mode cloud";
+    modeEl.textContent = "☁️ Cloud Mode — accessing data remotely via Supabase";
+    modeEl.style.display = "block";
+  } else if (isServedLocally) {
+    modeEl.className = "login-mode local";
+    modeEl.textContent = "📡 Local Mode — connected to shop server";
+    modeEl.style.display = "block";
+  }
+}
+
+initDataSource();
 
 /* ══════════════════════════════════════════════════════
    SERVICE WORKER REGISTRATION
@@ -756,14 +847,18 @@ function updateOnlineStatus() {
   const banner = document.getElementById("offline-banner");
   const badge = document.getElementById("status-badge");
   
-  if (isOnline) {
-    banner.classList.remove("show");
-    badge.className = "status-badge";
-    badge.innerHTML = '<span class="dot"></span> Live';
-  } else {
+  if (!isOnline) {
     banner.classList.add("show");
     badge.className = "status-badge offline";
     badge.innerHTML = '<span class="dot"></span> Offline';
+  } else if (dataMode === 'cloud') {
+    banner.classList.remove("show");
+    badge.className = "status-badge cloud";
+    badge.innerHTML = '<span class="dot"></span> Cloud';
+  } else {
+    banner.classList.remove("show");
+    badge.className = "status-badge";
+    badge.innerHTML = '<span class="dot"></span> Live';
   }
 }
 
@@ -771,36 +866,80 @@ window.addEventListener("online", () => { updateOnlineStatus(); loadAllData(); }
 window.addEventListener("offline", updateOnlineStatus);
 
 /* ══════════════════════════════════════════════════════
-   AUTH
+   AUTH — Works both locally and via Supabase
 ══════════════════════════════════════════════════════ */
-function attemptLogin() {
+async function attemptLogin() {
   const key = document.getElementById("master-key-input").value.trim();
   if (!key) return;
 
-  fetch(`${API}/api/auth`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key })
-  })
-    .then(r => {
-      if (r.ok) {
+  const errorEl = document.getElementById("login-error");
+  
+  // Try local auth first
+  if (dataMode === 'local' && localAPI) {
+    try {
+      const res = await fetch(`${localAPI}/api/auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key })
+      });
+      if (res.ok) {
+        localStorage.setItem("iva_auth_key", key);
+        // Also grab Supabase config from local API for future remote use
+        try {
+          const config = await (await fetch(`${localAPI}/api/config`)).json();
+          if (config.supabaseUrl) localStorage.setItem("iva_supabase_url", config.supabaseUrl);
+          if (config.supabaseKey) localStorage.setItem("iva_supabase_key", config.supabaseKey);
+          if (config.shopId) localStorage.setItem("iva_shop_id", config.shopId);
+        } catch(e) {}
+        showApp();
+        return;
+      } else {
+        errorEl.textContent = "❌ Invalid key. Please try again.";
+        errorEl.style.display = "block";
+        setTimeout(() => errorEl.style.display = "none", 3000);
+        return;
+      }
+    } catch(e) {
+      console.log("[Auth] Local auth failed, trying cloud...");
+    }
+  }
+
+  // Cloud auth — verify against shops table in Supabase
+  if (supabaseClient && shopId) {
+    try {
+      const { data, error } = await supabaseClient
+        .from("shops")
+        .select("master_key")
+        .eq("id", shopId)
+        .single();
+      
+      if (!error && data && data.master_key === key) {
         localStorage.setItem("iva_auth_key", key);
         showApp();
-      } else {
-        document.getElementById("login-error").style.display = "block";
-        setTimeout(() => document.getElementById("login-error").style.display = "none", 3000);
+        return;
       }
-    })
-    .catch(() => {
-      // Offline — check saved key
-      const saved = localStorage.getItem("iva_auth_key");
-      if (saved && saved === key) {
-        showApp();
-      } else {
-        document.getElementById("login-error").style.display = "block";
-        document.getElementById("login-error").textContent = "⚡ Can't verify — you appear offline.";
-      }
-    });
+    } catch(e) {
+      console.warn("[Auth] Cloud auth error:", e.message);
+    }
+  }
+
+  // Offline fallback — check saved key
+  const savedKey = localStorage.getItem("iva_auth_key");
+  if (savedKey && savedKey === key) {
+    showApp();
+    return;
+  }
+
+  // Check injected master key
+  if (INJECTED_MASTER_KEY && !INJECTED_MASTER_KEY.includes("__MASTER_KEY__") && key === INJECTED_MASTER_KEY) {
+    localStorage.setItem("iva_auth_key", key);
+    showApp();
+    return;
+  }
+
+  errorEl.textContent = "❌ Invalid key. Please try again.";
+  errorEl.style.display = "block";
+  setTimeout(() => errorEl.style.display = "none", 3000);
 }
 
 document.getElementById("master-key-input").addEventListener("keydown", (e) => {
@@ -816,9 +955,8 @@ function showApp() {
 }
 
 // Auto-login if already authenticated or server provided key
-const SERVER_KEY = "__MASTER_KEY__";
-if (SERVER_KEY && SERVER_KEY !== "__" + "MASTER_KEY" + "__" && SERVER_KEY.trim().length > 0) {
-  localStorage.setItem("iva_auth_key", SERVER_KEY);
+if (INJECTED_MASTER_KEY && !INJECTED_MASTER_KEY.includes("__MASTER_KEY__") && INJECTED_MASTER_KEY.trim().length > 0) {
+  localStorage.setItem("iva_auth_key", INJECTED_MASTER_KEY);
 }
 
 if (localStorage.getItem("iva_auth_key")) {
@@ -836,47 +974,114 @@ function switchTab(tab) {
 }
 
 /* ══════════════════════════════════════════════════════
-   API FETCH (with offline fallback via Service Worker)
+   DATA FETCH — Local API or Supabase Cloud
 ══════════════════════════════════════════════════════ */
 async function apiFetch(endpoint) {
+  if (dataMode === 'local' && localAPI) {
+    try {
+      const res = await fetch(`${localAPI}${endpoint}`, { signal: AbortSignal.timeout(5000) });
+      return await res.json();
+    } catch (e) {
+      console.warn(`[API] Local fetch failed: ${endpoint}`, e.message);
+      // Auto-fallback to cloud if local fails
+      if (supabaseClient) {
+        console.log("[API] Falling back to cloud mode...");
+        dataMode = 'cloud';
+        updateOnlineStatus();
+        return await fetchFromCloud();
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+// Fetch ALL data from Supabase shop_stats snapshot
+async function fetchFromCloud() {
+  if (!supabaseClient || !shopId) {
+    console.warn("[Cloud] No Supabase client or shop ID");
+    return null;
+  }
   try {
-    const res = await fetch(`${API}${endpoint}`);
-    return await res.json();
-  } catch (e) {
-    console.warn(`[API] Failed: ${endpoint}`, e.message);
+    const { data, error } = await supabaseClient
+      .from("shop_stats")
+      .select("stats_json, updated_at")
+      .eq("shop_id", shopId)
+      .single();
+    
+    if (error) {
+      console.error("[Cloud] Fetch error:", error.message);
+      return null;
+    }
+    
+    if (data && data.stats_json) {
+      console.log("[Cloud] Stats loaded, last updated:", data.updated_at);
+      return data.stats_json;
+    }
+    return null;
+  } catch(e) {
+    console.error("[Cloud] Error:", e.message);
     return null;
   }
 }
 
 /* ══════════════════════════════════════════════════════
-   LOAD ALL DATA
+   LOAD ALL DATA — Smart routing (local → cloud)
 ══════════════════════════════════════════════════════ */
 async function loadAllData() {
   const indicator = document.getElementById("refresh-indicator");
   indicator.classList.add("show");
 
   try {
-    const [stats, expiry, stock, invoices, analytics, notifs] = await Promise.all([
-      apiFetch("/api/stats"),
-      apiFetch("/api/expiry"),
-      apiFetch("/api/stock"),
-      apiFetch("/api/invoices"),
-      apiFetch("/api/analytics"),
-      apiFetch("/api/notifications?limit=20"),
-    ]);
+    if (dataMode === 'cloud') {
+      // ═══ CLOUD MODE: Read everything from Supabase shop_stats ═══
+      const cloudStats = await fetchFromCloud();
+      if (cloudStats) {
+        renderOverview(cloudStats);
+        // Cloud stats has all alert data embedded
+        renderExpiry({
+          expired: cloudStats.expiredProducts || [],
+          nearExpiry: cloudStats.expiringProducts || []
+        });
+        renderStock({
+          lowStock: cloudStats.lowStockProducts || [],
+          outOfStock: cloudStats.outOfStockProducts || [],
+          deadStock: cloudStats.deadStock || []
+        });
+        // Invoices from cloud snapshot
+        if (cloudStats.recentInvoices) {
+          renderInvoices(cloudStats.recentInvoices);
+        }
+        // Analytics from cloud snapshot
+        renderAnalytics(cloudStats);
+        statsData = cloudStats;
+        
+        // Update time label with cloud timestamp
+        document.getElementById("time-label").textContent = 
+          `Cloud sync · ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+      }
+    } else {
+      // ═══ LOCAL MODE: Fetch from API endpoints ═══
+      const [stats, expiry, stock, invoices, analytics, notifs] = await Promise.all([
+        apiFetch("/api/stats"),
+        apiFetch("/api/expiry"),
+        apiFetch("/api/stock"),
+        apiFetch("/api/invoices"),
+        apiFetch("/api/analytics"),
+        apiFetch("/api/notifications?limit=20"),
+      ]);
 
-    if (stats) renderOverview(stats);
-    if (expiry) renderExpiry(expiry);
-    if (stock) renderStock(stock);
-    if (invoices) renderInvoices(invoices);
-    if (analytics) renderAnalytics(analytics);
-    if (notifs) renderNotifications(notifs);
-    if (stats) statsData = stats;
+      if (stats) renderOverview(stats);
+      if (expiry) renderExpiry(expiry);
+      if (stock) renderStock(stock);
+      if (invoices) renderInvoices(invoices);
+      if (analytics) renderAnalytics(analytics);
+      if (notifs) renderNotifications(notifs);
+      if (stats) statsData = stats;
 
-    // Update time
-    document.getElementById("time-label").textContent = 
-      `Last updated · ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
-    
+      document.getElementById("time-label").textContent = 
+        `Last updated · ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+    }
   } catch(e) {
     console.error("[Load] Error:", e);
   }
@@ -906,10 +1111,11 @@ function renderOverview(s) {
   document.getElementById("m-near-expiry").textContent = s.nearExpiryCount || 0;
   document.getElementById("m-expired").textContent = s.expiredCount || 0;
 
-  // Profit Summary
+  // Profit Summary (with Overall)
   setProfit("profit-today", s.todayProfit);
   setProfit("profit-week", s.weeklyProfit);
   setProfit("profit-month", s.monthlyProfit);
+  setProfit("profit-overall", s.overallProfit);
 
   // Daily Sales Chart
   if (s.dailySales && s.dailySales.length > 0) {
@@ -929,6 +1135,7 @@ function renderOverview(s) {
 
 function setProfit(id, val) {
   const el = document.getElementById(id);
+  if (!el) return;
   const v = val || 0;
   el.textContent = `₹${formatNum(v)}`;
   el.className = v >= 0 ? "profit-positive" : "profit-negative";
@@ -1181,8 +1388,16 @@ async function askAI() {
   input.value = "";
   messages.scrollTop = messages.scrollHeight;
 
+  // In cloud mode, use local AI from statsData
+  if (dataMode === 'cloud') {
+    const answer = localAI(question);
+    messages.innerHTML += `<div class="chat-bubble bot">${esc(answer)}</div>`;
+    messages.scrollTop = messages.scrollHeight;
+    return;
+  }
+
   try {
-    const res = await fetch(`${API}/api/ai/ask`, {
+    const res = await fetch(`${localAPI}/api/ai/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question })
@@ -1190,10 +1405,41 @@ async function askAI() {
     const data = await res.json();
     messages.innerHTML += `<div class="chat-bubble bot">${esc(data.answer)}</div>`;
   } catch (e) {
-    messages.innerHTML += `<div class="chat-bubble bot" style="color:var(--amber);">⚡ Cannot reach server right now. Try again when you're online.</div>`;
+    // Fallback to local AI
+    const answer = localAI(question);
+    messages.innerHTML += `<div class="chat-bubble bot">${esc(answer)}</div>`;
   }
   
   messages.scrollTop = messages.scrollHeight;
+}
+
+// Client-side AI using cached statsData (works in cloud mode)
+function localAI(question) {
+  const q = question.toLowerCase();
+  const s = statsData;
+  if (!s) return "I don't have data loaded yet. Please refresh!";
+
+  if (q.includes("sale") || q.includes("revenue")) {
+    return `Today's sales: ₹${formatNum(s.todaySales || 0)}. This week: ₹${formatNum(s.weeklySales || 0)}. This month: ₹${formatNum(s.monthlySales || 0)}.`;
+  }
+  if (q.includes("profit")) {
+    return `Today's profit: ₹${formatNum(s.todayProfit || 0)}. Weekly: ₹${formatNum(s.weeklyProfit || 0)}. Monthly: ₹${formatNum(s.monthlyProfit || 0)}. Overall: ₹${formatNum(s.overallProfit || 0)}.`;
+  }
+  if (q.includes("top") || q.includes("best") || q.includes("popular")) {
+    const top = (s.topSelling || s.topProducts || []).slice(0, 3);
+    if (top.length === 0) return "No sales data available yet.";
+    return "Top sellers: " + top.map((p, i) => `${i+1}. ${p.name} (${p.total_sold || p.sold} sold)`).join(", ");
+  }
+  if (q.includes("stock") || q.includes("low")) {
+    return `Low stock: ${s.lowStockCount || 0} items. Out of stock: ${s.outOfStock || 0} items.`;
+  }
+  if (q.includes("expir")) {
+    return `Expired: ${s.expiredCount || 0} products. Expiring soon: ${s.nearExpiryCount || 0} products.`;
+  }
+  if (q.includes("product")) {
+    return `You have ${s.totalProducts || 0} products across ${s.totalCategories || 0} categories.`;
+  }
+  return "I can tell you about sales, profit, top products, stock alerts, or expiry status!";
 }
 
 document.getElementById("chat-input").addEventListener("keydown", (e) => {
@@ -1260,26 +1506,32 @@ async function dismissNotif(id) {
   const el = document.getElementById('notif-' + id);
   if (el) el.style.opacity = '0';
   try {
-    await fetch(`${API}/api/notifications/${id}`, { method: 'DELETE' });
+    if (dataMode === 'local') {
+      await fetch(`${localAPI}/api/notifications/${id}`, { method: 'DELETE' });
+    }
     setTimeout(() => { if (el) el.remove(); }, 300);
     // Refresh badge count
-    const data = await apiFetch('/api/notifications?limit=1');
-    if (data) {
-      const badge = document.getElementById('notif-badge');
-      const unread = data.unreadCount || 0;
-      badge.textContent = unread > 99 ? '99+' : unread;
-      badge.style.display = unread > 0 ? 'flex' : 'none';
+    if (dataMode === 'local') {
+      const data = await apiFetch('/api/notifications?limit=1');
+      if (data) {
+        const badge = document.getElementById('notif-badge');
+        const unread = data.unreadCount || 0;
+        badge.textContent = unread > 99 ? '99+' : unread;
+        badge.style.display = unread > 0 ? 'flex' : 'none';
+      }
     }
   } catch(e) {}
 }
 
 async function markAllRead() {
   try {
-    await fetch(`${API}/api/notifications/read`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
+    if (dataMode === 'local') {
+      await fetch(`${localAPI}/api/notifications/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+    }
     document.querySelectorAll('.notif-item.unread').forEach(el => el.classList.remove('unread'));
     const badge = document.getElementById('notif-badge');
     badge.style.display = 'none';

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iVA Admin Portal | Master Controller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #020617; color: #f8fafc; }
+        .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
+        .input-field { width: 100%; padding: 12px 16px; border-radius: 12px; background: rgba(2, 6, 23, 0.8); border: 1px solid rgba(99, 102, 241, 0.2); color: white; outline: none; margin-bottom: 16px; transition: all 0.2s; }
+        .btn-primary { width: 100%; padding: 12px; border-radius: 12px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; font-weight: 700; transition: all 0.2s; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
+        .toggle-switch { width: 48px; height: 26px; border-radius: 13px; position: relative; cursor: pointer; transition: all 0.3s; }
+        .toggle-knob { width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; transition: all 0.3s; }
+        .toggle-switch[data-active="true"] { background: #22c55e; } .toggle-switch[data-active="false"] { background: #475569; }
+        .toggle-switch[data-active="true"] .toggle-knob { left: 25px; } .toggle-switch[data-active="false"] .toggle-knob { left: 3px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // 🟢 CONFIGURATION
+        // PASTE YOUR CREDENTIALS HERE
+        const SUPABASE_URL = ''; 
+        const SUPABASE_KEY = ''; 
+
+        // Safe Initialization
+        const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [view, setView] = useState('login'); 
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                const session = localStorage.getItem('iva_admin_session');
+                if (session) {
+                    setUser(JSON.parse(session));
+                    setView('dash');
+                }
+                setLoading(false);
+            }, []);
+
+            if (!sb) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-8 bg-slate-950">
+                        <div className="glass p-12 rounded-[40px] max-w-lg text-center shadow-2xl border border-indigo-500/20">
+                            <div className="text-6xl mb-6">⚙️</div>
+                            <h1 className="text-3xl font-black text-white mb-4">Admin Config Required</h1>
+                            <p className="text-slate-400 leading-relaxed mb-8">
+                                The Admin Panel is deployed correctly but isn't connected to your database yet. 
+                                <br/><br/>
+                                Please open <strong>index.html</strong> on your computer, paste your Supabase URL and Key on <strong>lines 30-31</strong>, and re-upload to Netlify.
+                            </p>
+                            <div className="bg-indigo-500/10 p-4 rounded-2xl border border-indigo-500/20 font-mono text-xs text-indigo-300 text-left">
+                                const SUPABASE_URL = 'https://...'; <br/>
+                                const SUPABASE_KEY = 'eyJ...';
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            const handleLogin = (adminUser) => {
+                setUser(adminUser);
+                localStorage.setItem('iva_admin_session', JSON.stringify(adminUser));
+                setView('dash');
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('iva_admin_session');
+                setUser(null);
+                setView('login');
+            };
+
+            if (loading) return <div className="h-screen flex items-center justify-center text-indigo-400 font-bold">Connecting...</div>;
+
+            return (
+                <div>
+                    {view === 'login' ? (
+                        <Login onLogin={handleLogin} />
+                    ) : (
+                        <Dashboard user={user} onLogout={handleLogout} />
+                    )}
+                </div>
+            );
+        }
+
+        function Login({ onLogin }) {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setIsLoggingIn(true); setError('');
+                try {
+                    const { data, error } = await sb.from('admins').select('*').eq('email', email).single();
+                    if (error || !data) {
+                        setError('Account not found. Check admins table in Supabase.');
+                    } else {
+                        if (password === data.password_hash) {
+                            onLogin(data);
+                        } else {
+                            setError('Incorrect password');
+                        }
+                    }
+                } catch (err) { setError('Network error. Check your Supabase connection.'); }
+                setIsLoggingIn(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
+                    <div className="glass p-10 rounded-[32px] w-full max-w-md">
+                        <div className="text-center mb-10">
+                            <div className="w-20 h-20 bg-indigo-600 rounded-[24px] mx-auto flex items-center justify-center text-4xl mb-6 shadow-2xl">👑</div>
+                            <h1 className="text-3xl font-extrabold tracking-tight text-white">iVA Admin</h1>
+                        </div>
+                        {error && <div className="bg-red-500/10 text-red-400 p-4 rounded-xl mb-6 text-sm text-center">{error}</div>}
+                        <form onSubmit={handleSubmit}>
+                            <input type="email" placeholder="Admin Email" className="input-field" value={email} onChange={e => setEmail(e.target.value)} required />
+                            <input type="password" placeholder="Password" className="input-field" value={password} onChange={e => setPassword(e.target.value)} required />
+                            <button type="submit" className="btn-primary mt-4 h-[52px]" disabled={isLoggingIn}>{isLoggingIn ? "Verifying..." : "Login"}</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function Dashboard({ user, onLogout }) {
+            const [shops, setShops] = useState([]);
+            const [stats, setStats] = useState({ revenue: 0, shops: 0, active: 0 });
+            const [loading, setLoading] = useState(true);
+
+            const loadData = async () => {
+                setLoading(true);
+                try {
+                    const { data: shopList } = await sb.from('shops').select('*, shop_stats(stats_json)').order('created_at', { ascending: false });
+                    setShops(shopList || []);
+                    let rev = 0;
+                    shopList?.forEach(s => { rev += Number(s.shop_stats?.stats_json?.overallSales || 0); });
+                    setStats({ revenue: rev, shops: shopList?.length || 0, active: shopList?.filter(s => s.is_active).length || 0 });
+                } catch (e) {}
+                setLoading(false);
+            };
+
+            useEffect(() => { loadData(); }, []);
+
+            const toggleShop = async (shopId, status) => {
+                const { error } = await sb.from('shops').update({ is_active: !status }).eq('id', shopId);
+                if (!error) loadData();
+            };
+
+            return (
+                <div className="min-h-screen bg-[#020617] p-8">
+                    <nav className="flex justify-between items-center mb-10">
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-bold">iV</div>
+                            <h1 className="text-xl font-bold text-white">Admin Dashboard</h1>
+                        </div>
+                        <button onClick={onLogout} className="bg-white/5 px-6 py-2 rounded-xl text-sm font-bold border border-white/10 transition hover:bg-white/10">Log Out</button>
+                    </nav>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                        <div className="glass p-6 rounded-3xl"><p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Shops</p><p className="text-3xl font-black">{stats.shops}</p></div>
+                        <div className="glass p-6 rounded-3xl"><p className="text-xs font-bold text-slate-500 uppercase mb-1">Active</p><p className="text-3xl font-black text-emerald-400">{stats.active}</p></div>
+                        <div className="glass p-6 rounded-3xl"><p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Revenue</p><p className="text-3xl font-black text-indigo-400">₹{stats.revenue.toLocaleString()}</p></div>
+                    </div>
+
+                    <div className="glass rounded-[32px] overflow-hidden">
+                        <div className="p-8 border-b border-white/5 flex justify-between items-center">
+                            <h2 className="text-xl font-extrabold text-white">Shop Management</h2>
+                            <button onClick={loadData} className="w-10 h-10 flex items-center justify-center bg-white/5 rounded-xl hover:bg-white/10 transition">🔄</button>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-900/50 text-[10px] uppercase font-black text-slate-500 border-b border-white/5">
+                                    <tr><th className="px-8 py-5">Shop Info</th><th className="px-8 py-5">Owner</th><th className="px-8 py-5 text-center">Status</th><th className="px-8 py-5 text-center">Action</th></tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                    {shops.map(shop => (
+                                        <tr key={shop.id} className="hover:bg-white/[0.02] transition">
+                                            <td className="px-8 py-6">
+                                                <p className="font-bold text-white mb-1">{shop.name}</p>
+                                                <p className="text-[10px] font-mono text-slate-500">{shop.id}</p>
+                                            </td>
+                                            <td className="px-8 py-6">
+                                                <p className="font-semibold">{shop.owner_name}</p>
+                                                <p className="text-xs text-slate-400">{shop.mobile_number}</p>
+                                            </td>
+                                            <td className="px-8 py-6 text-center">
+                                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase ${shop.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${shop.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+                                                    {shop.is_active ? 'Online' : 'Disabled'}
+                                                </span>
+                                            </td>
+                                            <td className="px-8 py-6">
+                                                <div className="flex justify-center">
+                                                    <div className="toggle-switch" data-active={shop.is_active} onClick={() => toggleShop(shop.id, shop.is_active)}>
+                                                        <div className="toggle-knob"></div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

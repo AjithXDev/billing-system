@@ -11,9 +11,15 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const db = require("./db");
-const { createClient } = require('@supabase/supabase-js');
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+let supabase = null;
+if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+    try {
+        const { createClient } = require('@supabase/supabase-js');
+        supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+    } catch (e) {
+        console.error("[Supabase] Failed to initialize:", e.message);
+    }
+}
 
 const PORT = 4567;
 let server = null;
@@ -172,6 +178,61 @@ function startDashboardServer(mainWindow) {
     }
   });
 
+  // ── Config endpoint for mobile to get Supabase credentials ──
+  expressApp.get("/api/config", (req, res) => {
+    res.json({
+      supabaseUrl: process.env.SUPABASE_URL || "",
+      supabaseKey: process.env.SUPABASE_KEY || "",
+      shopId: process.env.SHOP_ID || "",
+      localApi: `http://${localIP}:${PORT}`
+    });
+  });
+
+  // ── Validate pairing code (desktop enters code from mobile app) ──
+  expressApp.post("/api/pairing/validate", async (req, res) => {
+    const { createClient } = require("@supabase/supabase-js");
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_KEY;
+    const shopId = process.env.SHOP_ID;
+    const { code } = req.body;
+    
+    if (!url || !key || !shopId) {
+      return res.status(400).json({ success: false, error: "Supabase or Shop not configured" });
+    }
+    if (!code) {
+      return res.status(400).json({ success: false, error: "Code is required" });
+    }
+    
+    try {
+      const sb = createClient(url, key);
+      
+      // Find matching pending code
+      const { data, error } = await sb.from("pairing_codes")
+        .select("*")
+        .eq("shop_id", shopId)
+        .eq("code", code)
+        .eq("status", "pending")
+        .single();
+      
+      if (error || !data) {
+        return res.json({ success: false, error: "Invalid code. Generate a new one in the Owner App." });
+      }
+      
+      // Check expiry
+      if (new Date(data.expires_at) < new Date()) {
+        await sb.from("pairing_codes").update({ status: "expired" }).eq("id", data.id);
+        return res.json({ success: false, error: "Code expired. Generate a new one." });
+      }
+      
+      // Mark as used
+      await sb.from("pairing_codes").update({ status: "used" }).eq("id", data.id);
+      
+      res.json({ success: true, deviceId: data.device_id });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   /* ══════════════════════════════════════════════════════
      API: Dashboard Summary Stats + Profit
   ══════════════════════════════════════════════════════ */
@@ -265,6 +326,16 @@ function startDashboardServer(mainWindow) {
       const weeklyProfit = weeklySales - weeklyCost;
       const monthlyProfit = monthlySales - monthlyCost;
 
+      // ── OVERALL (ALL-TIME) PROFIT ──
+      const overallSales = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as t FROM invoices`).get().t;
+      const overallCost = db.prepare(`
+        SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as cost
+        FROM invoice_items ii
+        JOIN products p ON ii.product_id=p.id
+      `).get().cost;
+      const overallBills = db.prepare(`SELECT COUNT(*) as c FROM invoices`).get().c;
+      const overallProfit = overallSales - overallCost;
+
       // ── PEAK TIME ANALYSIS ───────────────────────────
       const peakHours = db.prepare(`
         SELECT strftime('%H', created_at,'localtime') as hour,
@@ -296,10 +367,11 @@ function startDashboardServer(mainWindow) {
       res.json({
         totalProducts, totalCategories,
         todaySales, todayBills, weeklySales, monthlySales,
+        overallSales, overallCost, overallBills,
         expiredCount, nearExpiryCount, lowStockCount, outOfStock,
         topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })), 
         dailySales, monthlySalesBreakdown,
-        todayProfit, weeklyProfit, monthlyProfit,
+        todayProfit, weeklyProfit, monthlyProfit, overallProfit,
         todayCost, weeklyCost, monthlyCost,
         peakHours, paymentBreakdown,
         deadStock,

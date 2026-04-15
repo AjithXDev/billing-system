@@ -109,6 +109,11 @@ async function pushStatsSnapshot(shopId) {
     const weeklyCost  = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-7 days')").get().c;
     const monthlyCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days')").get().c;
 
+    // ── OVERALL (ALL-TIME) PROFIT ──
+    const overallSales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices").get().t;
+    const overallCost  = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id").get().c;
+    const overallBills = db.prepare("SELECT COUNT(*) as c FROM invoices").get().c;
+
     const topProducts = db.prepare("SELECT p.name, SUM(ii.quantity) as sold, SUM(ii.price*ii.quantity) as revenue FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.product_id ORDER BY sold DESC LIMIT 8").all();
     const dailySales  = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
     const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m',created_at,'localtime') as month, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-180 days') GROUP BY month ORDER BY month ASC").all();
@@ -120,13 +125,18 @@ async function pushStatsSnapshot(shopId) {
     const expiredList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
     const nearExpiList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, in7);
 
+    // ── Recent invoices for mobile history ──
+    const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+
     const statsSnapshot = {
       totalProducts, totalCategories,
       todaySales, todayBills, weeklySales, monthlySales,
+      overallSales, overallCost, overallBills,
       expiredCount, nearExpiryCount, lowStockCount, outOfStock,
       todayProfit: todaySales - todayCost,
       weeklyProfit: weeklySales - weeklyCost,
       monthlyProfit: monthlySales - monthlyCost,
+      overallProfit: overallSales - overallCost,
       todayCost, weeklyCost, monthlyCost,
       topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })),
       topProducts, dailySales, monthlySalesBreakdown: monthlyBreakdown,
@@ -135,6 +145,7 @@ async function pushStatsSnapshot(shopId) {
       outOfStockProducts: outOfStockList,
       expiredProducts: expiredList,
       expiringProducts: nearExpiList,
+      recentInvoices,
     };
 
     await supabase.from("shop_stats").upsert({
@@ -495,12 +506,19 @@ app.get("/api/stats", (req, res) => {
     const outOfStockProducts = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
     const expiredProducts    = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
     const expiringProducts   = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, in7);
+    // ── OVERALL (ALL-TIME) PROFIT ──
+    const overallSales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices").get().t;
+    const overallCostAll = calcCost("1=1");
+    const overallBills = db.prepare("SELECT COUNT(*) as c FROM invoices").get().c;
+
     res.json({
       totalProducts, totalCategories, todaySales, todayBills, weeklySales, monthlySales,
+      overallSales, overallCost: overallCostAll, overallBills,
       expiredCount, nearExpiryCount, lowStockCount, outOfStock,
       topSelling: topProducts.map((p) => ({ ...p, total_sold: p.sold })),
       topProducts, dailySales, monthlySalesBreakdown,
       todayProfit: todaySales - todayCost, weeklyProfit: weeklySales - weeklyCost, monthlyProfit: monthlySales - monthlyCost,
+      overallProfit: overallSales - overallCostAll,
       todayCost, weeklyCost, monthlyCost, peakHours, paymentBreakdown, deadStock,
       lowStockProducts, outOfStockProducts, expiredProducts, expiringProducts
     });

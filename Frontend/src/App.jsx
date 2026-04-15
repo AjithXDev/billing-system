@@ -6,6 +6,8 @@ import BulkUpdate from "./components/BulkUpdate";
 import Settings from "./components/Settings";
 import History from "./components/History";
 import Offers from "./components/Offers";
+import ShopRegistration from "./components/ShopRegistration";
+import PairingCode from "./components/PairingCode";
 import logoUrl from "./assets/logo.png";
 import "./App.css";
 
@@ -55,7 +57,7 @@ function WhatsAppQRModal({ qrData, onClose }) {
 }
 
 /* ── Lock Screen ────────────────────────────────────────────── */
-function LockScreen({ hwid, onRetry }) {
+function LockScreen({ hwid, onRetry, note }) {
   return (
     <div style={{
       height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column',
@@ -69,9 +71,14 @@ function LockScreen({ hwid, onRetry }) {
         textAlign: 'center', maxWidth: '450px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)'
       }}>
         <div style={{ fontSize: '48px', marginBottom: '20px' }}>🔒</div>
-        <h1 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '10px' }}>Software Not Activated</h1>
+        <h1 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '10px' }}>
+          {note === "Access denied. Admin has deactivated this shop." ? "Access Denied" : "Software Not Activated"}
+        </h1>
         <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', marginBottom: '30px' }}>
-          This installation of <strong>Smart Billing</strong> is locked. Please send your Machine ID to the developer to activate this shop.
+          {note === "Access denied. Admin has deactivated this shop." 
+            ? <strong style={{ color: '#ef4444' }}>Access denied. Admin has deactivated this shop.</strong>
+            : <>This installation of <strong>Smart Billing</strong> is locked. Please send your Machine ID to the developer to activate this shop.</>
+          }
         </p>
         <div style={{ 
           background: 'rgba(0,0,0,0.3)', padding: '12px 16px', borderRadius: '12px', 
@@ -103,6 +110,10 @@ function App() {
   const [appSettings, setAppSettings]   = useState({});
   const [license,     setLicense]       = useState({ is_active: true, hwid: '' });
   const [checking,    setChecking]      = useState(true);
+  const [isRegistered, setIsRegistered] = useState(true);
+  const [shopId, setShopId]             = useState('');
+  const [showPairing, setShowPairing]   = useState(false);
+  const [refreshKey,  setRefreshKey]    = useState(0); // incremented on soft refresh
 
   const navItems = [
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> },
@@ -133,9 +144,10 @@ function App() {
     }
   };
 
-  // 3. Debounced Refresh Logic (Full UI Reload)
+  // 3. Soft Refresh — re-fetches data in the current view without navigating
   const handleRefresh = () => {
-    window.location.reload();
+    setRefreshKey(k => k + 1);  // force child component re-mount
+    window.dispatchEvent(new CustomEvent('soft_refresh'));
   };
 
   const checkLicense = async () => {
@@ -153,6 +165,7 @@ function App() {
   useEffect(() => {
     checkLicense();
     loadSettings();
+    checkRegistration();
     window.addEventListener('settings_updated', loadSettings);
 
     if (!window.api) {
@@ -162,7 +175,7 @@ function App() {
     window.api.onWhatsappQR(qr => {
       setQrData(qr);
       setWaStatus('qr');
-      setShowQR(true);
+      // Do NOT auto-show the QR modal — user must click "Scan to Link"
     });
 
     window.api.onWhatsappStatus(status => {
@@ -175,13 +188,28 @@ function App() {
     };
   }, []);
 
+  // Check shop registration
+  const checkRegistration = async () => {
+    if (!window.api?.getRegistrationStatus) return;
+    try {
+      const res = await window.api.getRegistrationStatus();
+      setIsRegistered(res.isRegistered);
+      setShopId(res.shopId);
+    } catch {}
+  };
+
   if (checking) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'white' }}>
       Authenticating...
     </div>
   );
 
-  if (!license.is_active) return <LockScreen hwid={license.hwid} onRetry={checkLicense} />;
+  if (!license.is_active) return <LockScreen hwid={license.hwid} note={license.note} onRetry={checkLicense} />;
+
+  // Gate: Show registration screen if shop not registered
+  if (!isRegistered && window.api?.registerShop) {
+    return <ShopRegistration onRegistered={(id) => { setShopId(id); setIsRegistered(true); }} />;
+  }
 
   return (
     <ErrorBoundary>
@@ -223,6 +251,19 @@ function App() {
 
           {/* Bottom Area */}
           <div className="sidebar-bottom">
+            {/* Pair Mobile Button */}
+            {shopId && (
+              <button onClick={() => setShowPairing(true)} style={{
+                width: '100%', padding: '10px 12px', borderRadius: 10,
+                background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1))',
+                border: '1px solid rgba(99,102,241,0.2)', color: '#6366f1',
+                fontSize: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 8,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                transition: 'all 0.2s',
+              }}>
+                🔗 Pair Mobile Device
+              </button>
+            )}
             <button onClick={() => waStatus === 'qr' ? setShowQR(true) : undefined} className="btn-whatsapp-status" style={{ color: waStatus === 'ready' ? '#16a34a' : undefined }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
               {waStatus === 'connecting' ? 'Connecting...' : waStatus === 'qr' ? 'Scan to Link' : 'WhatsApp Synced'}
@@ -252,24 +293,27 @@ function App() {
               <button 
                 onClick={handleRefresh} 
                 style={{ background: 'var(--primary-light)', color: 'var(--primary)', border: 'none', padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span>🔄</span> Refresh App
+                <span>🔄</span> Refresh
               </button>
             </div>
           </header>
           
           <div className="enterprise-workspace">
-            {currentView === 'pos'          && <POS showQR={showQR} />}
-            {currentView === 'add_product'  && <Inventory />}
-            {currentView === 'product_list' && <ProductList />}
-            {currentView === 'bulk_update'  && <BulkUpdate />}
-            {currentView === 'offers'       && <Offers />}
-            {currentView === 'settings'     && <Settings />}
-            {currentView === 'history'      && <History />}
+            {currentView === 'pos'          && <POS key={`pos-${refreshKey}`} showQR={showQR} />}
+            {currentView === 'add_product'  && <Inventory key={`inv-${refreshKey}`} />}
+            {currentView === 'product_list' && <ProductList key={`pl-${refreshKey}`} />}
+            {currentView === 'bulk_update'  && <BulkUpdate key={`bu-${refreshKey}`} />}
+            {currentView === 'offers'       && <Offers key={`of-${refreshKey}`} />}
+            {currentView === 'settings'     && <Settings key={`st-${refreshKey}`} />}
+            {currentView === 'history'      && <History key={`hi-${refreshKey}`} />}
           </div>
         </main>
 
         {/* ── WhatsApp QR Modal ─────────────────────────────── */}
         {showQR && qrData && <WhatsAppQRModal qrData={qrData} onClose={() => setShowQR(false)} />}
+
+        {/* ── Pairing Code Modal ─────────────────────────────── */}
+        {showPairing && <PairingCode shopId={shopId} onClose={() => setShowPairing(false)} />}
 
       </div>
     </ErrorBoundary>

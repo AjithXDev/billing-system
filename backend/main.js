@@ -45,8 +45,92 @@ async function syncToCloud(shopId) {
         await supabase.from('invoice_items').upsert(items.map(i => ({ ...i, shop_id: shopId })));
       }
     }
+    // Push stats snapshot for mobile remote access
+    await pushStatsSnapshot(shopId);
   } catch (e) {}
 }
+
+// ── Register shop in Supabase (for mobile auth from anywhere) ──
+async function registerShop(shopId) {
+  if (!supabase) return;
+  try {
+    let storeName = "My Shop";
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); storeName = s.storeName || storeName; } catch(e) {}
+    }
+    await supabase.from("shops").upsert({
+      id: shopId,
+      name: storeName,
+      master_key: process.env.MASTER_KEY || "owner123",
+      updated_at: new Date().toISOString()
+    });
+  } catch(e) {}
+}
+
+// ── Push comprehensive stats snapshot to Supabase for mobile dashboard ──
+async function pushStatsSnapshot(shopId) {
+  if (!supabase) return;
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+
+    const totalProducts = db.prepare("SELECT COUNT(*) as c FROM products").get().c;
+    const totalCategories = db.prepare("SELECT COUNT(*) as c FROM categories").get().c;
+    const todaySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE date(created_at)=date('now','localtime')").get().t;
+    const todayBills = db.prepare("SELECT COUNT(*) as c FROM invoices WHERE date(created_at)=date('now','localtime')").get().c;
+    const weeklySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-7 days')").get().t;
+    const monthlySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-30 days')").get().t;
+    const overallSales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices").get().t;
+    const expiredCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date<?").get(today).c;
+    const nearExpiryCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?").get(today, in7).c;
+    const lowStockCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity>0 AND quantity<=10").get().c;
+    const outOfStock = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity<=0").get().c;
+
+    const todayCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE date(inv.created_at)=date('now','localtime')").get().c;
+    const weeklyCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-7 days')").get().c;
+    const monthlyCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days')").get().c;
+    const overallCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id").get().c;
+    const overallBills = db.prepare("SELECT COUNT(*) as c FROM invoices").get().c;
+
+    const topProducts = db.prepare("SELECT p.name, SUM(ii.quantity) as sold, SUM(ii.price*ii.quantity) as revenue FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.product_id ORDER BY sold DESC LIMIT 8").all();
+    const dailySales = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
+    const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m',created_at,'localtime') as month, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-180 days') GROUP BY month ORDER BY month ASC").all();
+    const peakHours = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
+    const paymentBreakdown = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
+    const deadStock = db.prepare("SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-60 days'))").all();
+    const lowStockList = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=10 ORDER BY quantity ASC LIMIT 30").all();
+    const outOfStockList = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
+    const expiredList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
+    const nearExpiList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, in7);
+    const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+
+    await supabase.from("shop_stats").upsert({
+      shop_id: shopId,
+      stats_json: {
+        totalProducts, totalCategories,
+        todaySales, todayBills, weeklySales, monthlySales,
+        overallSales, overallCost, overallBills,
+        expiredCount, nearExpiryCount, lowStockCount, outOfStock,
+        todayProfit: todaySales - todayCost,
+        weeklyProfit: weeklySales - weeklyCost,
+        monthlyProfit: monthlySales - monthlyCost,
+        overallProfit: overallSales - overallCost,
+        todayCost, weeklyCost, monthlyCost,
+        topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })),
+        topProducts, dailySales, monthlySalesBreakdown: monthlyBreakdown,
+        peakHours, paymentBreakdown, deadStock,
+        lowStockProducts: lowStockList,
+        outOfStockProducts: outOfStockList,
+        expiredProducts: expiredList,
+        expiringProducts: nearExpiList,
+        recentInvoices,
+      },
+      updated_at: new Date().toISOString()
+    });
+  } catch(e) {}
+}
+
 async function logNotification(shopId, type, message) {
   if (!supabase) return;
   try { await supabase.from('notifications').insert({ shop_id: shopId, type, message }); } catch(e) {}
@@ -160,6 +244,8 @@ function createWindow() {
         // ── Cloud Sync ──
         if (url && key && url.startsWith('http')) {
             initSupabase(url, key);
+            // Register shop in Supabase for mobile auth from anywhere
+            registerShop(currentShopId).catch(() => {});
             // Cloud sync is async and network-bound, keep it separate from tight local loops
             syncToCloud(currentShopId).catch(console.error);
         }
@@ -369,7 +455,20 @@ ipcMain.handle("get-license-status", async () => {
       await tempClient.from('software_licenses').update({ shop_name: realShopName }).eq('id', data.id);
     }
 
-    return { is_active: !!data.is_active, hwid };
+    let isAccessGranted = !!data.is_active;
+    let note = "Not activated";
+
+    // 🔴 NEW ADMIN CHECK: Verify if the entire shop is deactivated
+    const shopId = process.env.SHOP_ID;
+    if (shopId) {
+       const { data: shopData } = await tempClient.from('shops').select('is_active').eq('id', shopId).single();
+       if (shopData && shopData.is_active === false) {
+          isAccessGranted = false;
+          note = "Access denied. Admin has deactivated this shop.";
+       }
+    }
+
+    return { is_active: isAccessGranted, hwid, note };
   } catch (e) {
     console.error("License Check Error:", e.message);
     // Fail-safe: if network is down, allow access but log it (for now)
@@ -756,6 +855,11 @@ ipcMain.handle("get-dashboard-stats", async () => {
   const weeklyProfit = calculateProfit('-7 days');
   const monthlyProfit = calculateProfit('-30 days');
 
+  // Overall (all-time) profit
+  const overallSales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices").get().t;
+  const overallCostAll = db.prepare("SELECT COALESCE(SUM((ii.price - COALESCE(p.cost_price, 0)) * ii.quantity),0) as profit FROM invoice_items ii JOIN products p ON ii.product_id = p.id").get().profit || 0;
+  const overallBills = db.prepare("SELECT COUNT(*) as c FROM invoices").get().c;
+
   // Top 5 products sold this month
   const topProducts = db.prepare(`
     SELECT p.name, SUM(ii.quantity) as sold
@@ -788,6 +892,7 @@ ipcMain.handle("get-dashboard-stats", async () => {
     totalProducts, totalCategories, todaySales, todayBills,
     expiredCount, nearExpiryCount, lowStockCount, outOfStock,
     topProducts, todayProfit, weeklyProfit, monthlyProfit,
+    overallProfit: overallCostAll, overallSales, overallBills,
     dailySales, monthlySalesBreakdown,
     lowStockProducts, outOfStockProducts, expiringProducts, expiredProducts
   };
@@ -837,4 +942,170 @@ ipcMain.handle("toggle-offer-status", async (event, { id, status }) => {
   return { message: "Offer status updated" };
 });
 
+// ============================================================
+// 🏪 SHOP REGISTRATION & DEVICE PAIRING
+// ============================================================
+
+// Check if shop is registered
+ipcMain.handle("get-registration-status", async () => {
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings = {};
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+    }
+    const shopId = settings.shopId || process.env.SHOP_ID || "";
+    // Check if it's a UUID (registered) or old format
+    const isRegistered = shopId.length > 20; // UUIDs are 36 chars
+    return { isRegistered, shopId };
+  } catch (e) {
+    return { isRegistered: false, shopId: "" };
+  }
+});
+
+// Register shop in Supabase → get UUID
+ipcMain.handle("register-shop", async (event, data) => {
+  const { ownerName, mobileNumber } = data;
+  
+  // Get Supabase client  
+  const configPath = path.join(app.getPath("userData"), "app_settings.json");
+  let settings = {};
+  if (fs.existsSync(configPath)) {
+    try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+  }
+  
+  const url = settings.supabaseUrl || process.env.SUPABASE_URL;
+  const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+  
+  if (!url || !key || !url.startsWith('http')) {
+    return { success: false, error: "Supabase not configured. Add SUPABASE_URL and SUPABASE_KEY to .env" };
+  }
+  
+  initSupabase(url, key);
+  if (!supabase) {
+    return { success: false, error: "Could not initialize Supabase client" };
+  }
+  
+  try {
+    // Create shop in Supabase (auto-generates UUID)
+    const { data: shopData, error } = await supabase
+      .from("shops")
+      .insert({
+        owner_name: ownerName,
+        mobile_number: mobileNumber,
+        name: settings.storeName || "My Shop",
+        master_key: process.env.MASTER_KEY || settings.masterKey || "owner123",
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error("[Register] Supabase error:", error.message);
+      return { success: false, error: error.message };
+    }
+    
+    const newShopId = shopData.id;
+    
+    // Save to .env
+    try {
+      const envPath = path.join(__dirname, '..', '.env');
+      let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
+      // Replace or add SHOP_ID
+      if (envContent.includes('SHOP_ID=')) {
+        envContent = envContent.replace(/SHOP_ID=.*/g, `SHOP_ID=${newShopId}`);
+      } else {
+        envContent += `\nSHOP_ID=${newShopId}`;
+      }
+      fs.writeFileSync(envPath, envContent);
+      process.env.SHOP_ID = newShopId;
+    } catch(e) {
+      console.error("[Register] Failed to update .env:", e.message);
+    }
+    
+    // Save to app_settings.json
+    settings.shopId = newShopId;
+    settings.ownerName = ownerName;
+    settings.ownerMobile = mobileNumber;
+    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+    
+    console.log("[Register] Shop registered:", newShopId);
+    return { success: true, shopId: newShopId };
+  } catch (e) {
+    console.error("[Register] Error:", e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+// Generate 6-digit pairing code
+// Desktop VALIDATES a pairing code (generated by mobile app)
+ipcMain.handle("validate-pairing-code", async (event, code) => {
+  if (!supabase) {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings = {};
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+    }
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL;
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+    if (url && key) initSupabase(url, key);
+  }
+  
+  if (!supabase) return { success: false, error: "Supabase not connected" };
+  
+  const shopId = process.env.SHOP_ID;
+  if (!shopId || shopId.length < 20) return { success: false, error: "Shop not registered" };
+  
+  try {
+    // Find matching pending code for this shop
+    const { data, error } = await supabase
+      .from("pairing_codes")
+      .select("*")
+      .eq("shop_id", shopId)
+      .eq("code", code)
+      .eq("status", "pending")
+      .single();
+    
+    if (error || !data) {
+      return { success: false, error: "Invalid code. Make sure you generated a new code in the Owner App." };
+    }
+    
+    // Check expiry
+    if (new Date(data.expires_at) < new Date()) {
+      // Mark as expired
+      await supabase.from("pairing_codes").update({ status: "expired" }).eq("id", data.id);
+      return { success: false, error: "Code expired. Generate a new one in the Owner App." };
+    }
+    
+    // Mark code as used
+    await supabase
+      .from("pairing_codes")
+      .update({ status: "used" })
+      .eq("id", data.id);
+    
+    console.log(`[Pairing] ✅ Code ${code} validated — device paired!`);
+    return { success: true, deviceId: data.device_id };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Check pairing status
+ipcMain.handle("get-pairing-status", async (event, code) => {
+  if (!supabase) return { status: "unknown" };
+  
+  try {
+    const shopId = process.env.SHOP_ID;
+    const { data, error } = await supabase
+      .from("pairing_codes")
+      .select("status, device_id, user_id")
+      .eq("shop_id", shopId)
+      .eq("code", code)
+      .single();
+    
+    if (error || !data) return { status: "unknown" };
+    return { status: data.status, deviceId: data.device_id, userId: data.user_id };
+  } catch {
+    return { status: "unknown" };
+  }
+});
 

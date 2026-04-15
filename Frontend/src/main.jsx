@@ -38,7 +38,12 @@ if (!window.api) {
     getNotifications: (o) => fetch(`${API_URL}/notifications?unread=${!!o?.unreadOnly}`).then(r => r.json()),
     saveAppSettings: (d) => { localStorage.setItem("smart_billing_settings", JSON.stringify(d)); return Promise.resolve({ success: true }); },
     getAppSettings: () => Promise.resolve(JSON.parse(localStorage.getItem("smart_billing_settings") || "{}")),
-    getSyncStatus: () => Promise.resolve({ pending: 0 })
+    getSyncStatus: () => Promise.resolve({ pending: 0 }),
+    // Shop Registration & Pairing (stubs for web mode)
+    registerShop: () => Promise.resolve({ success: false, error: "Registration only works in desktop app" }),
+    getRegistrationStatus: () => Promise.resolve({ isRegistered: true, shopId: "web-mode" }),
+    validatePairingCode: () => Promise.resolve({ success: false, error: "Pairing only works in desktop app" }),
+    getPairingStatus: () => Promise.resolve({ status: "unknown" }),
   };
 }
 

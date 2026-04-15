@@ -57,4 +57,10 @@ contextBridge.exposeInMainWorld("api", {
   deleteNotification:  (id)           => ipcRenderer.invoke("delete-notification", id),
   getSyncStatus:       ()             => ipcRenderer.invoke("get-sync-status"),
   getLicenseStatus:    ()             => ipcRenderer.invoke("get-license-status"),
+
+  // 🏪 Shop Registration & Pairing
+  registerShop:        (data)         => ipcRenderer.invoke("register-shop", data),
+  getRegistrationStatus: ()           => ipcRenderer.invoke("get-registration-status"),
+  validatePairingCode: (code)         => ipcRenderer.invoke("validate-pairing-code", code),
+  getPairingStatus:    (code)         => ipcRenderer.invoke("get-pairing-status", code),
 });
