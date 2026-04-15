@@ -815,7 +815,12 @@ function showApp() {
   refreshInterval = setInterval(loadAllData, 30000);
 }
 
-// Auto-login if already authenticated
+// Auto-login if already authenticated or server provided key
+const SERVER_KEY = "__MASTER_KEY__";
+if (SERVER_KEY && SERVER_KEY !== "__" + "MASTER_KEY" + "__" && SERVER_KEY.trim().length > 0) {
+  localStorage.setItem("iva_auth_key", SERVER_KEY);
+}
+
 if (localStorage.getItem("iva_auth_key")) {
   showApp();
 }

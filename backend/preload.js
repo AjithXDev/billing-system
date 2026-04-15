@@ -56,4 +56,5 @@ contextBridge.exposeInMainWorld("api", {
   markAllNotifRead:    ()             => ipcRenderer.invoke("mark-all-notif-read"),
   deleteNotification:  (id)           => ipcRenderer.invoke("delete-notification", id),
   getSyncStatus:       ()             => ipcRenderer.invoke("get-sync-status"),
+  getLicenseStatus:    ()             => ipcRenderer.invoke("get-license-status"),
 });

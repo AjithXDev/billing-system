@@ -54,6 +54,46 @@ function WhatsAppQRModal({ qrData, onClose }) {
   );
 }
 
+/* ── Lock Screen ────────────────────────────────────────────── */
+function LockScreen({ hwid, onRetry }) {
+  return (
+    <div style={{
+      height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+      color: 'white', fontFamily: 'Inter, system-ui, sans-serif', zIndex: 9999, position: 'fixed', top: 0, left: 0
+    }}>
+      <div style={{
+        background: 'rgba(255,255,255,0.05)', padding: '40px', borderRadius: '24px',
+        border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)',
+        textAlign: 'center', maxWidth: '450px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)'
+      }}>
+        <div style={{ fontSize: '48px', marginBottom: '20px' }}>🔒</div>
+        <h1 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '10px' }}>Software Not Activated</h1>
+        <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', marginBottom: '30px' }}>
+          This installation of <strong>Smart Billing</strong> is locked. Please send your Machine ID to the developer to activate this shop.
+        </p>
+        <div style={{ 
+          background: 'rgba(0,0,0,0.3)', padding: '12px 16px', borderRadius: '12px', 
+          fontSize: '13px', fontFamily: 'monospace', color: '#38bdf8',
+          border: '1px dashed rgba(56,189,248,0.3)', marginBottom: '30px', wordBreak: 'break-all'
+        }}>
+          {hwid}
+        </div>
+        <button onClick={onRetry} style={{
+          width: '100%', padding: '14px', background: '#4f46e5', color: 'white',
+          border: 'none', borderRadius: '12px', fontWeight: '700', cursor: 'pointer'
+        }}>
+          Check Activation Status
+        </button>
+        <p style={{ marginTop: '20px', fontSize: '12px', color: '#64748b' }}>
+          Once activated by the developer, click check status to unlock.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main App ────────────────────────────────────────────────── */
 function App() {
   const [currentView, setCurrentView]   = useState('pos');
@@ -61,6 +101,8 @@ function App() {
   const [qrData,      setQrData]        = useState(null);
   const [showQR,      setShowQR]        = useState(false);
   const [appSettings, setAppSettings]   = useState({});
+  const [license,     setLicense]       = useState({ is_active: true, hwid: '' });
+  const [checking,    setChecking]      = useState(true);
 
   const navItems = [
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> },
@@ -91,15 +133,25 @@ function App() {
     }
   };
 
-  // 3. Debounced Refresh Logic
+  // 3. Debounced Refresh Logic (Full UI Reload)
   const handleRefresh = () => {
-    if (window._isRefreshing) return;
-    window._isRefreshing = true;
-    window.dispatchEvent(new Event('soft_refresh'));
-    setTimeout(() => { window._isRefreshing = false; }, 1500);
+    window.location.reload();
+  };
+
+  const checkLicense = async () => {
+    if (!window.api) return setChecking(false);
+    try {
+      const res = await window.api.getLicenseStatus();
+      setLicense(res);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setChecking(false);
+    }
   };
 
   useEffect(() => {
+    checkLicense();
     loadSettings();
     window.addEventListener('settings_updated', loadSettings);
 
@@ -123,6 +175,14 @@ function App() {
     };
   }, []);
 
+  if (checking) return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'white' }}>
+      Authenticating...
+    </div>
+  );
+
+  if (!license.is_active) return <LockScreen hwid={license.hwid} onRetry={checkLicense} />;
+
   return (
     <ErrorBoundary>
       <div className="app-container">
@@ -131,16 +191,18 @@ function App() {
         <aside className="enterprise-sidebar">
           {/* Workpace/Tenant Switcher */}
           <div className="sidebar-brand">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, overflow: 'hidden', padding: '0 4px' }}>
               {appSettings.billLogo ? (
-                <img src={appSettings.billLogo} alt="Logo" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'contain', flexShrink: 0 }} />
+                <div style={{ width: 34, height: 34, borderRadius: '50%', overflow: 'hidden', border: '2px solid #e2e8f0', flexShrink: 0, background: 'white' }}>
+                  <img src={appSettings.billLogo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </div>
               ) : (
-                <div style={{ width: 28, height: 28, borderRadius: 6, background: '#4f46e5', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: 16, flexShrink: 0 }}>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#4f46e5', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: 18, flexShrink: 0 }}>
                   {(appSettings.storeName || "i").charAt(0).toUpperCase()}
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, overflow: 'hidden' }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appSettings.storeName || "iVA Retail"}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{appSettings.storeName || "iVA Retail"}</span>
                 <span style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appSettings.tagline || "Supermarket Pro"}</span>
               </div>
             </div>

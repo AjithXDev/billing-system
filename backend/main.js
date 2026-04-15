@@ -2,11 +2,24 @@ const fs = require("fs");
 const path = require("path");
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
+const { execSync } = require("child_process");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
 const { v4: uuidv4 } = require("uuid");
 const { createClient } = require('@supabase/supabase-js');
+
+// ── HARDWARE LICENSING ──
+function getMachineId() {
+  try {
+    const output = execSync("wmic csproduct get uuid").toString();
+    const lines = output.trim().split("\n");
+    // Usually line 0 is 'UUID' and line 1 is the actual ID
+    return lines[lines.length - 1].trim(); 
+  } catch (e) {
+    return "unknown-hwid";
+  }
+}
 
 // ── CLOUD SYNC ENGINE ──
 let supabase = null;
@@ -303,6 +316,66 @@ ipcMain.handle("get-sync-status", () => {
   const pendingInvoices = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE is_synced = 0").get().cnt;
   const pendingProducts = db.prepare("SELECT COUNT(*) as cnt FROM products WHERE is_synced = 0").get().cnt;
   return { pending: pendingInvoices + pendingProducts };
+});
+
+// 🟢 GET LICENSE STATUS
+ipcMain.handle("get-license-status", async () => {
+  const hwid = getMachineId();
+  const userDataPath = app.getPath("userData");
+  const configPath = path.join(userDataPath, "app_settings.json");
+  
+  let settings = {};
+  if (fs.existsSync(configPath)) {
+    try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch(e) {}
+  }
+
+  const url = settings.supabaseUrl || process.env.SUPABASE_URL;
+  const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+
+  if (!url || !key || !url.startsWith("http")) {
+    return { is_active: true, hwid, note: "Offline mode / No cloud config" };
+  }
+
+  try {
+    const tempClient = createClient(url, key);
+    const { data, error } = await tempClient
+      .from('software_licenses')
+      .select('*')
+      .eq('machine_id', hwid)
+      .single();
+
+    let realShopName = "New Client";
+    if (fs.existsSync(configPath)) {
+      try {
+        const s = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (s.storeName) realShopName = s.storeName;
+      } catch(e) {}
+    }
+
+    if (error && error.code === 'PGRST116') {
+      // Not registered yet, auto-register as inactive
+      await tempClient.from('software_licenses').insert({
+        machine_id: hwid,
+        shop_name: realShopName,
+        is_active: false
+      });
+      return { is_active: false, hwid };
+    }
+
+    if (error) throw error;
+
+    // 🟢 Update shop name if it changed in local settings
+    if (data.shop_name !== realShopName) {
+      await tempClient.from('software_licenses').update({ shop_name: realShopName }).eq('id', data.id);
+    }
+
+    return { is_active: !!data.is_active, hwid };
+  } catch (e) {
+    console.error("License Check Error:", e.message);
+    // Fail-safe: if network is down, allow access but log it (for now)
+    // In production, you might want to block access if check fails 3 times
+    return { is_active: true, hwid, note: "Network check failed" };
+  }
 });
 
 // ============================================================

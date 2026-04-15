@@ -252,8 +252,9 @@ const POS = ({ showQR }) => {
       return;
     }
 
+    const hasGst = settings.gstNumber && settings.gstNumber.trim().length > 0;
     const priceType = product.price_type || 'exclusive';
-    const catGst = Number(product.gst_rate || product.category_gst || 0);
+    const catGst = hasGst ? Number(product.gst_rate || product.category_gst || 0) : 0;
     const price = Number(product.price || 0);
 
     const existingIdx = billItems.findIndex(i => i.id === product.id);
@@ -364,7 +365,8 @@ const POS = ({ showQR }) => {
     }
 
     const updated = [...billItems];
-    const catGst = Number(product.gst_rate || product.category_gst || 0);
+    const hasGst = settings.gstNumber && settings.gstNumber.trim().length > 0;
+    const catGst = hasGst ? Number(product.gst_rate || product.category_gst || 0) : 0;
     const price = Number(product.price || 0);
     const quantity = 1;
     const priceType = product.price_type || 'exclusive';
@@ -460,7 +462,8 @@ const POS = ({ showQR }) => {
     if (newQty < 0) newQty = 0;
 
     const priceType = item.price_type || 'exclusive';
-    const rate = Number(item.gstRate || 0);
+    const hasGst = settings.gstNumber && settings.gstNumber.trim().length > 0;
+    const rate = hasGst ? Number(item.gstRate || 0) : 0;
     const price = Number(item.price || 0);
 
     const dp = item.discountPercent || 0;
@@ -891,7 +894,7 @@ const POS = ({ showQR }) => {
                   {[...billItems.filter(i => i.qty > 0 && i.id), ...freeItems].map((item, idx) => (
                     <tr key={idx} style={{ borderBottom: "1px solid #ccc" }}>
                       <td style={{ padding: "12px", borderRight: "1px solid #333" }}>
-                        {item.name} {item.isFree && <span style={{ padding: "2px 5px", background: "#333", color: "white", fontSize: "0.7rem", borderRadius: "3px", marginLeft: "5px" }}>FREE</span>}
+                        {item.name}
                         <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>
                           {item.isFree ? `Offer: ${item.offerName}` : `+ ${item.gstRate}% GST (₹${item.gstAmt.toFixed(2)})`}
                         </div>
@@ -908,36 +911,9 @@ const POS = ({ showQR }) => {
                 </tbody>
               </table>
 
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "40px" }}>
-                {/* GST BREAKDOWN TABLE */}
-                <div style={{ flex: 1 }}>
-                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", border: "1px solid #ddd" }}>
-                      <thead>
-                         <tr style={{ background: "#f8fafc", borderBottom: "1px solid #ddd" }}>
-                            <th style={{ padding: "5px", textAlign: "left" }}>GST %</th>
-                            <th style={{ padding: "5px", textAlign: "right" }}>Taxable</th>
-                            <th style={{ padding: "5px", textAlign: "right" }}>CGST</th>
-                            <th style={{ padding: "5px", textAlign: "right" }}>SGST</th>
-                         </tr>
-                      </thead>
-                      <tbody>
-                         {[0, 5, 12, 18, 28].map(rate => {
-                            const items = billItems.filter(i => i.qty > 0 && Number(i.gstRate) === rate);
-                            if (items.length === 0) return null;
-                            const tax = items.reduce((s, i) => s + i.gstAmt, 0);
-                            const base = items.reduce((s, i) => s + i.total, 0);
-                            return (
-                               <tr key={rate} style={{ borderBottom: "1px solid #eee" }}>
-                                  <td style={{ padding: "5px" }}>{rate}%</td>
-                                  <td style={{ padding: "5px", textAlign: "right" }}>₹{base.toFixed(2)}</td>
-                                  <td style={{ padding: "5px", textAlign: "right" }}>₹{(tax / 2).toFixed(2)}</td>
-                                  <td style={{ padding: "5px", textAlign: "right" }}>₹{(tax / 2).toFixed(2)}</td>
-                               </tr>
-                            );
-                         })}
-                      </tbody>
-                   </table>
-                </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "40px" }}>
+
+
 
                 <div style={{ width: "250px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
@@ -1131,13 +1107,22 @@ const POS = ({ showQR }) => {
                             onClick={() => updateQty(idx, (item.qty || 0) - 1)}
                             disabled={!item.qty || item.qty <= 0}
                           >–</button>
-                          <span className="qty-display">{item.qty || 0}</span>
+                          <input 
+                            ref={el => inputRefs.current[`${idx}_qty`] = el}
+                            type="number"
+                            className="pos-input"
+                            style={{ width: 45, fontWeight: 800, fontSize: 13, background: 'transparent' }}
+                            value={item.qty || ""}
+                            onFocus={(e) => { e.target.select(); setCurrentRow(idx); }}
+                            onKeyDown={(e) => handleKeyDown(e, idx, "qty")}
+                            onChange={(e) => updateQty(idx, e.target.value)}
+                          />
                           <button 
                             className="qty-btn qty-plus"
                             onClick={() => updateQty(idx, (item.qty || 0) + 1)}
                             disabled={item.qty >= (item.maxStock || getProductStock(item.id))}
                           >+</button>
-                          {item.id && <span className="qty-stock-hint">/{item.maxStock || getProductStock(item.id)}</span>}
+                          {item.id && <span className="qty-stock-hint" style={{ marginLeft: 4 }}>/{item.maxStock || getProductStock(item.id)}</span>}
                         </div>
                       ) : (
                         <span style={{ color: 'var(--text-4)', fontSize: 12 }}>—</span>

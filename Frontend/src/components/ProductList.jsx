@@ -6,6 +6,7 @@ const ProductList = () => {
   const [isEditModalOpen, setEditModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [categories, setCategories] = useState([]);
+  const [settings, setSettings] = useState({ storeName: "iVA Retail", tagline: "Quality groceries at best price...", billLogo: "" });
   
   const load = async () => {
     if (window.api && window.api.getProductsFull) {
@@ -14,6 +15,10 @@ const ProductList = () => {
     if (window.api && window.api.getCategories) {
       setCategories(await window.api.getCategories());
     }
+    try {
+      const raw = localStorage.getItem("smart_billing_settings");
+      if (raw) setSettings(JSON.parse(raw));
+    } catch (e) {}
   };
   
   useEffect(() => {
@@ -95,15 +100,19 @@ const ProductList = () => {
               color: #1e3a8a;
             }
             .tagline { color: #64748b; font-size: 14px; margin-top: 4px; font-weight: 500; }
+            .shop-header { display: flex; align-items: center; gap: 20px; }
+            .shop-logo { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 3px solid #f1f5f9; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
             .catalog-label {
+              display: inline-block;
               background: #eff6ff;
               color: #2563eb;
               padding: 6px 12px;
               border-radius: 6px;
-              font-size: 12px;
-              font-weight: 700;
+              font-size: 11px;
+              font-weight: 800;
               text-transform: uppercase;
               letter-spacing: 0.05em;
+              margin-bottom: 8px;
             }
             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
             th { 
@@ -174,10 +183,13 @@ const ProductList = () => {
           </div>
           <div class="container">
             <header>
-              <div class="shop-info">
-                <div class="catalog-label">Product Catalog</div>
-                <h1>MY MART</h1>
-                <div class="tagline">Providing quality products since 2024</div>
+              <div class="shop-header">
+                ${settings.billLogo ? `<img src="${settings.billLogo}" class="shop-logo" />` : ''}
+                <div class="shop-info">
+                  <div class="catalog-label">Product Catalog</div>
+                  <h1>${settings.storeName || 'MY SHOP'}</h1>
+                  <div class="tagline">${settings.tagline || 'Reliable billing solutions'}</div>
+                </div>
               </div>
               <div style="text-align: right">
                 <div style="font-size: 12px; color: #64748b; font-weight: 600;">DATE GENERATED</div>

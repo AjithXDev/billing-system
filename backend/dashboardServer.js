@@ -9,7 +9,11 @@ const cors = require("cors");
 const http = require("http");
 const os = require("os");
 const path = require("path");
+const fs = require("fs");
 const db = require("./db");
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const PORT = 4567;
 let server = null;
@@ -102,11 +106,61 @@ function startDashboardServer(mainWindow) {
   expressApp.use(cors());
   expressApp.use(express.json({ limit: '50mb' }));
 
-  // ── Serve the mobile dashboard HTML ─────────────────
+  // ── Serve the mobile dashboard HTML with credential injection ──
   expressApp.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "..", "mobile-dashboard", "index.html"));
+    const mobilePath = path.join(__dirname, "..", "mobile-dashboard", "index.html");
+    if (!fs.existsSync(mobilePath)) {
+      return res.status(404).send("Mobile dashboard not found.");
+    }
+    
+    let html = fs.readFileSync(mobilePath, "utf-8");
+    const settings = getSettings();
+    
+    // Inject credentials
+    html = html.replace("__SUPABASE_URL__", process.env.SUPABASE_URL || "");
+    html = html.replace("__SUPABASE_KEY__", process.env.SUPABASE_KEY || "");
+    html = html.replace("__SHOP_ID__",      process.env.SHOP_ID || "");
+    html = html.replace("__MASTER_KEY__",   process.env.MASTER_KEY || settings.masterKey || "");
+    html = html.replace("__LOCAL_API__",    `http://${localIP}:${PORT}`);
+    
+    res.send(html);
   });
   expressApp.use(express.static(path.join(__dirname, "..", "mobile-dashboard")));
+
+  // ── Serve Master Control Dashboard ──
+  expressApp.get("/master", (req, res) => {
+    const masterPath = path.join(__dirname, "..", "master-dashboard", "index.html");
+    if (!fs.existsSync(masterPath)) return res.status(404).send("Master Dashboard not found.");
+    res.sendFile(masterPath);
+  });
+
+  // ── Master License Management API ──
+  expressApp.get("/api/master/licenses", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (auth !== (process.env.MASTER_KEY || "owner123")) return res.status(401).send("Unauthorized");
+    
+    try {
+      const { data, error } = await supabase.from('software_licenses').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  expressApp.post("/api/master/licenses/:id/status", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (auth !== (process.env.MASTER_KEY || "owner123")) return res.status(401).send("Unauthorized");
+    
+    const { status } = req.body;
+    try {
+      const { error } = await supabase.from('software_licenses').update({ 
+        is_active: status,
+        activated_at: status ? new Date().toISOString() : null
+      }).eq('id', req.params.id);
+      
+      if (error) throw error;
+      res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
 
   expressApp.post("/api/auth", (req, res) => {
     const { key } = req.body;
