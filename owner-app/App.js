@@ -35,6 +35,9 @@ function OwnerApp() {
   const [email, setEmail] = useState('');
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [authUser, setAuthUser] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -68,18 +71,15 @@ function OwnerApp() {
 
   const initClient = () => {
     try {
-      // For web (Expo web), load Supabase from CDN dynamically
       if (typeof window !== 'undefined' && window.supabase) {
         const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         setSb(client);
         return client;
       }
-      // For native, we would need @supabase/supabase-js but we use fetch directly
       return null;
     } catch { return null; }
   };
 
-  // ── Supabase API helpers (works without SDK via REST) ──
   const sbFetch = async (table, method, body, query = '') => {
     const url = `${SUPABASE_URL}/rest/v1/${table}${query}`;
     const headers = {
@@ -100,7 +100,6 @@ function OwnerApp() {
     return data;
   };
 
-  // Supabase Auth via REST API
   const sbAuth = async (endpoint, body) => {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/${endpoint}`, {
       method: 'POST',
@@ -154,12 +153,18 @@ function OwnerApp() {
         setLoading(true); setError('');
 
         try {
-          // 1. Create auth user
           const authData = await sbAuth('signup', {
             email: email.trim(),
             password,
             data: { owner_name: ownerName.trim(), mobile: mobile.trim() },
           });
+
+          // Check if registration was successful or pending email verification
+          if (authData.user && authData.user.identities && authData.user.identities.length === 0) {
+            setError('This email is already registered. Please login or reset your password.');
+            setLoading(false);
+            return;
+          }
 
           Alert.alert('✅ Account Created', 'You can now log in with your email and password.', [
             { text: 'Login', onPress: () => { setError(''); setScreen('login'); } }
@@ -210,7 +215,17 @@ function OwnerApp() {
           });
           setAuthUser(data.user || data);
           Store.set('iva_auth_token', data.access_token || '');
-          setScreen('shopId');
+          
+          // CRITICAL FIX: If already paired, go straight to dashboard. Do not ask for Shop ID again.
+          const savedPaired = Store.get('iva_paired');
+          const savedShopId = Store.get('iva_shop_id');
+          if (savedPaired === 'true' && savedShopId) {
+             setShopId(savedShopId);
+             setIsPaired(true);
+             setScreen('dashboard');
+          } else {
+             setScreen('shopId');
+          }
         } catch (e) {
           setError(e.message);
         }
@@ -227,7 +242,7 @@ function OwnerApp() {
 
       <TouchableOpacity style={[s.outlineBtn, { borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.05)' }]} 
         onPress={() => { setError(''); setScreen('shopId'); }}>
-        <Text style={[s.outlineBtnText, { color: '#818cf8', fontWeight: '800' }]}>⚡ LOGIN WITH SHOP ID</Text>
+        <Text style={[s.outlineBtnText, { color: '#818cf8', fontWeight: '800' }]}>⚡ GET STARTED (SHOP PAIRING)</Text>
       </TouchableOpacity>
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20 }}>
@@ -242,7 +257,7 @@ function OwnerApp() {
   );
 
   // ══════════════════════════════════════════════════════
-  //  FORGOT PASSWORD
+  //  FORGOT PASSWORD FLOW (OTP based)
   // ══════════════════════════════════════════════════════
   const renderForgot = () => (
     <ScrollView contentContainerStyle={s.scrollWrap} keyboardShouldPersistTaps="handled">
@@ -252,7 +267,7 @@ function OwnerApp() {
         </View>
       </View>
       <Text style={s.heading}>Reset Password</Text>
-      <Text style={s.subheading}>We'll send a reset link to your email</Text>
+      <Text style={s.subheading}>Enter your email to receive a code</Text>
 
       <Label>Email</Label>
       <TextInput style={s.input} value={email} onChangeText={setEmail}
@@ -266,17 +281,81 @@ function OwnerApp() {
 
         try {
           await sbAuth('recover', { email: email.trim() });
-          Alert.alert('📧 Email Sent', 'Check your inbox for a password reset link.', [
-            { text: 'OK', onPress: () => setScreen('login') }
+          Alert.alert('📧 OTP Sent', 'Check your inbox for the verification code.', [
+            { text: 'OK', onPress: () => { setOtp(''); setScreen('forgot_otp'); } }
           ]);
         } catch (e) { setError(e.message); }
         setLoading(false);
       }}>
-        <Text style={s.primaryBtnText}>{loading ? 'Sending...' : '📧 SEND RESET LINK'}</Text>
+        <Text style={s.primaryBtnText}>{loading ? 'Sending...' : '📧 SEND OTP CODE'}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => { setError(''); setScreen('login'); }}>
         <Text style={s.linkText}>← Back to Login</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+
+  const renderForgotOtp = () => (
+    <ScrollView contentContainerStyle={s.scrollWrap} keyboardShouldPersistTaps="handled">
+      <View style={s.logoWrap}><View style={[s.logoBadge, { backgroundColor: '#f59e0b' }]}><Text style={{ fontSize: 26 }}>💬</Text></View></View>
+      <Text style={s.heading}>Enter OTP Code</Text>
+      <Text style={s.subheading}>Enter the code sent to {email}</Text>
+
+      <Label>Verification Code</Label>
+      <TextInput style={s.input} value={otp} onChangeText={setOtp}
+        placeholder="6-digit code" placeholderTextColor="#555" keyboardType="numeric" />
+
+      {error ? <ErrBox msg={error} /> : null}
+
+      <TouchableOpacity style={[s.primaryBtn, { backgroundColor: '#f59e0b' }]} disabled={loading} onPress={async () => {
+        if (!otp.trim()) { setError('Enter the code from your email'); return; }
+        setLoading(true); setError('');
+        try {
+          const data = await sbAuth('verify', { type: 'recovery', email: email.trim(), token: otp.trim() });
+          setResetToken(data.access_token || data.session?.access_token);
+          setScreen('forgot_reset');
+        } catch (e) { setError(e.message); }
+        setLoading(false);
+      }}>
+        <Text style={s.primaryBtnText}>{loading ? 'Verifying...' : 'VERIFY CODE'}</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+
+  const renderForgotReset = () => (
+    <ScrollView contentContainerStyle={s.scrollWrap} keyboardShouldPersistTaps="handled">
+      <View style={s.logoWrap}><View style={[s.logoBadge, { backgroundColor: '#f59e0b' }]}><Text style={{ fontSize: 26 }}>🔒</Text></View></View>
+      <Text style={s.heading}>New Password</Text>
+      <Text style={s.subheading}>Enter your new password below</Text>
+
+      <Label>New Password</Label>
+      <TextInput style={s.input} value={password} onChangeText={setPassword}
+        placeholder="Min 6 chars" placeholderTextColor="#555" secureTextEntry />
+
+      <Label>Confirm Password</Label>
+      <TextInput style={s.input} value={confirmPassword} onChangeText={setConfirmPassword}
+        placeholder="Re-enter password" placeholderTextColor="#555" secureTextEntry />
+
+      {error ? <ErrBox msg={error} /> : null}
+
+      <TouchableOpacity style={[s.primaryBtn, { backgroundColor: '#f59e0b' }]} disabled={loading} onPress={async () => {
+        if (!password || password.length < 6) { setError('Password must be 6+ chars'); return; }
+        if (password !== confirmPassword) { setError('Passwords do not match'); return; }
+        setLoading(true); setError('');
+        try {
+          await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            method: 'PUT',
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${resetToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+          });
+          Alert.alert('✅ Success', 'Password updated successfully. You can now login.', [
+            { text: 'Login', onPress: () => { setPassword(''); setScreen('login'); } }
+          ]);
+        } catch (e) { setError('Failed to update password. Try again.'); }
+        setLoading(false);
+      }}>
+        <Text style={s.primaryBtnText}>{loading ? 'Updating...' : 'UPDATE PASSWORD'}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -638,6 +717,8 @@ setInterval(load,30000);
         {screen === 'register' && renderRegister()}
         {screen === 'login' && renderLogin()}
         {screen === 'forgot' && renderForgot()}
+        {screen === 'forgot_otp' && renderForgotOtp()}
+        {screen === 'forgot_reset' && renderForgotReset()}
         {screen === 'shopId' && renderShopId()}
         {screen === 'pairing' && renderPairing()}
         {screen === 'dashboard' && renderDashboard()}

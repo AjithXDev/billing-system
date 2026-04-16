@@ -1,5 +1,5 @@
 {
-  "name": "smart-billing",
+  "name": "innoaivators-billing",
   "version": "1.0.0",
   "main": "backend/main.js",
   "scripts": {
@@ -15,7 +15,7 @@
   },
   "build": {
     "appId": "com.smart.billing",
-    "productName": "Smart Billing",
+    "productName": "Innoaivators billing",
     "copyright": "Copyright © 2026 AjithXDev",
     "directories": {
       "output": "dist-electron"
@@ -51,7 +51,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Smart Billing"
+      "shortcutName": "Innoaivators billing"
     }
   },
   "keywords": [],

@@ -113,7 +113,6 @@ function App() {
   const [isRegistered, setIsRegistered] = useState(true);
   const [shopId, setShopId]             = useState('');
   const [showPairing, setShowPairing]   = useState(false);
-  const [refreshKey,  setRefreshKey]    = useState(0); // incremented on soft refresh
 
   const navItems = [
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> },
@@ -146,7 +145,6 @@ function App() {
 
   // 3. Soft Refresh — re-fetches data in the current view without navigating
   const handleRefresh = () => {
-    setRefreshKey(k => k + 1);  // force child component re-mount
     window.dispatchEvent(new CustomEvent('soft_refresh'));
   };
 
@@ -306,13 +304,13 @@ function App() {
           </header>
           
           <div className="enterprise-workspace">
-            {currentView === 'pos'          && <POS key={`pos-${refreshKey}`} showQR={showQR} />}
-            {currentView === 'add_product'  && <Inventory key={`inv-${refreshKey}`} />}
-            {currentView === 'product_list' && <ProductList key={`pl-${refreshKey}`} />}
-            {currentView === 'bulk_update'  && <BulkUpdate key={`bu-${refreshKey}`} />}
-            {currentView === 'offers'       && <Offers key={`of-${refreshKey}`} />}
-            {currentView === 'settings'     && <Settings key={`st-${refreshKey}`} />}
-            {currentView === 'history'      && <History key={`hi-${refreshKey}`} />}
+            {currentView === 'pos'          && <POS showQR={showQR} />}
+            {currentView === 'add_product'  && <Inventory />}
+            {currentView === 'product_list' && <ProductList />}
+            {currentView === 'bulk_update'  && <BulkUpdate />}
+            {currentView === 'offers'       && <Offers />}
+            {currentView === 'settings'     && <Settings />}
+            {currentView === 'history'      && <History />}
           </div>
         </main>
 

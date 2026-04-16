@@ -172,10 +172,18 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    title: "Innoaivators billing", // Updated Application Title
+    icon: path.join(__dirname, "assets", "logo.png"), // Ready for custom app logo later
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+
+  // Completely remove the default top menu bar (File, Edit, View, etc.)
+  mainWindow.setMenu(null);
+
+  // Force the title to stay "Innoaivators billing" regardless of page content
+  mainWindow.on('page-title-updated', (e) => e.preventDefault());
 
   if (app.isPackaged) {
     mainWindow.loadFile(path.join(__dirname, "..", "Frontend", "dist", "index.html"));
