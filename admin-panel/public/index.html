@@ -29,8 +29,8 @@
 
         // 🟢 CONFIGURATION
         // PASTE YOUR CREDENTIALS HERE
-        const SUPABASE_URL = ''; 
-        const SUPABASE_KEY = ''; 
+        const SUPABASE_URL = //'https://baawqrqihlhsrghvjlpx.supabase.co'; 
+        const SUPABASE_KEY = //'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0'; 
 
         // Safe Initialization
         const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
@@ -160,6 +160,14 @@
                 if (!error) loadData();
             };
 
+            const deleteShop = async (shopId, shopName) => {
+                if (confirm(`Are you sure you want to PERMANENTLY delete ${shopName}? All synced data for this shop will be lost.`)) {
+                    const { error } = await sb.from('shops').delete().eq('id', shopId);
+                    if (!error) loadData();
+                    else alert("Failed to delete shop: " + error.message);
+                }
+            };
+
             return (
                 <div className="min-h-screen bg-[#020617] p-8">
                     <nav className="flex justify-between items-center mb-10">
@@ -184,7 +192,7 @@
                         <div className="overflow-x-auto">
                             <table className="w-full text-left">
                                 <thead className="bg-slate-900/50 text-[10px] uppercase font-black text-slate-500 border-b border-white/5">
-                                    <tr><th className="px-8 py-5">Shop Info</th><th className="px-8 py-5">Owner</th><th className="px-8 py-5 text-center">Status</th><th className="px-8 py-5 text-center">Action</th></tr>
+                                    <tr><th className="px-8 py-5">Shop Info</th><th className="px-8 py-5">Owner</th><th className="px-8 py-5 text-center">Status</th><th className="px-8 py-5 text-center">Action</th><th className="px-8 py-5 text-center">Delete</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5">
                                     {shops.map(shop => (
@@ -209,6 +217,11 @@
                                                         <div className="toggle-knob"></div>
                                                     </div>
                                                 </div>
+                                            </td>
+                                            <td className="px-8 py-6 text-center">
+                                                <button onClick={() => deleteShop(shop.id, shop.name)} className="w-9 h-9 flex items-center justify-center bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition">
+                                                   🗑️
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}

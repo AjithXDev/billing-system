@@ -33,21 +33,42 @@ async function syncToCloud(shopId) {
   try {
     const products = db.prepare("SELECT * FROM products WHERE is_synced = 0").all();
     for (const p of products) {
-      const { error } = await supabase.from('products').upsert({ ...p, shop_id: shopId, is_synced: 1 });
-      if (!error) db.prepare("UPDATE products SET is_synced = 1 WHERE id = ?").run(p.id);
+      const { id, is_synced, ...data } = p;
+      const { error } = await supabase.from('products').upsert({ 
+        ...data, 
+        local_id: id, 
+        shop_id: shopId 
+      }, { onConflict: 'shop_id,local_id' });
+      
+      if (!error) db.prepare("UPDATE products SET is_synced = 1 WHERE id = ?").run(id);
+      else console.error("[Sync] Product error:", error.message);
     }
+
     const invoices = db.prepare("SELECT * FROM invoices WHERE is_synced = 0").all();
     for (const inv of invoices) {
-      const { error } = await supabase.from('invoices').upsert({ ...inv, shop_id: shopId, is_synced: 1 });
+      const { id, is_synced, ...data } = inv;
+      const { error } = await supabase.from('invoices').upsert({ 
+        ...data, 
+        local_id: id, 
+        shop_id: shopId 
+      }, { onConflict: 'shop_id,local_id' });
+
       if (!error) {
-        db.prepare("UPDATE invoices SET is_synced = 1 WHERE id = ?").run(inv.id);
-        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(inv.id);
-        await supabase.from('invoice_items').upsert(items.map(i => ({ ...i, shop_id: shopId })));
+        db.prepare("UPDATE invoices SET is_synced = 1 WHERE id = ?").run(id);
+        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(id);
+        await supabase.from('invoice_items').upsert(items.map(i => {
+           const { id: itemId, ...itemData } = i;
+           return { ...itemData, shop_id: shopId, local_id: itemId };
+        }));
+      } else {
+        console.error("[Sync] Invoice error:", error.message);
       }
     }
     // Push stats snapshot for mobile remote access
     await pushStatsSnapshot(shopId);
-  } catch (e) {}
+  } catch (e) {
+    console.error("[Sync] General error:", e.message);
+  }
 }
 
 // ── Register shop in Supabase (for mobile auth from anywhere) ──
@@ -55,13 +76,22 @@ async function registerShop(shopId) {
   if (!supabase) return;
   try {
     let storeName = "My Shop";
+    let ownerName = "Shop Owner";
+    let mobile = "";
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     if (fs.existsSync(configPath)) {
-      try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); storeName = s.storeName || storeName; } catch(e) {}
+      try { 
+        const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); 
+        storeName = s.storeName || storeName; 
+        ownerName = s.ownerName || ownerName;
+        mobile = s.ownerPhone || mobile;
+      } catch(e) {}
     }
     await supabase.from("shops").upsert({
       id: shopId,
       name: storeName,
+      owner_name: ownerName,
+      mobile_number: mobile,
       master_key: process.env.MASTER_KEY || "owner123",
       updated_at: new Date().toISOString()
     });
@@ -166,17 +196,6 @@ function createWindow() {
   // Start the background API & Mobile Dashboard server
   startDashboardServer(mainWindow);
 
-  // 🟢 Auto-Generate Shop ID if missing in .env
-  let shopId = process.env.SHOP_ID;
-  if (!shopId) {
-    shopId = `shop-${uuidv4().slice(0, 8)}`;
-    // Append to .env for persistence
-    try {
-      fs.appendFileSync(path.join(__dirname, '..', '.env'), `\nSHOP_ID=${shopId}`);
-      process.env.SHOP_ID = shopId;
-      console.log("[Setup] Auto-generated Unique Shop ID:", shopId);
-    } catch(e) { console.error("Failed to save SHOP_ID to .env"); }
-  }
 
   // 🟢 Initialize Cloud Sync & Alert Loop
   setInterval(async () => {
@@ -404,80 +423,7 @@ ipcMain.handle("get-sync-status", () => {
   return { pending: pendingInvoices + pendingProducts };
 });
 
-// 🟢 GET LICENSE STATUS
-ipcMain.handle("get-license-status", async () => {
-  const hwid = getMachineId();
-  const userDataPath = app.getPath("userData");
-  const configPath = path.join(userDataPath, "app_settings.json");
-  
-  let settings = {};
-  if (fs.existsSync(configPath)) {
-    try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch(e) {}
-  }
 
-  const url = settings.supabaseUrl || process.env.SUPABASE_URL;
-  const key = settings.supabaseKey || process.env.SUPABASE_KEY;
-
-  if (!url || !key || !url.startsWith("http")) {
-    return { is_active: true, hwid, note: "Offline mode / No cloud config" };
-  }
-
-  try {
-    const tempClient = createClient(url, key);
-    const { data, error } = await tempClient
-      .from('software_licenses')
-      .select('*')
-      .eq('machine_id', hwid)
-      .single();
-
-    let realShopName = "New Client";
-    if (fs.existsSync(configPath)) {
-      try {
-        const s = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        if (s.storeName) realShopName = s.storeName;
-      } catch(e) {}
-    }
-
-    if (error && error.code === 'PGRST116') {
-      // Not registered yet, auto-register as inactive
-      await tempClient.from('software_licenses').insert({
-        machine_id: hwid,
-        shop_name: realShopName,
-        is_active: false
-      });
-      return { is_active: false, hwid };
-    }
-
-    if (error) throw error;
-
-    // 🟢 Update shop name if it changed in local settings
-    if (data.shop_name !== realShopName) {
-      await tempClient.from('software_licenses').update({ shop_name: realShopName }).eq('id', data.id);
-    }
-
-    let isAccessGranted = !!data.is_active;
-    let note = "Not activated";
-
-    // 🔴 NEW ADMIN CHECK: Verify if the entire shop is deactivated
-    const shopId = process.env.SHOP_ID;
-    if (shopId) {
-       const { data: shopData } = await tempClient.from('shops').select('is_active').eq('id', shopId).single();
-       if (shopData && shopData.is_active === false) {
-          isAccessGranted = false;
-          note = "Access denied. Admin has deactivated this shop.";
-       }
-    }
-
-    return { is_active: isAccessGranted, hwid, note };
-  } catch (e) {
-    console.error("License Check Error:", e.message);
-    // Fail-safe: if network is down, allow access but log it (for now)
-    // In production, you might want to block access if check fails 3 times
-    return { is_active: true, hwid, note: "Network check failed" };
-  }
-});
-
-// ============================================================
 // 🔔 NOTIFICATION HANDLERS (Owner Alerts)
 // ============================================================
 
@@ -950,14 +896,33 @@ ipcMain.handle("toggle-offer-status", async (event, { id, status }) => {
 ipcMain.handle("get-registration-status", async () => {
   try {
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    const envPath = path.join(__dirname, '..', '.env');
+    
     let settings = {};
     if (fs.existsSync(configPath)) {
       try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
     }
-    const shopId = settings.shopId || process.env.SHOP_ID || "";
-    // Check if it's a UUID (registered) or old format
-    const isRegistered = shopId.length > 20; // UUIDs are 36 chars
-    return { isRegistered, shopId };
+
+    // DIRECT FILE CHECK: Don't trust process.env cache
+    let envContent = "";
+    if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf-8');
+    }
+    
+    const hasShopId = envContent.includes("SHOP_ID=");
+    const match = envContent.match(/SHOP_ID=(.+)/);
+    const shopIdValue = match ? match[1].trim() : "";
+
+    if (!hasShopId || !shopIdValue) {
+        // Forcefully Wipe local cache
+        if (settings.shopId) {
+            delete settings.shopId;
+            fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+        }
+        return { isRegistered: false, shopId: "" };
+    }
+
+    return { isRegistered: true, shopId: shopIdValue };
   } catch (e) {
     return { isRegistered: false, shopId: "" };
   }
@@ -965,7 +930,7 @@ ipcMain.handle("get-registration-status", async () => {
 
 // Register shop in Supabase → get UUID
 ipcMain.handle("register-shop", async (event, data) => {
-  const { ownerName, mobileNumber } = data;
+  const { shopName, ownerName, mobileNumber } = data;
   
   // Get Supabase client  
   const configPath = path.join(app.getPath("userData"), "app_settings.json");
@@ -978,39 +943,39 @@ ipcMain.handle("register-shop", async (event, data) => {
   const key = settings.supabaseKey || process.env.SUPABASE_KEY;
   
   if (!url || !key || !url.startsWith('http')) {
-    return { success: false, error: "Supabase not configured. Add SUPABASE_URL and SUPABASE_KEY to .env" };
+    return { success: false, error: "Supabase not configured. Please contact support." };
   }
   
   initSupabase(url, key);
   if (!supabase) {
-    return { success: false, error: "Could not initialize Supabase client" };
+    return { success: false, error: "Cloud connection failed. Please check internet." };
   }
   
   try {
-    // Create shop in Supabase (auto-generates UUID)
-    const { data: shopData, error } = await supabase
+    // Generate a local Shop ID (shop-xxxxxxxx format)
+    const newShopId = `shop-${uuidv4().slice(0, 8)}`;
+
+    // Create shop in Supabase (status default is disabled in DB)
+    const { error } = await supabase
       .from("shops")
       .insert({
+        id: newShopId,
         owner_name: ownerName,
         mobile_number: mobileNumber,
-        name: settings.storeName || "My Shop",
+        name: shopName || settings.storeName || "My Shop",
         master_key: process.env.MASTER_KEY || settings.masterKey || "owner123",
-      })
-      .select()
-      .single();
+        is_active: false // Explicitly set to false until admin reviews
+      });
     
     if (error) {
       console.error("[Register] Supabase error:", error.message);
       return { success: false, error: error.message };
     }
     
-    const newShopId = shopData.id;
-    
     // Save to .env
     try {
       const envPath = path.join(__dirname, '..', '.env');
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
-      // Replace or add SHOP_ID
       if (envContent.includes('SHOP_ID=')) {
         envContent = envContent.replace(/SHOP_ID=.*/g, `SHOP_ID=${newShopId}`);
       } else {
@@ -1018,21 +983,20 @@ ipcMain.handle("register-shop", async (event, data) => {
       }
       fs.writeFileSync(envPath, envContent);
       process.env.SHOP_ID = newShopId;
-    } catch(e) {
-      console.error("[Register] Failed to update .env:", e.message);
-    }
+    } catch(e) { console.error("[Register] .env error:", e.message); }
     
     // Save to app_settings.json
     settings.shopId = newShopId;
+    settings.storeName = shopName;
     settings.ownerName = ownerName;
     settings.ownerMobile = mobileNumber;
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
     
-    console.log("[Register] Shop registered:", newShopId);
+    console.log("[Register] Shop registered and pending activation:", newShopId);
     return { success: true, shopId: newShopId };
   } catch (e) {
-    console.error("[Register] Error:", e.message);
-    return { success: false, error: e.message };
+    console.error("[Register] Critical error:", e.message);
+    return { success: false, error: "System error: " + e.message };
   }
 });
 
@@ -1053,7 +1017,7 @@ ipcMain.handle("validate-pairing-code", async (event, code) => {
   if (!supabase) return { success: false, error: "Supabase not connected" };
   
   const shopId = process.env.SHOP_ID;
-  if (!shopId || shopId.length < 20) return { success: false, error: "Shop not registered" };
+  if (!shopId || shopId.length < 8) return { success: false, error: "Shop not registered" };
   
   try {
     // Find matching pending code for this shop
@@ -1086,6 +1050,62 @@ ipcMain.handle("validate-pairing-code", async (event, code) => {
     return { success: true, deviceId: data.device_id };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+// 🟢 LICENSE CHECK (For Admin Dashboard Activation)
+ipcMain.handle("get-license-status", async () => {
+  const machineId = getMachineId();
+  if (!supabase) {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings = {};
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+    }
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL;
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+    if (url && key) initSupabase(url, key);
+  }
+
+  if (!supabase) return { is_active: true, hwid: machineId, note: "Offline mode or Supabase not connected" };
+
+  try {
+    const shopId = process.env.SHOP_ID || "";
+    if (!shopId) return { is_active: false, needsRegistration: true, hwid: machineId, note: "Shop not registered" };
+
+    const { data: shopRecord, error } = await supabase
+      .from("shops")
+      .select("is_active")
+      .eq("id", shopId)
+      .single();
+
+    if (error || !shopRecord) {
+      // If shop record not found, it might have been deleted by the Admin.
+      // Wipe the local registration to allow the user to register again.
+      console.log(`[License] ⚠️ Shop ${shopId} not found in cloud. Wiping local registration.`);
+      
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      const envPath = path.join(__dirname, '..', '.env');
+      
+      // Wipe .env entry
+      if (fs.existsSync(envPath)) {
+        let envContent = fs.readFileSync(envPath, 'utf-8');
+        envContent = envContent.replace(/SHOP_ID=.*/g, '');
+        fs.writeFileSync(envPath, envContent);
+      }
+      process.env.SHOP_ID = "";
+
+      return { is_active: false, needsRegistration: true, hwid: machineId, note: "Shop registration was removed by admin." };
+    }
+
+    if (!shopRecord.is_active) {
+      return { is_active: false, needsRegistration: false, hwid: machineId, note: "Access denied. Admin has deactivated this shop." };
+    }
+
+    console.log(`[License] ✅ Shop ${shopId} is active!`);
+    return { is_active: true, hwid: machineId };
+  } catch (e) {
+    return { is_active: true, hwid: machineId, note: "Sync issue: " + e.message };
   }
 });
 

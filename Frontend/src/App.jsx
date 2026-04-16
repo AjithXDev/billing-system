@@ -155,6 +155,9 @@ function App() {
     try {
       const res = await window.api.getLicenseStatus();
       setLicense(res);
+      if (res.needsRegistration) {
+        setIsRegistered(false);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -204,12 +207,16 @@ function App() {
     </div>
   );
 
-  if (!license.is_active) return <LockScreen hwid={license.hwid} note={license.note} onRetry={checkLicense} />;
-
   // Gate: Show registration screen if shop not registered
   if (!isRegistered && window.api?.registerShop) {
-    return <ShopRegistration onRegistered={(id) => { setShopId(id); setIsRegistered(true); }} />;
+    return <ShopRegistration onRegistered={(id) => { 
+        setShopId(id); 
+        setIsRegistered(true);
+        checkLicense(); // Immediately check if activation is needed
+    }} />;
   }
+
+  if (!license.is_active) return <LockScreen hwid={license.hwid} note={license.note} onRetry={checkLicense} />;
 
   return (
     <ErrorBoundary>

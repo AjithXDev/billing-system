@@ -11,8 +11,8 @@ if (Platform.OS !== 'web') {
 //  ⚙️ SUPABASE CONFIG — Set these once from your .env file
 //  These are your project's public (anon) keys — safe for client use
 // ═══════════════════════════════════════════════════════════════════
-const SUPABASE_URL = 'your_supabase_url_here';     // e.g. https://abcd1234.supabase.co
-const SUPABASE_KEY = 'your_supabase_anon_key_here'; // e.g. eyJhbGciOi...
+const SUPABASE_URL = 'https://baawqrqihlhsrghvjlpx.supabase.co';     // e.g. https://abcd1234.supabase.co
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0'; // e.g. eyJhbGciOi...
 
 // Simple persistent storage (works on web + native)
 const Store = {
@@ -219,7 +219,18 @@ function OwnerApp() {
         <Text style={s.primaryBtnText}>{loading ? '⏳ Logging in...' : '🔑 LOGIN'}</Text>
       </TouchableOpacity>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
+      <View style={{ marginVertical: 25, flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ flex: 1, height: 1, backgroundColor: '#252532' }} />
+        <Text style={{ color: '#45455a', marginHorizontal: 15, fontSize: 11, fontWeight: '700' }}>OR DIRECT ACCESS</Text>
+        <View style={{ flex: 1, height: 1, backgroundColor: '#252532' }} />
+      </View>
+
+      <TouchableOpacity style={[s.outlineBtn, { borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.05)' }]} 
+        onPress={() => { setError(''); setScreen('shopId'); }}>
+        <Text style={[s.outlineBtnText, { color: '#818cf8', fontWeight: '800' }]}>⚡ LOGIN WITH SHOP ID</Text>
+      </TouchableOpacity>
+
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20 }}>
         <TouchableOpacity onPress={() => { setError(''); setScreen('register'); }}>
           <Text style={s.linkText}>Create Account</Text>
         </TouchableOpacity>
@@ -295,7 +306,7 @@ function OwnerApp() {
 
       <TouchableOpacity style={[s.primaryBtn, { backgroundColor: '#06b6d4' }]} disabled={loading} onPress={async () => {
         const sid = shopId.trim();
-        if (!sid || sid.length < 20) { setError('Enter a valid Shop ID (UUID format)'); return; }
+        if (!sid || sid.length < 8) { setError('Enter a valid Shop ID'); return; }
         setLoading(true); setError('');
 
         try {
