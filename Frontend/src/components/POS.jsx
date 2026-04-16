@@ -340,7 +340,7 @@ const POS = ({ showQR }) => {
         const pBarcode = p.barcode ? String(p.barcode).trim().toLowerCase() : "";
         const pCode = p.product_code ? String(p.product_code).toLowerCase() : "";
         return pName.includes(matchVal) || pBarcode === matchVal || pCode === matchVal;
-      });
+      }).slice(0, 25);
       setSuggestions(filtered);
       setSelectedSugIndex(0);
     } else {
@@ -416,7 +416,8 @@ const POS = ({ showQR }) => {
     }, 10);
   };
 
-  const filteredProducts = allProducts;
+  // In "Image Billing" mode, limit the max products rendered at once to prevent severe UI freezes
+  const filteredProducts = allProducts.slice(0, 100);
 
   const handleKeyDown = (e, index, field) => {
     if (field === "name") {
@@ -943,7 +944,7 @@ const POS = ({ showQR }) => {
               </div>
 
               <div className="no-print" style={{ marginTop: "40px", display: "flex", justifyContent: "center", gap: "20px" }}>
-                <button onClick={() => window.print()} style={{ padding: "12px 25px", background: "#333", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>🖨️ PRINT INVOICE</button>
+                <button onClick={() => { if (document.activeElement) document.activeElement.blur(); setTimeout(() => window.print(), 100); }} style={{ padding: "12px 25px", background: "#333", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>🖨️ PRINT INVOICE</button>
                 <button onClick={closeSuccess} style={{ padding: "12px 25px", background: "#0284c7", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>CLOSE & START NEW</button>
               </div>
             </div>

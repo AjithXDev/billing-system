@@ -78,6 +78,7 @@ async function registerShop(shopId) {
     let storeName = "My Shop";
     let ownerName = "Shop Owner";
     let mobile = "";
+    let email = "";
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     if (fs.existsSync(configPath)) {
       try { 
@@ -85,6 +86,7 @@ async function registerShop(shopId) {
         storeName = s.storeName || storeName; 
         ownerName = s.ownerName || ownerName;
         mobile = s.ownerPhone || mobile;
+        email = s.ownerEmail || email;
       } catch(e) {}
     }
     await supabase.from("shops").upsert({
@@ -92,6 +94,7 @@ async function registerShop(shopId) {
       name: storeName,
       owner_name: ownerName,
       mobile_number: mobile,
+      owner_email: email,
       master_key: process.env.MASTER_KEY || "owner123",
       updated_at: new Date().toISOString()
     });
@@ -102,8 +105,18 @@ async function registerShop(shopId) {
 async function pushStatsSnapshot(shopId) {
   if (!supabase) return;
   try {
+    let settings = {};
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch(e) {}
+    }
+
+    const lowThreshold = settings.lowStockThreshold || 10;
+    const expiryDays = settings.expiryAlertDays || 3;
+    const deadThresholdDays = settings.deadStockThresholdDays || 30;
+
     const today = new Date().toISOString().split("T")[0];
-    const in7 = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+    const inN = new Date(Date.now() + expiryDays * 86400000).toISOString().split("T")[0];
 
     const totalProducts = db.prepare("SELECT COUNT(*) as c FROM products").get().c;
     const totalCategories = db.prepare("SELECT COUNT(*) as c FROM categories").get().c;
@@ -113,8 +126,8 @@ async function pushStatsSnapshot(shopId) {
     const monthlySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-30 days')").get().t;
     const overallSales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices").get().t;
     const expiredCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date<?").get(today).c;
-    const nearExpiryCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?").get(today, in7).c;
-    const lowStockCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity>0 AND quantity<=10").get().c;
+    const nearExpiryCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?").get(today, inN).c;
+    const lowStockCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity>0 AND quantity<=?").get(lowThreshold).c;
     const outOfStock = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity<=0").get().c;
 
     const todayCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE date(inv.created_at)=date('now','localtime')").get().c;
@@ -126,14 +139,24 @@ async function pushStatsSnapshot(shopId) {
     const topProducts = db.prepare("SELECT p.name, SUM(ii.quantity) as sold, SUM(ii.price*ii.quantity) as revenue FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.product_id ORDER BY sold DESC LIMIT 8").all();
     const dailySales = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
     const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m',created_at,'localtime') as month, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-180 days') GROUP BY month ORDER BY month ASC").all();
+    const yearlyBreakdown = db.prepare("SELECT strftime('%Y',created_at,'localtime') as year, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices GROUP BY year ORDER BY year DESC LIMIT 5").all();
+    
+    // Group by week for current month
+    const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM((ii.price - COALESCE(p.cost_price, 0)) * ii.quantity),0) as profit FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE strftime('%Y-%m',inv.created_at,'localtime') = strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
+    
     const peakHours = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
     const paymentBreakdown = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
-    const deadStock = db.prepare("SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-60 days'))").all();
-    const lowStockList = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=10 ORDER BY quantity ASC LIMIT 30").all();
+    
+    const deadStock = db.prepare(`SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadThresholdDays} days'))`).all();
+    const lowStockList = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=? ORDER BY quantity ASC LIMIT 30").all(lowThreshold);
     const outOfStockList = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
     const expiredList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
-    const nearExpiList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, in7);
+    const nearExpiList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, inN);
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+
+    const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
+
+
 
     await supabase.from("shop_stats").upsert({
       shop_id: shopId,
@@ -149,12 +172,23 @@ async function pushStatsSnapshot(shopId) {
         todayCost, weeklyCost, monthlyCost,
         topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })),
         topProducts, dailySales, monthlySalesBreakdown: monthlyBreakdown,
+        yearlyBreakdown, weeklyBreakdown,
         peakHours, paymentBreakdown, deadStock,
         lowStockProducts: lowStockList,
         outOfStockProducts: outOfStockList,
         expiredProducts: expiredList,
         expiringProducts: nearExpiList,
         recentInvoices,
+        allProductsList,
+        settings: {
+          storeAddress: settings.storeAddress || '',
+          storeTagline: settings.storeTagline || '',
+          gstNumber: settings.gstNumber || '',
+          whatsappNumber: settings.ownerPhone || '',
+          expiryAlertDays: expiryDays,
+          lowStockThreshold: lowThreshold,
+          deadStockThresholdDays: deadThresholdDays
+        }
       },
       updated_at: new Date().toISOString()
     });

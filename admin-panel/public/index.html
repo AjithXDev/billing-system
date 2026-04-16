@@ -145,9 +145,30 @@
             };
 
             const deleteShop = async (shopId, shopName) => {
-                if (confirm(`Permanent delete ${shopName}? This action cannot be undone.`)) {
+                const shop = shops.find(s => s.id === shopId);
+                const ownerInfo = shop ? `\n\nOwner: ${shop.owner_name || 'N/A'}\nEmail: ${shop.owner_email || 'N/A'}\nMobile: ${shop.mobile_number || 'N/A'}` : '';
+                if (!confirm(`⚠️ PERMANENT DELETE\n\nShop: ${shopName}\nID: ${shopId}${ownerInfo}\n\nThis will remove:\n• All shop data & statistics\n• All invoices & products\n• All paired devices\n• Owner's account\n\nThis action CANNOT be undone!`)) return;
+                
+                try {
+                    // Try backend API first (handles auth user deletion too)
+                    try {
+                        const apiRes = await fetch('/api/shops/' + shopId, { method: 'DELETE' });
+                        const apiData = await apiRes.json();
+                        if (apiRes.ok && apiData.success) {
+                            loadData();
+                            alert('✅ Shop "' + shopName + '" and all associated data deleted successfully!' + 
+                                (apiData.authDeleted ? '\n\nOwner auth account also removed.' : '\n\nNote: Delete the owner from Supabase Auth dashboard manually if needed.'));
+                            return;
+                        }
+                    } catch(apiErr) { /* Backend not available, fall back to direct Supabase */ }
+                    
+                    // Fallback: Direct Supabase delete (cascade handles related tables)
                     const { error } = await sb.from('shops').delete().eq('id', shopId);
-                    if (!error) loadData();
+                    if (error) throw error;
+                    loadData();
+                    alert('✅ Shop "' + shopName + '" deleted.\n\nNote: Owner auth account may need manual cleanup from Supabase dashboard.');
+                } catch(e) {
+                    alert('❌ Delete failed: ' + e.message);
                 }
             };
 

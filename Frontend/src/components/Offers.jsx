@@ -134,7 +134,11 @@ const Offers = () => {
   useEffect(() => {
     fetchOffers();
     fetchProducts();
-    const onRefresh = () => { fetchOffers(); fetchProducts(); };
+    const onRefresh = () => { 
+      setSearchQuery("");
+      fetchOffers(); 
+      fetchProducts(); 
+    };
     window.addEventListener("soft_refresh", onRefresh);
     return () => window.removeEventListener("soft_refresh", onRefresh);
   }, []);

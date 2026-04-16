@@ -11,6 +11,7 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const db = require("./db");
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 let supabase = null;
 if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
     try {
@@ -102,6 +103,93 @@ async function startTunnel(mainWindow) {
   } catch (e) {
     console.warn("[Sync Engine] Offline mode. Waiting for internet...");
     setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 60000); // Check every minute
+  }
+}
+
+/* ── Sync Stats to Supabase Cloud (works standalone without Electron) ── */
+async function syncStatsToSupabase() {
+  if (!supabase) return;
+  const shopId = process.env.SHOP_ID;
+  if (!shopId) return;
+
+  try {
+    const settings = getSettings();
+    const lowThreshold = settings.lowStockThreshold || 10;
+    const expiryDays = settings.expiryAlertDays || 3;
+    const deadDays = settings.deadStockThresholdDays || 30;
+    const today = todayStr();
+    const inExp = inNdays(expiryDays);
+
+    const totalProducts = db.prepare("SELECT COUNT(*) as c FROM products").get().c;
+    const totalCategories = db.prepare("SELECT COUNT(*) as c FROM categories").get().c;
+    const todaySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE date(created_at)=date('now','localtime')").get().t;
+    const todayBills = db.prepare("SELECT COUNT(*) as c FROM invoices WHERE date(created_at)=date('now','localtime')").get().c;
+    const weeklySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-7 days')").get().t;
+    const monthlySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE created_at>=datetime('now','-30 days')").get().t;
+    const overallSales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices").get().t;
+    const overallBills = db.prepare("SELECT COUNT(*) as c FROM invoices").get().c;
+    const expiredCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date<?").get(today).c;
+    const nearExpiryCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=?").get(today, inExp).c;
+    const lowStockCount = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity>0 AND quantity<=?").get(lowThreshold).c;
+    const outOfStockVal = db.prepare("SELECT COUNT(*) as c FROM products WHERE quantity<=0").get().c;
+
+    const todayCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE date(inv.created_at)=date('now','localtime')").get().c;
+    const weeklyCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-7 days')").get().c;
+    const monthlyCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days')").get().c;
+    const overallCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id").get().c;
+
+    const topProducts = db.prepare("SELECT p.name, SUM(ii.quantity) as sold, SUM(ii.price*ii.quantity) as revenue FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.product_id ORDER BY sold DESC LIMIT 8").all();
+    const dailySalesData = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
+    const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m',created_at,'localtime') as month, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-180 days') GROUP BY month ORDER BY month ASC").all();
+    const yearlyBreakdown = db.prepare("SELECT strftime('%Y',created_at,'localtime') as year, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices GROUP BY year ORDER BY year DESC LIMIT 5").all();
+    const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE strftime('%Y-%m',created_at,'localtime')=strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
+    const peakHoursData = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
+    const paymentBreakdownData = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
+
+    const deadStockData = db.prepare("SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-" + deadDays + " days'))").all();
+    const lowStockProducts = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=? ORDER BY quantity ASC LIMIT 30").all(lowThreshold);
+    const outOfStockProducts = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
+    const expiredProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
+    const expiringProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, inExp);
+    const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+    const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
+
+    const { error: statsErr } = await supabase.from("shop_stats").upsert({
+      shop_id: shopId,
+      stats_json: {
+        totalProducts, totalCategories, todaySales, todayBills, weeklySales, monthlySales,
+        overallSales, overallCost, overallBills, expiredCount, nearExpiryCount, lowStockCount, outOfStock: outOfStockVal,
+        todayProfit: todaySales - todayCost, weeklyProfit: weeklySales - weeklyCost,
+        monthlyProfit: monthlySales - monthlyCost, overallProfit: overallSales - overallCost,
+        todayCost, weeklyCost, monthlyCost,
+        topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })),
+        topProducts, dailySales: dailySalesData, monthlySalesBreakdown: monthlyBreakdown,
+        yearlyBreakdown, weeklyBreakdown, peakHours: peakHoursData, paymentBreakdown: paymentBreakdownData,
+        deadStock: deadStockData, lowStockProducts, outOfStockProducts, expiredProducts, expiringProducts,
+        recentInvoices, allProductsList,
+        settings: {
+          storeName: settings.storeName || '', storeAddress: settings.storeAddress || '',
+          storeTagline: settings.storeTagline || '', gstNumber: settings.gstNumber || '',
+          whatsappNumber: settings.ownerPhone || '', expiryAlertDays: expiryDays,
+          lowStockThreshold: lowThreshold, deadStockThresholdDays: deadDays
+        }
+      },
+      updated_at: new Date().toISOString()
+    });
+    if (statsErr) { console.error("[Sync] Stats push error:", statsErr.message); return; }
+
+    // Register/update shop in Supabase
+    await supabase.from("shops").upsert({
+      id: shopId, name: settings.storeName || 'My Shop',
+      owner_name: settings.ownerName || 'Shop Owner',
+      mobile_number: settings.ownerPhone || '',
+      owner_email: settings.ownerEmail || '',
+      master_key: process.env.MASTER_KEY || 'owner123',
+      updated_at: new Date().toISOString()
+    });
+    console.log("[Sync] \u2705 Stats synced to Supabase at", new Date().toLocaleTimeString());
+  } catch (e) {
+    console.error("[Sync] Error:", e.message);
   }
 }
 
@@ -801,6 +889,10 @@ function startDashboardServer(mainWindow) {
     }
     // Start internet tunnel after server is up
     startTunnel(mainWindow);
+
+    // ── Supabase Cloud Sync (works standalone without Electron) ──
+    syncStatsToSupabase();
+    setInterval(syncStatsToSupabase, 60000);
   });
 
   server.on("error", (err) => {
@@ -817,3 +909,8 @@ function getDashboardURL() { return `http://${localIP}:${PORT}`; }
 function getTunnelURL() { return tunnelURL; }
 
 module.exports = { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL };
+
+// Self-start when run directly (e.g., `node dashboardServer.js`)
+if (require.main === module) {
+  startDashboardServer(null);
+}

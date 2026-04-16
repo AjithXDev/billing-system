@@ -141,6 +141,64 @@ app.post('/api/shops/:id/toggle', requireAuth, async (req, res) => {
   }
 });
 
+// ── DELETE Shop + Owner Account ──
+app.delete('/api/shops/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabase();
+    
+    // 1. Get shop details (owner email for auth cleanup)
+    const { data: shop, error: fetchErr } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchErr || !shop) {
+      return res.status(404).json({ error: 'Shop not found' });
+    }
+
+    const ownerEmail = shop.owner_email;
+    
+    // 2. Delete shop — CASCADE handles: shop_stats, pairing_codes, paired_devices, invoices, products, notifications
+    const { error: delErr } = await supabase
+      .from('shops')
+      .delete()
+      .eq('id', id);
+    
+    if (delErr) throw delErr;
+    
+    // 3. Try to delete owner's Supabase Auth account (needs service_role key)
+    let authDeleted = false;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (serviceKey && ownerEmail) {
+      try {
+        const adminSb = createClient(process.env.SUPABASE_URL, serviceKey);
+        const { data: { users } } = await adminSb.auth.admin.listUsers();
+        const authUser = users.find(u => u.email === ownerEmail);
+        if (authUser) {
+          await adminSb.auth.admin.deleteUser(authUser.id);
+          authDeleted = true;
+          console.log(`✅ Auth user ${ownerEmail} deleted`);
+        }
+      } catch (authErr) {
+        console.warn(`⚠️ Could not delete auth user ${ownerEmail}:`, authErr.message);
+      }
+    }
+    
+    console.log(`🗑️ Shop ${shop.name} (${id}) deleted completely`);
+    res.json({ 
+      success: true, 
+      message: `Shop "${shop.name}" and all data deleted`,
+      authDeleted,
+      ownerEmail
+    });
+  } catch (err) {
+    console.error('Delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get comprehensive analytics across all shops
 app.get('/api/analytics', requireAuth, async (req, res) => {
   try {

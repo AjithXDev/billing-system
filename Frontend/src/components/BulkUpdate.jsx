@@ -22,7 +22,10 @@ export default function BulkUpdate() {
 
   useEffect(() => {
     load();
-    const onRefresh = () => load();
+    const onRefresh = () => {
+      setFilter("");
+      load();
+    };
     window.addEventListener('soft_refresh', onRefresh);
     return () => window.removeEventListener('soft_refresh', onRefresh);
   }, []);
@@ -56,7 +59,7 @@ export default function BulkUpdate() {
     }
   };
 
-  const filteredProducts = products.filter(p => !filter || p.name?.toLowerCase().includes(filter.toLowerCase()) || p.barcode?.includes(filter));
+  const filteredProducts = products.filter(p => !filter || p.name?.toLowerCase().includes(filter.toLowerCase()) || p.barcode?.includes(filter)).slice(0, 100);
   const hasChanges = Object.values(updates).some(val => Number(val) !== 0);
 
   return (

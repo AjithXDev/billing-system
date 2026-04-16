@@ -23,7 +23,10 @@ const ProductList = () => {
   
   useEffect(() => {
     load();
-    const onRefresh = () => load();
+    const onRefresh = () => {
+      setSearchQuery("");
+      load();
+    };
     window.addEventListener('soft_refresh', onRefresh);
     return () => window.removeEventListener('soft_refresh', onRefresh);
   }, []);
@@ -384,6 +387,7 @@ const ProductList = () => {
               <tbody>
                  {products
                    .filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.barcode || "").includes(searchQuery) || (p.product_code || "").toLowerCase().includes(searchQuery.toLowerCase()))
+                   .slice(0, 100)
                    .map((p, index) => {
                     const today = new Date().toISOString().split('T')[0];
                     const expired = p.expiry_date && p.expiry_date < today;

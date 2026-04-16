@@ -25,7 +25,11 @@ export default function History() {
 
   useEffect(() => {
     loadInvoices();
-    const onRefresh = () => loadInvoices();
+    const onRefresh = () => {
+      setDateFrom("");
+      setDateTo("");
+      loadInvoices();
+    };
     window.addEventListener('soft_refresh', onRefresh);
     return () => window.removeEventListener('soft_refresh', onRefresh);
   }, [loadInvoices]);

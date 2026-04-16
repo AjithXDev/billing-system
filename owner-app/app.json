@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "owner-app",
-    "slug": "owner-app",
+    "slug": "innoaivators-owner-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,6 +16,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.mhdsafiq.ownerapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -24,6 +25,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "5f2a7450-87f4-4d12-ad34-7d1eb6ff4a9d"
+      }
     }
   }
 }
