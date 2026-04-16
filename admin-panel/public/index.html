@@ -3,36 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iVA Admin Portal | Master Controller</title>
+    <title>iVA Master Portal | Enterprise Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #020617; color: #f8fafc; }
-        .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
-        .input-field { width: 100%; padding: 12px 16px; border-radius: 12px; background: rgba(2, 6, 23, 0.8); border: 1px solid rgba(99, 102, 241, 0.2); color: white; outline: none; margin-bottom: 16px; transition: all 0.2s; }
-        .btn-primary { width: 100%; padding: 12px; border-radius: 12px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; font-weight: 700; transition: all 0.2s; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
-        .toggle-switch { width: 48px; height: 26px; border-radius: 13px; position: relative; cursor: pointer; transition: all 0.3s; }
-        .toggle-knob { width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; transition: all 0.3s; }
-        .toggle-switch[data-active="true"] { background: #22c55e; } .toggle-switch[data-active="false"] { background: #475569; }
-        .toggle-switch[data-active="true"] .toggle-knob { left: 25px; } .toggle-switch[data-active="false"] .toggle-knob { left: 3px; }
+        :root { --brand: #6366f1; --brand-dark: #4f46e5; --bg: #020617; }
+        body { font-family: 'Spline Sans', sans-serif; background-color: var(--bg); color: #f8fafc; overflow-x: hidden; }
+        .glass-card { background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .input-glow:focus { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); border-color: var(--brand); }
+        .stat-card { transition: transform 0.2s, box-shadow 0.2s; }
+        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px -10px rgba(99, 102, 241, 0.3); }
+        .btn-grad { background: linear-gradient(135deg, var(--brand), var(--brand-dark)); transition: all 0.2s; }
+        .btn-grad:hover { transform: translateY(-1px); box-shadow: 0 8px 16px -4px rgba(79, 70, 229, 0.4); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .mesh-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; background: radial-gradient(circle at 50% 10%, rgba(99, 102, 241, 0.15), transparent 40%), radial-gradient(circle at 90% 80%, rgba(79, 70, 229, 0.1), transparent 40%); }
     </style>
 </head>
 <body>
+    <div class="mesh-bg"></div>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
 
         // 🟢 CONFIGURATION
-        // PASTE YOUR CREDENTIALS HERE
-        const SUPABASE_URL = //'https://baawqrqihlhsrghvjlpx.supabase.co'; 
-        const SUPABASE_KEY = //'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0'; 
+        const SUPABASE_URL = 'https://baawqrqihlhsrghvjlpx.supabase.co'; 
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0'; 
 
-        // Safe Initialization
         const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
         function App() {
@@ -49,25 +52,7 @@
                 setLoading(false);
             }, []);
 
-            if (!sb) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center p-8 bg-slate-950">
-                        <div className="glass p-12 rounded-[40px] max-w-lg text-center shadow-2xl border border-indigo-500/20">
-                            <div className="text-6xl mb-6">⚙️</div>
-                            <h1 className="text-3xl font-black text-white mb-4">Admin Config Required</h1>
-                            <p className="text-slate-400 leading-relaxed mb-8">
-                                The Admin Panel is deployed correctly but isn't connected to your database yet. 
-                                <br/><br/>
-                                Please open <strong>index.html</strong> on your computer, paste your Supabase URL and Key on <strong>lines 30-31</strong>, and re-upload to Netlify.
-                            </p>
-                            <div className="bg-indigo-500/10 p-4 rounded-2xl border border-indigo-500/20 font-mono text-xs text-indigo-300 text-left">
-                                const SUPABASE_URL = 'https://baawqrqihlhsrghvjlpx.supabase.co'; <br/>
-                                const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
-                            </div>
-                        </div>
-                    </div>
-                );
-            }
+            if (!sb) return <div className="h-screen flex items-center justify-center text-red-400">Database Configuration Missing</div>;
 
             const handleLogin = (adminUser) => {
                 setUser(adminUser);
@@ -81,55 +66,54 @@
                 setView('login');
             };
 
-            if (loading) return <div className="h-screen flex items-center justify-center text-indigo-400 font-bold">Connecting...</div>;
+            if (loading) return <div className="h-screen flex items-center justify-center text-indigo-400 font-bold">Initializing Portal...</div>;
 
-            return (
-                <div>
-                    {view === 'login' ? (
-                        <Login onLogin={handleLogin} />
-                    ) : (
-                        <Dashboard user={user} onLogout={handleLogout} />
-                    )}
-                </div>
-            );
+            return view === 'login' ? <Login onLogin={handleLogin} /> : <Dashboard user={user} onLogout={handleLogout} />;
         }
 
         function Login({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
-            const [isLoggingIn, setIsLoggingIn] = useState(false);
+            const [status, setStatus] = useState('idle');
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                setIsLoggingIn(true); setError('');
+                setStatus('loading'); setError('');
                 try {
                     const { data, error } = await sb.from('admins').select('*').eq('email', email).single();
                     if (error || !data) {
-                        setError('Account not found. Check admins table in Supabase.');
+                        setError('Account authorization failed.');
+                    } else if (password === data.password_hash) {
+                        onLogin(data);
                     } else {
-                        if (password === data.password_hash) {
-                            onLogin(data);
-                        } else {
-                            setError('Incorrect password');
-                        }
+                        setError('Invalid administrative credentials.');
                     }
-                } catch (err) { setError('Network error. Check your Supabase connection.'); }
-                setIsLoggingIn(false);
+                } catch (err) { setError('System link failure.'); }
+                setStatus('idle');
             };
 
             return (
-                <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
-                    <div className="glass p-10 rounded-[32px] w-full max-w-md">
+                <div className="min-h-screen flex items-center justify-center p-6">
+                    <div className="glass-card p-10 rounded-[40px] w-full max-w-md border border-indigo-500/20">
                         <div className="text-center mb-10">
-                            <div className="w-20 h-20 bg-indigo-600 rounded-[24px] mx-auto flex items-center justify-center text-4xl mb-6 shadow-2xl">👑</div>
-                            <h1 className="text-3xl font-extrabold tracking-tight text-white">iVA Admin</h1>
+                            <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl mx-auto flex items-center justify-center text-2xl font-black mb-6 shadow-xl shadow-indigo-500/20">iA</div>
+                            <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Master Portal</h1>
+                            <p className="text-slate-400 font-medium">Enterprise Management Suite</p>
                         </div>
-                        {error && <div className="bg-red-500/10 text-red-400 p-4 rounded-xl mb-6 text-sm text-center">{error}</div>}
-                        <form onSubmit={handleSubmit}>
-                            <input type="email" placeholder="Admin Email" className="input-field" value={email} onChange={e => setEmail(e.target.value)} required />
-                            <input type="password" placeholder="Password" className="input-field" value={password} onChange={e => setPassword(e.target.value)} required />
-                            <button type="submit" className="btn-primary mt-4 h-[52px]" disabled={isLoggingIn}>{isLoggingIn ? "Verifying..." : "Login"}</button>
+                        {error && <div className="bg-red-500/10 text-red-400 p-4 rounded-2xl mb-6 text-sm text-center font-semibold border border-red-500/20">{error}</div>}
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2 block ml-1">Admin Email</label>
+                                <input type="email" placeholder="admin@enterprise.com" className="w-full bg-[#0f172a] border border-white/10 rounded-2xl px-5 py-4 text-white outline-none input-glow transition-all" value={email} onChange={e => setEmail(e.target.value)} required />
+                            </div>
+                            <div>
+                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2 block ml-1">Access Password</label>
+                                <input type="password" placeholder="••••••••" className="w-full bg-[#0f172a] border border-white/10 rounded-2xl px-5 py-4 text-white outline-none input-glow transition-all" value={password} onChange={e => setPassword(e.target.value)} required />
+                            </div>
+                            <button type="submit" className="w-full h-14 rounded-2xl btn-grad text-white font-bold text-lg mt-4 disabled:opacity-50" disabled={status === 'loading'}>
+                                {status === 'loading' ? 'Authorizing...' : 'Enter Console'}
+                            </button>
                         </form>
                     </div>
                 </div>
@@ -144,11 +128,11 @@
             const loadData = async () => {
                 setLoading(true);
                 try {
-                    const { data: shopList } = await sb.from('shops').select('*, shop_stats(stats_json)').order('created_at', { ascending: false });
-                    setShops(shopList || []);
+                    const { data: list } = await sb.from('shops').select('*, shop_stats(stats_json)').order('created_at', { ascending: false });
+                    setShops(list || []);
                     let rev = 0;
-                    shopList?.forEach(s => { rev += Number(s.shop_stats?.stats_json?.overallSales || 0); });
-                    setStats({ revenue: rev, shops: shopList?.length || 0, active: shopList?.filter(s => s.is_active).length || 0 });
+                    list?.forEach(s => { rev += Number(s.shop_stats?.stats_json?.overallSales || 0); });
+                    setStats({ revenue: rev, shops: list?.length || 0, active: list?.filter(s => s.is_active).length || 0 });
                 } catch (e) {}
                 setLoading(false);
             };
@@ -161,66 +145,92 @@
             };
 
             const deleteShop = async (shopId, shopName) => {
-                if (confirm(`Are you sure you want to PERMANENTLY delete ${shopName}? All synced data for this shop will be lost.`)) {
+                if (confirm(`Permanent delete ${shopName}? This action cannot be undone.`)) {
                     const { error } = await sb.from('shops').delete().eq('id', shopId);
                     if (!error) loadData();
-                    else alert("Failed to delete shop: " + error.message);
                 }
             };
 
             return (
-                <div className="min-h-screen bg-[#020617] p-8">
-                    <nav className="flex justify-between items-center mb-10">
-                        <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-bold">iV</div>
-                            <h1 className="text-xl font-bold text-white">Admin Dashboard</h1>
+                <div className="max-w-7xl mx-auto p-8">
+                    <nav className="flex justify-between items-center mb-12">
+                        <div className="flex items-center gap-5">
+                            <div className="w-12 h-12 bg-[#0d0d1a] border border-white/10 rounded-2xl flex items-center justify-center">
+                                <span className="text-xl font-black bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">iA</span>
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-bold text-white tracking-tight">Enterprise Console</h1>
+                                <p className="text-xs text-slate-500 font-semibold tracking-wide uppercase">System Administrator</p>
+                            </div>
                         </div>
-                        <button onClick={onLogout} className="bg-white/5 px-6 py-2 rounded-xl text-sm font-bold border border-white/10 transition hover:bg-white/10">Log Out</button>
+                        <div className="flex items-center gap-6">
+                            <div className="text-right hidden md:block">
+                                <p className="text-sm font-bold text-white">{user.email}</p>
+                                <p className="text-[10px] text-emerald-400 font-black uppercase">Root Access Active</p>
+                            </div>
+                            <button onClick={onLogout} className="bg-white/5 border border-white/10 px-6 py-2.5 rounded-2xl text-xs font-bold transition hover:bg-white/10">Sign Out</button>
+                        </div>
                     </nav>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                        <div className="glass p-6 rounded-3xl"><p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Shops</p><p className="text-3xl font-black">{stats.shops}</p></div>
-                        <div className="glass p-6 rounded-3xl"><p className="text-xs font-bold text-slate-500 uppercase mb-1">Active</p><p className="text-3xl font-black text-emerald-400">{stats.active}</p></div>
-                        <div className="glass p-6 rounded-3xl"><p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Revenue</p><p className="text-3xl font-black text-indigo-400">₹{stats.revenue.toLocaleString()}</p></div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+                        <div className="glass-card p-8 rounded-[32px] stat-card">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Registered Terminals</p>
+                            <p className="text-4xl font-black text-white">{stats.shops}</p>
+                        </div>
+                        <div className="glass-card p-8 rounded-[32px] stat-card">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Activated Channels</p>
+                            <p className="text-4xl font-black text-emerald-400">{stats.active}</p>
+                        </div>
+                        <div className="glass-card p-8 rounded-[32px] stat-card">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Global Throughput</p>
+                            <p className="text-4xl font-black text-indigo-400">₹{stats.revenue.toLocaleString()}</p>
+                        </div>
                     </div>
 
-                    <div className="glass rounded-[32px] overflow-hidden">
-                        <div className="p-8 border-b border-white/5 flex justify-between items-center">
-                            <h2 className="text-xl font-extrabold text-white">Shop Management</h2>
-                            <button onClick={loadData} className="w-10 h-10 flex items-center justify-center bg-white/5 rounded-xl hover:bg-white/10 transition">🔄</button>
+                    <div className="glass-card rounded-[40px] overflow-hidden">
+                        <div className="px-10 py-8 bg-white/[0.02] border-b border-white/5 flex justify-between items-center">
+                            <h2 className="text-xl font-bold text-white">Shop Ecosystem</h2>
+                            <button onClick={loadData} className="px-5 py-2.5 bg-indigo-500/10 text-indigo-400 rounded-xl text-xs font-bold border border-indigo-500/20 hover:bg-indigo-500/20 transition">Refresh Ledger</button>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left">
-                                <thead className="bg-slate-900/50 text-[10px] uppercase font-black text-slate-500 border-b border-white/5">
-                                    <tr><th className="px-8 py-5">Shop Info</th><th className="px-8 py-5">Owner</th><th className="px-8 py-5 text-center">Status</th><th className="px-8 py-5 text-center">Action</th><th className="px-8 py-5 text-center">Delete</th></tr>
+                                <thead className="text-[10px] uppercase font-black text-slate-500 tracking-wider">
+                                    <tr>
+                                        <th className="px-10 py-6">Business Unit</th>
+                                        <th className="px-10 py-6">Ownership</th>
+                                        <th className="px-10 py-6">State</th>
+                                        <th className="px-10 py-6 text-center">Auth Status</th>
+                                        <th className="px-10 py-6 text-right">Delete</th>
+                                    </tr>
                                 </thead>
-                                <tbody className="divide-y divide-white/5">
+                                <tbody className="divide-y divide-white/[0.03]">
                                     {shops.map(shop => (
-                                        <tr key={shop.id} className="hover:bg-white/[0.02] transition">
-                                            <td className="px-8 py-6">
-                                                <p className="font-bold text-white mb-1">{shop.name}</p>
-                                                <p className="text-[10px] font-mono text-slate-500">{shop.id}</p>
+                                        <tr key={shop.id} className="hover:bg-white/[0.01] transition-colors group">
+                                            <td className="px-10 py-7">
+                                                <p className="font-bold text-white mb-0.5">{shop.name}</p>
+                                                <p className="text-[10px] font-mono text-slate-500 tracking-tighter uppercase">{shop.id}</p>
                                             </td>
-                                            <td className="px-8 py-6">
-                                                <p className="font-semibold">{shop.owner_name}</p>
-                                                <p className="text-xs text-slate-400">{shop.mobile_number}</p>
+                                            <td className="px-10 py-7">
+                                                <p className="font-bold text-slate-300 mb-0.5">{shop.owner_name}</p>
+                                                <p className="text-xs text-slate-500 mb-0.5">{shop.mobile_number}</p>
+                                                <p className="text-[10px] text-indigo-400 font-medium">{shop.owner_email}</p>
                                             </td>
-                                            <td className="px-8 py-6 text-center">
-                                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase ${shop.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                                                    <span className={`w-1.5 h-1.5 rounded-full ${shop.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-                                                    {shop.is_active ? 'Online' : 'Disabled'}
+                                            <td className="px-10 py-7">
+                                                <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-xl text-[10px] font-bold ${shop.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-orange-500/10 text-orange-400'}`}>
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${shop.is_active ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
+                                                    {shop.is_active ? 'OPERATIONAL' : 'SUSPENDED'}
                                                 </span>
                                             </td>
-                                            <td className="px-8 py-6">
+                                            <td className="px-10 py-7">
                                                 <div className="flex justify-center">
-                                                    <div className="toggle-switch" data-active={shop.is_active} onClick={() => toggleShop(shop.id, shop.is_active)}>
-                                                        <div className="toggle-knob"></div>
-                                                    </div>
+                                                    <button onClick={() => toggleShop(shop.id, shop.is_active)} className={`w-14 h-7 rounded-full relative transition-all duration-300 ${shop.is_active ? 'bg-indigo-500' : 'bg-slate-700'}`}>
+                                                        <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all duration-300 ${shop.is_active ? 'left-8' : 'left-1'}`}></div>
+                                                    </button>
                                                 </div>
                                             </td>
-                                            <td className="px-8 py-6 text-center">
-                                                <button onClick={() => deleteShop(shop.id, shop.name)} className="w-9 h-9 flex items-center justify-center bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition">
-                                                   🗑️
+                                            <td className="px-10 py-7 text-right">
+                                                <button onClick={() => deleteShop(shop.id, shop.name)} className="w-10 h-10 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 flex items-center justify-center mx-auto opacity-0 group-hover:opacity-100 transition inline-flex">
+                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                                                 </button>
                                             </td>
                                         </tr>

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS public.shops (
     id TEXT PRIMARY KEY DEFAULT ('shop-' || lower(substr(md5(random()::text), 1, 8))),
     owner_name TEXT,
     mobile_number TEXT,
+    owner_email TEXT,
     name TEXT DEFAULT 'My Shop',
     master_key TEXT,
     is_active BOOLEAN DEFAULT false,
@@ -193,3 +194,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE invoices;
 ALTER PUBLICATION supabase_realtime ADD TABLE products;
 ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 ALTER PUBLICATION supabase_realtime ADD TABLE software_licenses;
+
+-- ══════════════════════════════════════════════════════
+--  MIGRATION HELPERS (Run these on existing databases)
+-- ══════════════════════════════════════════════════════
+-- ALTER TABLE public.shops ADD COLUMN IF NOT EXISTS owner_email TEXT;

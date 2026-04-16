@@ -136,7 +136,7 @@ export default function Settings() {
         marginBottom: 16, flexShrink: 0
       }}>
         <div>
-          <h2 style={{ fontSize: 18, fontWeight: 800, color: "var(--text-1)", margin: 0 }}>⚙️ Settings</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 800, color: "var(--text-1)", margin: 0 }}>Settings</h2>
           <div style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 3 }}>Configure your billing application</div>
         </div>
         <div>
@@ -145,14 +145,14 @@ export default function Settings() {
             border: "none", background: saved ? "#16a34a" : "var(--primary)",
             color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
             transition: "background .3s"
-          }}>{saved ? "✅ Saved!" : "💾 Save Changes"}</button>
+          }}>{saved ? "Saved" : "Save Changes"}</button>
         </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingRight: 10 }}>
         
         {/* ── STORE INFO ── */}
-        <SectionTitle icon="🏪" title="Store Information" />
+        <SectionTitle icon="" title="Store Information" />
 
         <SettingRow label="Store Name">
           <input style={inputStyle} value={cfg.storeName} onChange={e => set("storeName", e.target.value)} placeholder="My Supermarket" />
@@ -171,7 +171,7 @@ export default function Settings() {
         </SettingRow>
 
         {/* ── BILLING SETTINGS ── */}
-        <SectionTitle icon="🧾" title="Billing Details" />
+        <SectionTitle icon="" title="Billing Details" />
 
         <SettingRow label="GST Number">
           <input style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: ".05em" }} value={cfg.gstNumber} onChange={e => set("gstNumber", e.target.value.toUpperCase())} placeholder="22AAAAA0000A1Z5" />
@@ -182,7 +182,7 @@ export default function Settings() {
         </SettingRow>
 
         {/* ── LOGO FOR BILL ── */}
-        <SectionTitle icon="🖼️" title="Bill Logo" />
+        <SectionTitle icon="" title="Bill Logo" />
 
         <SettingRow label="Upload Store Logo" hint="Displayed on printed bills/receipts (black & white format)">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -213,9 +213,9 @@ export default function Settings() {
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 60, height: 60, borderRadius: 8,
                 border: "2px dashed var(--border)", cursor: "pointer",
-                background: "var(--surface-2)", fontSize: 24, color: "var(--text-4)"
+                background: "var(--surface-2)", fontSize: 10, fontWeight: 800, color: "var(--text-4)"
               }}>
-                📷
+                UPLOAD
                 <input type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: "none" }} />
               </label>
             )}
@@ -234,7 +234,7 @@ export default function Settings() {
         </SettingRow>
 
         {/* ── ALERT SETTINGS ── */}
-        <SectionTitle icon="🔔" title="System Alerts" />
+        <SectionTitle icon="" title="System Alerts" />
 
         <SettingRow label="Low Stock Alert Level" hint="Products with stock ≤ this value trigger alerts">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -260,7 +260,7 @@ export default function Settings() {
           </div>
         </SettingRow>
 
-        <SectionTitle icon="📱" title="Automation & Notifications" />
+        <SectionTitle icon="" title="Automation & Notifications" />
 
         <SettingRow label="Owner WhatsApp Number" hint="For automated stock/expiry alerts via WhatsApp">
           <input style={inputStyle} value={cfg.ownerPhone} onChange={e => set("ownerPhone", e.target.value)} placeholder="919876543210 (with country code)" />
@@ -275,9 +275,24 @@ export default function Settings() {
           </button>
         </SettingRow>
 
+        <SectionTitle icon="" title="Terminal Security" />
+
+        <SettingRow label="Master Access Key" hint="This is the password used to link your Mobile App.">
+          <input style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: ".1em" }} 
+            value={cfg.masterKey} 
+            onChange={e => set("masterKey", e.target.value)} 
+            placeholder="Enter a secure key" />
+        </SettingRow>
+
+        <SettingRow label="System Shop ID" hint="Unique identifier for this terminal.">
+          <input style={{ ...inputStyle, background: "#f1f5f9", cursor: "default", fontFamily: "monospace", color: "#64748b" }} 
+            value={cfg.shopId || "ID NOT FOUND"} 
+            readOnly />
+        </SettingRow>
+
 
         {/* ── ABOUT BRAND ── */}
-        <SectionTitle icon="ℹ️" title="About Software" />
+        <SectionTitle icon="" title="About Software" />
 
         <div style={{
           background: "linear-gradient(135deg, var(--surface-2), var(--surface))",

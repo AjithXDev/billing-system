@@ -938,7 +938,7 @@ ipcMain.handle("get-registration-status", async () => {
 
 // Register shop in Supabase → get UUID
 ipcMain.handle("register-shop", async (event, data) => {
-  const { shopName, ownerName, mobileNumber } = data;
+  const { shopName, ownerName, mobileNumber, email } = data;
   
   // Get Supabase client  
   const configPath = path.join(app.getPath("userData"), "app_settings.json");
@@ -969,6 +969,7 @@ ipcMain.handle("register-shop", async (event, data) => {
       .insert({
         id: newShopId,
         owner_name: ownerName,
+        owner_email: email, // New field for email login
         mobile_number: mobileNumber,
         name: shopName || settings.storeName || "My Shop",
         master_key: process.env.MASTER_KEY || settings.masterKey || "owner123",
@@ -997,6 +998,7 @@ ipcMain.handle("register-shop", async (event, data) => {
     settings.shopId = newShopId;
     settings.storeName = shopName;
     settings.ownerName = ownerName;
+    settings.ownerEmail = email; // Save locally
     settings.ownerMobile = mobileNumber;
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
     

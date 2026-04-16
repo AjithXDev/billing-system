@@ -8,17 +8,22 @@ export default function ShopRegistration({ onRegistered }) {
   const [shopName, setShopName]   = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [mobile, setMobile]       = useState("");
+  const [email, setEmail]         = useState("");
   const [loading, setLoading]     = useState(false);
   const [registeredSuccessfully, setRegisteredSuccessfully] = useState(false);
   const [error, setError]         = useState("");
 
     const handleRegister = async () => {
-        if (!shopName.trim() || !ownerName.trim() || !mobile.trim()) {
+        if (!shopName.trim() || !ownerName.trim() || !mobile.trim() || !email.trim()) {
             setError("All credentials are required to provision your terminal.");
             return;
         }
         if (mobile.trim().length < 10) {
             setError("Mobile number must be at least 10 digits.");
+            return;
+        }
+        if (!email.includes("@")) {
+            setError("Please enter a valid business email.");
             return;
         }
 
@@ -30,6 +35,7 @@ export default function ShopRegistration({ onRegistered }) {
                 shopName: shopName.trim(),
                 ownerName: ownerName.trim(),
                 mobileNumber: mobile.trim(),
+                email: email.trim()
             });
 
             if (result.success) {
@@ -39,7 +45,8 @@ export default function ShopRegistration({ onRegistered }) {
                         ...currentSettings,
                         storeName: shopName.trim(),
                         ownerName: ownerName.trim(),
-                        ownerPhone: mobile.trim()
+                        ownerPhone: mobile.trim(),
+                        ownerEmail: email.trim()
                     });
                     window.dispatchEvent(new CustomEvent('settings_updated'));
                 } catch (err) { console.error("Sync error:", err); }
@@ -121,6 +128,16 @@ export default function ShopRegistration({ onRegistered }) {
                   </div>
 
                   <div className="input-group">
+                      <label>Business Email</label>
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="owner@enterprise.com"
+                      />
+                  </div>
+
+                  <div className="input-group">
                       <label>Communication Hub (Mobile)</label>
                       <input
                         type="tel"
@@ -146,6 +163,7 @@ export default function ShopRegistration({ onRegistered }) {
               </div>
           </div>
       </div>
+
 
       <style>{`
         .setup-container {
