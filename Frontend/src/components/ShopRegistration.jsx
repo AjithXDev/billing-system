@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import logoUrl from "../assets/logo.png";
 
 /**
  * ShopRegistration — Dual-Panel Enterprise Setup Interface.
@@ -9,9 +10,7 @@ export default function ShopRegistration({ onRegistered }) {
   const [ownerName, setOwnerName] = useState("");
   const [mobile, setMobile]       = useState("");
   const [email, setEmail]         = useState("");
-  const [loading, setLoading]     = useState(false);
-  const [registeredSuccessfully, setRegisteredSuccessfully] = useState(false);
-  const [error, setError]         = useState("");
+  const [loading, setLoading]     = useState(false);  const [error, setError]         = useState("");
 
     const handleRegister = async () => {
         if (!shopName.trim() || !ownerName.trim() || !mobile.trim() || !email.trim()) {
@@ -41,20 +40,24 @@ export default function ShopRegistration({ onRegistered }) {
             if (result.success) {
                 try {
                     const currentSettings = await window.api.getAppSettings() || {};
-                    await window.api.saveAppSettings({
+                    const newSettings = {
                         ...currentSettings,
                         storeName: shopName.trim(),
                         ownerName: ownerName.trim(),
                         ownerPhone: mobile.trim(),
                         ownerEmail: email.trim()
-                    });
+                    };
+                    await window.api.saveAppSettings(newSettings);
+                    
+                    // Sync with localStorage so App.jsx picks it up immediately
+                    localStorage.setItem("smart_billing_settings", JSON.stringify(newSettings));
+                    
+                    if (window.api.setWindowTitle) window.api.setWindowTitle(shopName.trim());
                     window.dispatchEvent(new CustomEvent('settings_updated'));
-                } catch (err) { console.error("Sync error:", err); }
-
-                setRegisteredSuccessfully(true);
-                setTimeout(() => {
+                    
+                    // Transition to Terminal instantly as requested
                     onRegistered(result.shopId);
-                }, 2800);
+                } catch (err) { console.error("Sync error:", err); }
             } else {
                 setError(result.error || "Cloud gateway timeout. Check connection.");
             }
@@ -65,18 +68,6 @@ export default function ShopRegistration({ onRegistered }) {
         }
     };
 
-    if (registeredSuccessfully) {
-        return (
-            <div className="setup-container success-mode">
-                <div className="success-overlay-content">
-                    <div className="congrats-orb">✨</div>
-                    <h1>Terminal Activated</h1>
-                    <p>Workspace <strong>{shopName}</strong> has been secured and synchronized.<br/>Launching enterprise dashboard...</p>
-                    <div className="launch-progress"><div className="launch-fill"></div></div>
-                </div>
-            </div>
-        );
-    }
 
   return (
     <div className="setup-container">
@@ -84,15 +75,23 @@ export default function ShopRegistration({ onRegistered }) {
       <div className="visual-panel">
           <div className="gradient-mesh"></div>
           <div className="panel-content">
-              <div className="setup-logo">🛍️</div>
-              <h2 className="setup-tagline">Experience the future of <br/><span>Enterprise Billing.</span></h2>
+              <div className="setup-logo-container">
+                  <img src={logoUrl} alt="Innoaivators" className="setup-logo-img" />
+              </div>
+              <h1 className="brand-name">Innoaivators</h1>
+              <h2 className="setup-tagline">Innovate, Create, Elevate.<br/><span>Partner in Digital Transformation.</span></h2>
+              <p className="setup-description">
+                Your Strategic Partner in Intelligent Automation and Advanced Business Analytics. 
+                Built for the modern enterprise, designed for scale.
+              </p>
               <ul className="feature-list">
-                  <li><span className="dot"></span> AI-Driven Business Analytics</li>
-                  <li><span className="dot"></span> Seamless Multi-Device Sync</li>
-                  <li><span className="dot"></span> Military-Grade Data Encryption</li>
+                  <li><span className="dot"></span> Autonomous Business Intelligence</li>
+                  <li><span className="dot"></span> Unified Cloud-to-Edge Ecosystem</li>
+                  <li><span className="dot"></span> Next-Gen Intelligent Automation</li>
+                  <li><span className="dot"></span> Military-Grade Transaction Security</li>
               </ul>
               <div className="panel-footer">
-                  © 2026 iVA Systems • Version 4.0 Pro
+                  © 2026 Innoaivators Systems • Version 4.0 Pro
               </div>
           </div>
       </div>
@@ -188,18 +187,26 @@ export default function ShopRegistration({ onRegistered }) {
         @keyframes meshFloat { 0% { transform: scale(1); } 100% { transform: scale(1.2) rotate(5deg); } }
 
         .panel-content { position: relative; z-index: 10; width: 100%; }
-        .setup-logo {
-            width: 80px; height: 80px; background: white; border-radius: 24px;
+
+        .setup-logo-container {
+            width: 72px; height: 72px; background: white; border-radius: 20px;
             display: flex; align-items: center; justify-content: center;
-            font-size: 44px; margin-bottom: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            margin-bottom: 24px; box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            overflow: hidden; padding: 10px;
         }
-        .setup-tagline { color: #f8fafc; font-size: 48px; font-weight: 900; line-height: 1.1; letter-spacing: -0.04em; margin-bottom: 40px; }
+        .setup-logo-img { width: 100%; height: 100%; object-fit: contain; }
+        
+        .brand-name { color: rgba(255,255,255,0.5); font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 8px; }
+        
+        .setup-tagline { color: #f8fafc; font-size: 42px; font-weight: 900; line-height: 1.1; letter-spacing: -0.04em; margin-bottom: 20px; }
         .setup-tagline span { color: #818cf8; }
         
+        .setup-description { color: #94a3b8; font-size: 16px; font-weight: 500; line-height: 1.6; margin-bottom: 40px; max-width: 480px; }
+
         .feature-list { list-style: none; padding: 0; margin-bottom: 60px; }
-        .feature-list li { color: #94a3b8; font-size: 18px; font-weight: 500; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+        .feature-list li { color: #e2e8f0; font-size: 17px; font-weight: 600; margin-bottom: 18px; display: flex; align-items: center; gap: 12px; }
         .feature-list .dot { width: 8px; height: 8px; background: #6366f1; border-radius: 50%; box-shadow: 0 0 10px #6366f1; }
-        .panel-footer { position: absolute; bottom: 40px; left: 80px; color: #475569; font-size: 14px; font-weight: 600; }
+        .panel-footer { position: absolute; bottom: 40px; left: 80px; color: #475569; font-size: 13px; font-weight: 700; letter-spacing: 0.05em; }
 
         /* FORM PANEL */
         .form-panel { flex: 1; background: #020617; display: flex; align-items: center; justify-content: center; padding: 60px; border-left: 1px solid rgba(255,255,255,0.05); }
@@ -240,11 +247,12 @@ export default function ShopRegistration({ onRegistered }) {
         .success-overlay-content h1 { color: white; font-size: 48px; font-weight: 900; margin-bottom: 16px; letter-spacing: -0.04em; }
         .success-overlay-content p { color: #94a3b8; font-size: 20px; line-height: 1.6; margin-bottom: 40px; }
         .launch-progress { width: 300px; height: 8px; background: rgba(255,255,255,0.05); border-radius: 10px; margin: 0 auto; overflow: hidden; }
-        .launch-fill { height: 100%; background: #6366f1; width: 0%; animation: loadFill 2.8s linear forwards; }
-
-        @keyframes popIn { from { opacity: 0; transform: scale(0.8); } }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
         @keyframes loadFill { to { width: 100%; } }
+
+        .launch-status {
+            color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.15em; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 10px;
+        }
 
         /* RESPONSIVE */
         @media (max-width: 1000px) {

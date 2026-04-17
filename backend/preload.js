@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("api", {
   getShopId:           ()             => ipcRenderer.invoke("get-shop-id"),
   saveAppSettings:     (data)         => ipcRenderer.invoke("save-app-settings", data),
   getAppSettings:      ()             => ipcRenderer.invoke("get-app-settings"),
+  setWindowTitle:      (title)        => ipcRenderer.invoke("set-window-title", title),
 
   // WhatsApp — automatic sending
   sendWhatsapp:        (phone, text)  => ipcRenderer.invoke("send-whatsapp", phone, text),
@@ -63,4 +64,8 @@ contextBridge.exposeInMainWorld("api", {
   getRegistrationStatus: ()           => ipcRenderer.invoke("get-registration-status"),
   validatePairingCode: (code)         => ipcRenderer.invoke("validate-pairing-code", code),
   getPairingStatus:    (code)         => ipcRenderer.invoke("get-pairing-status", code),
+
+  // 🪟 Window Controls
+  minimizeWindow: () => ipcRenderer.invoke("minimize-window"),
+  closeWindow:    () => ipcRenderer.invoke("close-window"),
 });

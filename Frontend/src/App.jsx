@@ -143,9 +143,9 @@ function App() {
     }
   };
 
-  // 3. Soft Refresh — re-fetches data in the current view without navigating
+  // 3. Application Hard Refresh
   const handleRefresh = () => {
-    window.dispatchEvent(new CustomEvent('soft_refresh'));
+    window.location.reload();
   };
 
   const checkLicense = async () => {
@@ -235,8 +235,8 @@ function App() {
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, overflow: 'hidden' }}>
-                <span style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{appSettings.storeName || "iVA Retail"}</span>
-                <span style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appSettings.tagline || "Supermarket Pro"}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', lineHeight: 1.2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{appSettings.storeName || "Innoaivators"}</span>
+                <span style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appSettings.tagline || "Innovate, Create, Elevate"}</span>
               </div>
             </div>
           </div>
@@ -282,7 +282,7 @@ function App() {
           {/* Dashboard Header */}
           <header className="enterprise-header">
             <div className="header-breadcrumbs">
-              <span className="breadcrumb-muted">iVA Retail</span>
+              <span className="breadcrumb-muted">Innoaivators</span>
               <span className="breadcrumb-separator">/</span>
               <span className="breadcrumb-active">
                 {currentView === 'pos' ? 'Billing Terminal' :
@@ -297,8 +297,19 @@ function App() {
             <div className="header-right">
               <button 
                 onClick={handleRefresh} 
-                style={{ background: 'var(--primary-light)', color: 'var(--primary)', border: 'none', padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+                className="header-btn">
                 <span>🔄</span> Refresh
+              </button>
+              <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }}></div>
+              <button 
+                onClick={() => window.api?.minimizeWindow()} 
+                className="header-btn" title="Minimize">
+                <span>➖</span>
+              </button>
+              <button 
+                onClick={() => { if(confirm('Are you sure you want to close the application?')) window.api?.closeWindow() }} 
+                className="header-btn btn-close-app" title="Close Application">
+                <span>✖️</span>
               </button>
             </div>
           </header>

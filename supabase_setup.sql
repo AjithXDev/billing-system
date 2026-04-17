@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS public.invoices (
     bill_no TEXT,
     customer_name TEXT,
     customer_phone TEXT,
+    customer_address TEXT,
     total_amount NUMERIC,
     tax_amount NUMERIC,
     payment_mode TEXT,
@@ -130,6 +131,7 @@ CREATE TABLE IF NOT EXISTS public.products (
     price NUMERIC,
     quantity NUMERIC,
     unit TEXT,
+    barcode TEXT,
     expiry_date TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(shop_id, local_id)
@@ -196,6 +198,23 @@ ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 ALTER PUBLICATION supabase_realtime ADD TABLE software_licenses;
 
 -- ══════════════════════════════════════════════════════
---  MIGRATION HELPERS (Run these on existing databases)
+--  11. SCHEMA UPDATES (MIGRATION)
 -- ══════════════════════════════════════════════════════
--- ALTER TABLE public.shops ADD COLUMN IF NOT EXISTS owner_email TEXT;
+
+-- Shops Updates
+ALTER TABLE public.shops ADD COLUMN IF NOT EXISTS owner_email TEXT;
+
+-- Products Updates
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category_id INTEGER;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS product_code TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS price_type TEXT DEFAULT 'exclusive';
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS cost_price NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS default_discount NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS barcode TEXT;
+
+-- Invoices Updates
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS bill_date TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS customer_id INTEGER;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS customer_address TEXT;

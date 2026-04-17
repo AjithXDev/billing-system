@@ -109,6 +109,7 @@ const POS = ({ showQR }) => {
   // ── NEW TERMINAL STATES ──
   const [terminalActive, setTerminalActive] = useState(false);
   const [billingMode, setBillingMode] = useState(null); // 'photo' or 'tally'
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   const inputRefs = useRef({}); 
   const tallyInputRef = useRef(null);
@@ -215,6 +216,32 @@ const POS = ({ showQR }) => {
     setHeldCount(held.length);
   };
 
+  const handleLocalRefresh = async () => {
+    setIsRefreshing(true);
+    setBillItems([emptyRow()]);
+    setCustomer({ name: "", phone: "", address: "" });
+    setAmountReceived("");
+    setCheckoutStep(1);
+    try {
+      if (window.api?.getProductsFull) {
+        const prods = await window.api.getProductsFull();
+        setAllProducts(Array.isArray(prods) ? prods : []);
+      }
+      if (window.api?.getOffers) {
+        const offers = await window.api.getOffers();
+        setActiveOffers(offers.filter(o => o.status === 1));
+      }
+      await refreshHeldCount();
+      loadSettings();
+    } catch(e) {}
+    
+    setTimeout(() => {
+      setIsRefreshing(false);
+      // Ensure focus goes back to the terminal input
+      inputRefs.current["0_name"]?.focus();
+    }, 800);
+  };
+
   /* ── Hold current bill ── */
   const holdBill = async () => {
     const validItems = billItems.filter(i => i.qty > 0 && i.id);
@@ -291,6 +318,10 @@ const POS = ({ showQR }) => {
         total: gross_taxable,
         gstRate: catGst,
         gstAmt,
+        cgstRate: catGst / 2,
+        sgstRate: catGst / 2,
+        cgstAmt: gstAmt / 2,
+        sgstAmt: gstAmt / 2,
         expiry_date: product.expiry_date || null,
         image: product.image || null,
         maxStock: availableStock,
@@ -394,6 +425,10 @@ const POS = ({ showQR }) => {
       total: gross_taxable, 
       gstRate: catGst,
       gstAmt: gstAmt,
+      cgstRate: catGst / 2,
+      sgstRate: catGst / 2,
+      cgstAmt: gstAmt / 2,
+      sgstAmt: gstAmt / 2,
       expiry_date: product.expiry_date || null,
       maxStock: availableStock,
       discountPercent: dp,
@@ -694,6 +729,25 @@ const POS = ({ showQR }) => {
   return (
     <div className="pos-container" style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", zIndex: 1000, background: "var(--bg)" }}>
 
+      {/* ── REFRESH OVERLAY ── */}
+      {isRefreshing && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(255,255,255,0.85)", zIndex: 9999,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(2px)"
+        }}>
+          <div style={{
+             width: 45, height: 45, border: "4px solid #e2e8f0",
+             borderTopColor: "var(--primary)", borderRadius: "50%",
+             animation: "spin 1s linear infinite"
+          }}></div>
+          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+          <div style={{ marginTop: 20, fontWeight: 800, color: "var(--text-1)", fontSize: "16px" }}>Syncing latest stock & prices...</div>
+          <div style={{ marginTop: 6, fontWeight: 500, color: "var(--text-3)", fontSize: "13px" }}>Clearing current bill</div>
+        </div>
+      )}
+
       {/* ── HELD BILLS PANEL ─── */}
       {showHeldBills && (
         <HeldBillsPanel
@@ -883,7 +937,7 @@ const POS = ({ showQR }) => {
 
               <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "30px", border: "1px solid #333" }}>
                 <thead>
-                  <tr style={{ backgroundColor: "#e6f0fa", borderBottom: "1px solid #333" }}>
+                  <tr style={{ backgroundColor: "#f8f9fa", borderBottom: "1px solid #333" }}>
                     <th style={{ padding: "12px", textAlign: "left", borderRight: "1px solid #333" }}>Item Description</th>
                     <th style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>Qty</th>
                     <th style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>Rate</th>
@@ -939,13 +993,16 @@ const POS = ({ showQR }) => {
               </div>
 
               <div style={{ marginTop: "50px", textAlign: "center", color: "#666", fontSize: "0.9rem", borderTop: "1px solid #ccc", paddingTop: "20px" }}>
-                Returns are accepted within 30 days of the purchase date.<br />
-                Thank You for your business!
+                Thank you for your purchase visit again<br /><br />
+                <span style={{ fontSize: "0.8rem", color: "#888" }}>
+                  Software by Innoaivators<br />
+                  innoaivators.com &nbsp;|&nbsp; PH - +91 90877 86231
+                </span>
               </div>
 
               <div className="no-print" style={{ marginTop: "40px", display: "flex", justifyContent: "center", gap: "20px" }}>
                 <button onClick={() => { if (document.activeElement) document.activeElement.blur(); setTimeout(() => window.print(), 100); }} style={{ padding: "12px 25px", background: "#333", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>🖨️ PRINT INVOICE</button>
-                <button onClick={closeSuccess} style={{ padding: "12px 25px", background: "#0284c7", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>CLOSE & START NEW</button>
+                <button onClick={closeSuccess} style={{ padding: "12px 25px", background: "#1e293b", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "1rem" }}>CLOSE & START NEW</button>
               </div>
             </div>
           )}
@@ -964,7 +1021,7 @@ const POS = ({ showQR }) => {
               <div style={{ fontSize: 12, color: "var(--text-4)" }}>Terminal Active · Full Screen Mode</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => { window.dispatchEvent(new Event('soft_refresh')); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>🔄 Refresh</button>
+              <button onClick={handleLocalRefresh} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>🔄 Refresh</button>
               <button onClick={() => { setTerminalActive(false); if(document.exitFullscreen) document.exitFullscreen(); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>Exit Terminal</button>
             </div>
           </div>

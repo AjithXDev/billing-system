@@ -90,6 +90,7 @@ export default function Settings() {
   const save = () => {
     localStorage.setItem("smart_billing_settings", JSON.stringify(cfg));
     window.api?.saveAppSettings?.(cfg);
+    if (window.api?.setWindowTitle && cfg.storeName) window.api.setWindowTitle(cfg.storeName);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
     window.dispatchEvent(new Event('settings_updated'));
@@ -295,22 +296,39 @@ export default function Settings() {
         <SectionTitle icon="" title="About Software" />
 
         <div style={{
-          background: "linear-gradient(135deg, var(--surface-2), var(--surface))",
-          border: "1px solid var(--border)",
-          borderRadius: 12, padding: 24, marginTop: 12, marginBottom: 40,
-          textAlign: "center"
+          background: "linear-gradient(135deg, #0f172a, #1e293b)",
+          border: "1px solid rgba(99,102,241,0.2)",
+          borderRadius: 16, padding: "32px 24px", marginTop: 12, marginBottom: 40,
+          textAlign: "center",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.1)"
         }}>
-          <div style={{ letterSpacing: "-.02em", marginBottom: 8 }}>
-            <span style={{ fontSize: 24, fontWeight: 900, color: "var(--primary)" }}>INNOAIVATORS</span>
-            <span style={{ fontSize: 24, fontWeight: 900, color: "var(--text-1)", marginLeft: 6 }}>TECHNOLOGIES</span>
+          <div style={{ letterSpacing: "-.02em", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+            <span style={{ 
+              fontSize: 28, fontWeight: 900, 
+              background: "linear-gradient(135deg, #818cf8, #c084fc)", 
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" 
+            }}>INNOAIVATORS</span>
           </div>
-          <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 400, margin: "0 auto" }}>
-            <div style={{ color: "var(--text-2)", fontWeight: 600, marginBottom: 8 }}>Next-Gen Business Analytics & Retail Systems</div>
-            We empower local businesses with hyper-fast offline billing coupled with real-time cloud analytics.<br/><br/>
-            <i>"Turning raw data into smarter decisions."</i>
+          <div style={{ fontSize: 14, color: "#94a3b8", lineHeight: 1.8, maxWidth: 500, margin: "0 auto" }}>
+            <div style={{ color: "#38bdf8", fontWeight: 700, marginBottom: 16, fontSize: 13, letterSpacing: 0.8, textTransform: "uppercase" }}>
+              Transforming ideas into innovative digital solutions through cutting-edge technology and creative excellence.
+            </div>
+            <p style={{marginBottom: 12}}>
+              We are a visionary technology partner committed to empowering businesses through seamless digital transformation. Our expertise lies in crafting high-performance, intelligent systems that bridge the gap between offline reliability and cloud-scale intelligence.
+            </p>
+            <p style={{marginBottom: 12, fontSize: 13, fontStyle: "italic", color: "#cbd5e1"}}>
+              Driven by innovation, built for excellence.
+            </p>
           </div>
-          <div style={{ marginTop: 16, fontSize: 10.5, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>
-            Version 2.1.0 · Local-First Architecture
+          <div style={{ display: "flex", justifyContent: "center", gap: 20, marginTop: 24 }}>
+            <div style={{ background: "rgba(255,255,255,0.05)", padding: "8px 16px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)" }}>
+              <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 800 }}>Version</span><br/>
+              <span style={{ fontSize: 13, color: "#f8fafc", fontWeight: 700 }}>2.2.0 Enterprise</span>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.05)", padding: "8px 16px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)" }}>
+              <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 800 }}>Core</span><br/>
+              <span style={{ fontSize: 13, color: "#10b981", fontWeight: 700 }}>Local-First AI Engine</span>
+            </div>
           </div>
         </div>
 

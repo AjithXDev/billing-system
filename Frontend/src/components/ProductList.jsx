@@ -7,6 +7,7 @@ const ProductList = () => {
   const [editingProduct, setEditingProduct] = useState(null);
   const [categories, setCategories] = useState([]);
   const [settings, setSettings] = useState({ storeName: "iVA Retail", tagline: "Quality groceries at best price...", billLogo: "" });
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   const load = async () => {
     if (window.api && window.api.getProductsFull) {
@@ -19,6 +20,15 @@ const ProductList = () => {
       const raw = localStorage.getItem("smart_billing_settings");
       if (raw) setSettings(JSON.parse(raw));
     } catch (e) {}
+  };
+
+  const handleLocalRefresh = async () => {
+    setIsRefreshing(true);
+    setSearchQuery("");
+    await load();
+    setTimeout(() => {
+      setIsRefreshing(false);
+    }, 600);
   };
   
   useEffect(() => {
@@ -231,7 +241,24 @@ const ProductList = () => {
   };
 
   return (
-    <div className="admin-scroll-area">
+    <div className="admin-scroll-area" style={{ position: 'relative' }}>
+      {isRefreshing && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(255,255,255,0.7)", zIndex: 999,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(2px)", borderRadius: "var(--r-lg)"
+        }}>
+          <div style={{
+             width: 40, height: 40, border: "3px solid #e2e8f0",
+             borderTopColor: "var(--primary)", borderRadius: "50%",
+             animation: "spin 1s linear infinite"
+          }}></div>
+          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+          <div style={{ marginTop: 15, fontWeight: 700, color: "var(--text-1)", fontSize: "14px" }}>Synchronizing Master Inventory...</div>
+        </div>
+      )}
+
       {isEditModalOpen && editingProduct && (
         <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
           <div className="invoice-modal" onClick={e => e.stopPropagation()}>
@@ -365,8 +392,8 @@ const ProductList = () => {
                   padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '13px', width: '200px'
                 }}
               />
-              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem', background: '#334155' }} onClick={printPriceList}>🖨️ Print Price List</button>
-              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={load}>Refresh Data</button>
+              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={printPriceList}>🖨️ Print Price List</button>
+              <button className="btn-action" style={{ padding: '6px 15px', fontSize: '0.8rem' }} onClick={handleLocalRefresh}>Refresh Data</button>
             </div>
          </div>
 

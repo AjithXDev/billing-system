@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut } = require("electron");
 const { execSync } = require("child_process");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
@@ -15,7 +15,7 @@ function getMachineId() {
     const output = execSync("wmic csproduct get uuid").toString();
     const lines = output.trim().split("\n");
     // Usually line 0 is 'UUID' and line 1 is the actual ID
-    return lines[lines.length - 1].trim(); 
+    return lines[lines.length - 1].trim();
   } catch (e) {
     return "unknown-hwid";
   }
@@ -25,46 +25,55 @@ function getMachineId() {
 let supabase = null;
 function initSupabase(url, key) {
   if (!supabase && url && key) {
-    try { supabase = createClient(url, key); } catch(e) {}
+    try { supabase = createClient(url, key); } catch (e) { }
   }
 }
 async function syncToCloud(shopId) {
   if (!supabase) return;
   try {
-    const products = db.prepare("SELECT * FROM products WHERE is_synced = 0").all();
+    // 1. Sync Products (with category name join)
+    const products = db.prepare(`
+      SELECT p.*, c.name as category_name 
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      WHERE p.is_synced = 0
+    `).all();
+
     for (const p of products) {
-      const { id, is_synced, ...data } = p;
-      const { error } = await supabase.from('products').upsert({ 
-        ...data, 
-        local_id: id, 
-        shop_id: shopId 
+      const { id, is_synced, flag_low_stock, flag_out_of_stock, flag_expiry, flag_dead_stock, ...data } = p;
+      const { error } = await supabase.from('products').upsert({
+        ...data,
+        local_id: id,
+        shop_id: shopId,
+        updated_at: new Date().toISOString()
       }, { onConflict: 'shop_id,local_id' });
-      
+
       if (!error) db.prepare("UPDATE products SET is_synced = 1 WHERE id = ?").run(id);
-      else console.error("[Sync] Product error:", error.message);
+      else console.error(`[Sync] Product error (ID: ${id}):`, error.message);
     }
 
+    // 2. Sync Invoices
     const invoices = db.prepare("SELECT * FROM invoices WHERE is_synced = 0").all();
     for (const inv of invoices) {
       const { id, is_synced, ...data } = inv;
-      const { error } = await supabase.from('invoices').upsert({ 
-        ...data, 
-        local_id: id, 
-        shop_id: shopId 
+      const { error } = await supabase.from('invoices').upsert({
+        ...data,
+        local_id: id,
+        shop_id: shopId
       }, { onConflict: 'shop_id,local_id' });
 
       if (!error) {
         db.prepare("UPDATE invoices SET is_synced = 1 WHERE id = ?").run(id);
         const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(id);
         await supabase.from('invoice_items').upsert(items.map(i => {
-           const { id: itemId, ...itemData } = i;
-           return { ...itemData, shop_id: shopId, local_id: itemId };
+          const { id: itemId, ...itemData } = i;
+          return { ...itemData, shop_id: shopId, local_id: itemId };
         }));
       } else {
-        console.error("[Sync] Invoice error:", error.message);
+        console.error(`[Sync] Invoice error (ID: ${id}):`, error.message);
       }
     }
-    // Push stats snapshot for mobile remote access
+    // 3. Push stats snapshot for mobile remote access
     await pushStatsSnapshot(shopId);
   } catch (e) {
     console.error("[Sync] General error:", e.message);
@@ -81,13 +90,13 @@ async function registerShop(shopId) {
     let email = "";
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     if (fs.existsSync(configPath)) {
-      try { 
-        const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); 
-        storeName = s.storeName || storeName; 
+      try {
+        const s = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        storeName = s.storeName || storeName;
         ownerName = s.ownerName || ownerName;
         mobile = s.ownerPhone || mobile;
         email = s.ownerEmail || email;
-      } catch(e) {}
+      } catch (e) { }
     }
     await supabase.from("shops").upsert({
       id: shopId,
@@ -98,7 +107,7 @@ async function registerShop(shopId) {
       master_key: process.env.MASTER_KEY || "owner123",
       updated_at: new Date().toISOString()
     });
-  } catch(e) {}
+  } catch (e) { }
 }
 
 // ── Push comprehensive stats snapshot to Supabase for mobile dashboard ──
@@ -108,7 +117,7 @@ async function pushStatsSnapshot(shopId) {
     let settings = {};
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     if (fs.existsSync(configPath)) {
-      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch(e) {}
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) { }
     }
 
     const lowThreshold = settings.lowStockThreshold || 10;
@@ -140,13 +149,13 @@ async function pushStatsSnapshot(shopId) {
     const dailySales = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
     const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m',created_at,'localtime') as month, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-180 days') GROUP BY month ORDER BY month ASC").all();
     const yearlyBreakdown = db.prepare("SELECT strftime('%Y',created_at,'localtime') as year, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices GROUP BY year ORDER BY year DESC LIMIT 5").all();
-    
+
     // Group by week for current month
     const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM((ii.price - COALESCE(p.cost_price, 0)) * ii.quantity),0) as profit FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE strftime('%Y-%m',inv.created_at,'localtime') = strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
-    
+
     const peakHours = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
     const paymentBreakdown = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
-    
+
     const deadStock = db.prepare(`SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadThresholdDays} days'))`).all();
     const lowStockList = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=? ORDER BY quantity ASC LIMIT 30").all(lowThreshold);
     const outOfStockList = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
@@ -192,12 +201,12 @@ async function pushStatsSnapshot(shopId) {
       },
       updated_at: new Date().toISOString()
     });
-  } catch(e) {}
+  } catch (e) { }
 }
 
 async function logNotification(shopId, type, message) {
   if (!supabase) return;
-  try { await supabase.from('notifications').insert({ shop_id: shopId, type, message }); } catch(e) {}
+  try { await supabase.from('notifications').insert({ shop_id: shopId, type, message }); } catch (e) { }
 }
 
 let mainWindow = null;
@@ -206,11 +215,44 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    title: "Innoaivators billing", // Updated Application Title
-    icon: path.join(__dirname, "assets", "logo.png"), // Ready for custom app logo later
+    fullscreen: true,
+    frame: false,
+    kiosk: true,
+    title: "Innoaivators billing",
+    icon: path.join(__dirname, "assets", "logo.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
+  });
+
+  // Dynamically set title if shop is already registered
+  const settingsPath = path.join(app.getPath("userData"), "app_settings.json");
+  if (fs.existsSync(settingsPath)) {
+    try {
+      const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      if (s.storeName) {
+        mainWindow.setTitle(`${s.storeName} - Innoaivators`);
+      }
+    } catch (e) { }
+  }
+
+  // Handle Fullscreen Toggles
+  const { globalShortcut } = require("electron");
+
+  // Esc to exit kiosk/fullscreen
+  globalShortcut.register("Escape", () => {
+    if (mainWindow) {
+      mainWindow.setKiosk(false);
+      mainWindow.setFullScreen(false);
+    }
+  });
+
+  // F11 to enter kiosk/fullscreen
+  globalShortcut.register("F11", () => {
+    if (mainWindow) {
+      mainWindow.setKiosk(true);
+      mainWindow.setFullScreen(true);
+    }
   });
 
   // Completely remove the default top menu bar (File, Edit, View, etc.)
@@ -242,29 +284,29 @@ function createWindow() {
   // 🟢 Initialize Cloud Sync & Alert Loop
   setInterval(async () => {
     try {
-        const configPath = path.join(app.getPath("userData"), "app_settings.json");
-        let settings = {};
-        if (fs.existsSync(configPath)) {
-            try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch(e) { settings = {}; }
-        }
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      let settings = {};
+      if (fs.existsSync(configPath)) {
+        try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) { settings = {}; }
+      }
 
-        const url = settings.supabaseUrl || process.env.SUPABASE_URL;
-        const key = settings.supabaseKey || process.env.SUPABASE_KEY;
-        const currentShopId = process.env.SHOP_ID || 'billing-shop';
+      const url = settings.supabaseUrl || process.env.SUPABASE_URL;
+      const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+      const currentShopId = process.env.SHOP_ID || 'billing-shop';
 
-        // ── Local Notification Alerts (always run, independent of cloud) ──
-        const today = new Date().toISOString().split('T')[0];
-        const lowThreshold = settings.lowStockThreshold || 10;
-        const expiryDays = settings.expiryAlertDays || 3;
-        const deadThresholdDays = settings.deadStockThresholdDays || 30;
-        const nearExpiryDate = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
+      // ── Local Notification Alerts (always run, independent of cloud) ──
+      const today = new Date().toISOString().split('T')[0];
+      const lowThreshold = settings.lowStockThreshold || 10;
+      const expiryDays = settings.expiryAlertDays || 3;
+      const deadThresholdDays = settings.deadStockThresholdDays || 30;
+      const nearExpiryDate = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
 
-        const expired = db.prepare("SELECT id, name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ? AND flag_expiry != 2").all(today);
-        const nearExpiry = db.prepare("SELECT id, name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ? AND flag_expiry = 0").all(today, nearExpiryDate);
-        const lowStock = db.prepare("SELECT id, name, quantity FROM products WHERE quantity > 0 AND quantity <= ? AND flag_low_stock = 0").all(lowThreshold);
-        const outOfStock = db.prepare("SELECT id, name FROM products WHERE quantity <= 0 AND flag_out_of_stock = 0").all();
-        
-        const deadStock = db.prepare(`
+      const expired = db.prepare("SELECT id, name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ? AND flag_expiry != 2").all(today);
+      const nearExpiry = db.prepare("SELECT id, name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ? AND flag_expiry = 0").all(today, nearExpiryDate);
+      const lowStock = db.prepare("SELECT id, name, quantity FROM products WHERE quantity > 0 AND quantity <= ? AND flag_low_stock = 0").all(lowThreshold);
+      const outOfStock = db.prepare("SELECT id, name FROM products WHERE quantity <= 0 AND flag_out_of_stock = 0").all();
+
+      const deadStock = db.prepare(`
           SELECT id, name FROM products 
           WHERE quantity > 0 AND flag_dead_stock = 0 AND id NOT IN (
             SELECT DISTINCT product_id FROM invoice_items ii 
@@ -273,45 +315,45 @@ function createWindow() {
           )
         `).all();
 
-        const insertNotif = db.prepare("INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)");
-        
-        if (expired.length > 0) {
-          const names = expired.slice(0, 5).map(p => p.name).join(', ');
-          insertNotif.run('EXPIRY', `${expired.length} Products Expired!`, `⚠️ ${names}`);
-        }
-        if (nearExpiry.length > 0) {
-          const names = nearExpiry.slice(0, 5).map(p => p.name).join(', ');
-          insertNotif.run('NEAR_EXPIRY', `${nearExpiry.length} Products Expiring Soon!`, `⏰ ${names}`);
-        }
-        // ... (remaining notification types continue similarly)
+      const insertNotif = db.prepare("INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)");
 
-        // WhatsApp Alerts (send outside transaction to prevent DB lock during network wait)
-        if (settings.ownerPhone) {
-          for (const p of lowStock) sendMessage(settings.ownerPhone, `📉 ${p.name} is low Stock (${p.quantity}).`);
-          for (const p of outOfStock) sendMessage(settings.ownerPhone, `🚫 ${p.name} out of Stock!`);
-          // ... etc
-        }
+      if (expired.length > 0) {
+        const names = expired.slice(0, 5).map(p => p.name).join(', ');
+        insertNotif.run('EXPIRY', `${expired.length} Products Expired!`, `⚠️ ${names}`);
+      }
+      if (nearExpiry.length > 0) {
+        const names = nearExpiry.slice(0, 5).map(p => p.name).join(', ');
+        insertNotif.run('NEAR_EXPIRY', `${nearExpiry.length} Products Expiring Soon!`, `⏰ ${names}`);
+      }
+      // ... (remaining notification types continue similarly)
 
-        // UPDATE FLAGS IN ONE TRANSACTION TO REDUCE DISK I/O
-        const resetFlags = db.transaction(() => {
-          lowStock.forEach(p => db.prepare("UPDATE products SET flag_low_stock = 1 WHERE id = ?").run(p.id));
-          outOfStock.forEach(p => db.prepare("UPDATE products SET flag_out_of_stock = 1 WHERE id = ?").run(p.id));
-          nearExpiry.forEach(p => db.prepare("UPDATE products SET flag_expiry = 1 WHERE id = ?").run(p.id));
-          expired.forEach(p => db.prepare("UPDATE products SET flag_expiry = 2 WHERE id = ?").run(p.id));
-          deadStock.forEach(p => db.prepare("UPDATE products SET flag_dead_stock = 1 WHERE id = ?").run(p.id));
-        });
-        resetFlags();
+      // WhatsApp Alerts (send outside transaction to prevent DB lock during network wait)
+      if (settings.ownerPhone) {
+        for (const p of lowStock) sendMessage(settings.ownerPhone, `📉 ${p.name} is low Stock (${p.quantity}).`);
+        for (const p of outOfStock) sendMessage(settings.ownerPhone, `🚫 ${p.name} out of Stock!`);
+        // ... etc
+      }
 
-        // ── Cloud Sync ──
-        if (url && key && url.startsWith('http')) {
-            initSupabase(url, key);
-            // Register shop in Supabase for mobile auth from anywhere
-            registerShop(currentShopId).catch(() => {});
-            // Cloud sync is async and network-bound, keep it separate from tight local loops
-            syncToCloud(currentShopId).catch(console.error);
-        }
-    } catch(e) { console.error("[Sync Loop Error]", e.message); }
-  }, 60000); 
+      // UPDATE FLAGS IN ONE TRANSACTION TO REDUCE DISK I/O
+      const resetFlags = db.transaction(() => {
+        lowStock.forEach(p => db.prepare("UPDATE products SET flag_low_stock = 1 WHERE id = ?").run(p.id));
+        outOfStock.forEach(p => db.prepare("UPDATE products SET flag_out_of_stock = 1 WHERE id = ?").run(p.id));
+        nearExpiry.forEach(p => db.prepare("UPDATE products SET flag_expiry = 1 WHERE id = ?").run(p.id));
+        expired.forEach(p => db.prepare("UPDATE products SET flag_expiry = 2 WHERE id = ?").run(p.id));
+        deadStock.forEach(p => db.prepare("UPDATE products SET flag_dead_stock = 1 WHERE id = ?").run(p.id));
+      });
+      resetFlags();
+
+      // ── Cloud Sync ──
+      if (url && key && url.startsWith('http')) {
+        initSupabase(url, key);
+        // Register shop in Supabase for mobile auth from anywhere
+        registerShop(currentShopId).catch(() => { });
+        // Cloud sync is async and network-bound, keep it separate from tight local loops
+        syncToCloud(currentShopId).catch(console.error);
+      }
+    } catch (e) { console.error("[Sync Loop Error]", e.message); }
+  }, 60000);
 }
 
 app.whenReady().then(createWindow);
@@ -365,7 +407,7 @@ ipcMain.handle("add-product", async (event, product) => {
 // 🟢 EDIT PRODUCT (with expiry_date)
 ipcMain.handle("edit-product", async (event, product) => {
   const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount } = product;
-  
+
   // Fetch current to optionally reset flags if restocked
   const oldP = db.prepare("SELECT quantity, expiry_date FROM products WHERE id=?").get(id);
   let resetStock = quantity > 10 && oldP && oldP.quantity <= 10; // Simple restocking reset rule 
@@ -431,8 +473,14 @@ ipcMain.handle("get-app-settings", (event) => {
     if (fs.existsSync(configPath)) {
       return JSON.parse(fs.readFileSync(configPath, "utf-8"));
     }
-  } catch (e) {}
+  } catch (e) { }
   return null;
+});
+
+ipcMain.handle("set-window-title", (event, title) => {
+  if (mainWindow) {
+    mainWindow.setTitle(`${title} - Innoaivators`);
+  }
 });
 
 ipcMain.handle("ask-ai-consultant", async (event, question) => {
@@ -457,6 +505,15 @@ ipcMain.handle("ask-ai-consultant", async (event, question) => {
 
 ipcMain.handle("get-shop-id", () => {
   return process.env.SHOP_ID;
+});
+
+// 🟢 WINDOW CONTROLS
+ipcMain.handle("minimize-window", () => {
+  if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.handle("close-window", () => {
+  if (mainWindow) mainWindow.close();
 });
 
 ipcMain.handle("get-sync-status", () => {
@@ -562,8 +619,12 @@ ipcMain.handle("create-invoice", async (event, data) => {
     }
   }
 
-  const today = new Date().toISOString().split('T')[0];
-  const lastBill = db.prepare("SELECT bill_no FROM invoices WHERE bill_date = ? ORDER BY bill_no DESC LIMIT 1").get(today);
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const currentMonth = now.toISOString().slice(0, 7); // "YYYY-MM"
+
+  // Monthly sequential bill numbering
+  const lastBill = db.prepare("SELECT bill_no FROM invoices WHERE strftime('%Y-%m', bill_date) = ? ORDER BY bill_no DESC LIMIT 1").get(currentMonth);
   const nextBillNo = lastBill ? (lastBill.bill_no + 1) : 1;
 
   const result = db.prepare(`
@@ -708,7 +769,7 @@ ipcMain.handle("get-expiry-alerts", async () => {
       const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       expiryDays = settings.expiryAlertDays || 3;
     }
-  } catch(e) {}
+  } catch (e) { }
   const inN = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
 
   const expired = db.prepare(`
@@ -771,7 +832,7 @@ ipcMain.handle("get-dashboard-stats", async () => {
       lowThreshold = settings.lowStockThreshold || 10;
       expiryDays = settings.expiryAlertDays || 3;
     }
-  } catch(e) {}
+  } catch (e) { }
   const inN = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
 
   const totalProducts = db.prepare("SELECT COUNT(*) as cnt FROM products").get().cnt;
@@ -939,29 +1000,29 @@ ipcMain.handle("get-registration-status", async () => {
   try {
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     const envPath = path.join(__dirname, '..', '.env');
-    
+
     let settings = {};
     if (fs.existsSync(configPath)) {
-      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
 
     // DIRECT FILE CHECK: Don't trust process.env cache
     let envContent = "";
     if (fs.existsSync(envPath)) {
-        envContent = fs.readFileSync(envPath, 'utf-8');
+      envContent = fs.readFileSync(envPath, 'utf-8');
     }
-    
+
     const hasShopId = envContent.includes("SHOP_ID=");
     const match = envContent.match(/SHOP_ID=(.+)/);
     const shopIdValue = match ? match[1].trim() : "";
 
     if (!hasShopId || !shopIdValue) {
-        // Forcefully Wipe local cache
-        if (settings.shopId) {
-            delete settings.shopId;
-            fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
-        }
-        return { isRegistered: false, shopId: "" };
+      // Forcefully Wipe local cache
+      if (settings.shopId) {
+        delete settings.shopId;
+        fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+      }
+      return { isRegistered: false, shopId: "" };
     }
 
     return { isRegistered: true, shopId: shopIdValue };
@@ -973,26 +1034,26 @@ ipcMain.handle("get-registration-status", async () => {
 // Register shop in Supabase → get UUID
 ipcMain.handle("register-shop", async (event, data) => {
   const { shopName, ownerName, mobileNumber, email } = data;
-  
+
   // Get Supabase client  
   const configPath = path.join(app.getPath("userData"), "app_settings.json");
   let settings = {};
   if (fs.existsSync(configPath)) {
-    try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+    try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
   }
-  
+
   const url = settings.supabaseUrl || process.env.SUPABASE_URL;
   const key = settings.supabaseKey || process.env.SUPABASE_KEY;
-  
+
   if (!url || !key || !url.startsWith('http')) {
     return { success: false, error: "Supabase not configured. Please contact support." };
   }
-  
+
   initSupabase(url, key);
   if (!supabase) {
     return { success: false, error: "Cloud connection failed. Please check internet." };
   }
-  
+
   try {
     // Generate a local Shop ID (shop-xxxxxxxx format)
     const newShopId = `shop-${uuidv4().slice(0, 8)}`;
@@ -1009,12 +1070,12 @@ ipcMain.handle("register-shop", async (event, data) => {
         master_key: process.env.MASTER_KEY || settings.masterKey || "owner123",
         is_active: false // Explicitly set to false until admin reviews
       });
-    
+
     if (error) {
       console.error("[Register] Supabase error:", error.message);
       return { success: false, error: error.message };
     }
-    
+
     // Save to .env
     try {
       const envPath = path.join(__dirname, '..', '.env');
@@ -1026,8 +1087,8 @@ ipcMain.handle("register-shop", async (event, data) => {
       }
       fs.writeFileSync(envPath, envContent);
       process.env.SHOP_ID = newShopId;
-    } catch(e) { console.error("[Register] .env error:", e.message); }
-    
+    } catch (e) { console.error("[Register] .env error:", e.message); }
+
     // Save to app_settings.json
     settings.shopId = newShopId;
     settings.storeName = shopName;
@@ -1035,7 +1096,7 @@ ipcMain.handle("register-shop", async (event, data) => {
     settings.ownerEmail = email; // Save locally
     settings.ownerMobile = mobileNumber;
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
-    
+
     console.log("[Register] Shop registered and pending activation:", newShopId);
     return { success: true, shopId: newShopId };
   } catch (e) {
@@ -1051,18 +1112,18 @@ ipcMain.handle("validate-pairing-code", async (event, code) => {
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     let settings = {};
     if (fs.existsSync(configPath)) {
-      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
     const url = settings.supabaseUrl || process.env.SUPABASE_URL;
     const key = settings.supabaseKey || process.env.SUPABASE_KEY;
     if (url && key) initSupabase(url, key);
   }
-  
+
   if (!supabase) return { success: false, error: "Supabase not connected" };
-  
+
   const shopId = process.env.SHOP_ID;
   if (!shopId || shopId.length < 8) return { success: false, error: "Shop not registered" };
-  
+
   try {
     // Find matching pending code for this shop
     const { data, error } = await supabase
@@ -1072,24 +1133,24 @@ ipcMain.handle("validate-pairing-code", async (event, code) => {
       .eq("code", code)
       .eq("status", "pending")
       .single();
-    
+
     if (error || !data) {
       return { success: false, error: "Invalid code. Make sure you generated a new code in the Owner App." };
     }
-    
+
     // Check expiry
     if (new Date(data.expires_at) < new Date()) {
       // Mark as expired
       await supabase.from("pairing_codes").update({ status: "expired" }).eq("id", data.id);
       return { success: false, error: "Code expired. Generate a new one in the Owner App." };
     }
-    
+
     // Mark code as used
     await supabase
       .from("pairing_codes")
       .update({ status: "used" })
       .eq("id", data.id);
-    
+
     console.log(`[Pairing] ✅ Code ${code} validated — device paired!`);
     return { success: true, deviceId: data.device_id };
   } catch (e) {
@@ -1104,7 +1165,7 @@ ipcMain.handle("get-license-status", async () => {
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     let settings = {};
     if (fs.existsSync(configPath)) {
-      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
     const url = settings.supabaseUrl || process.env.SUPABASE_URL;
     const key = settings.supabaseKey || process.env.SUPABASE_KEY;
@@ -1127,10 +1188,10 @@ ipcMain.handle("get-license-status", async () => {
       // If shop record not found, it might have been deleted by the Admin.
       // Wipe the local registration to allow the user to register again.
       console.log(`[License] ⚠️ Shop ${shopId} not found in cloud. Wiping local registration.`);
-      
+
       const configPath = path.join(app.getPath("userData"), "app_settings.json");
       const envPath = path.join(__dirname, '..', '.env');
-      
+
       // Wipe .env entry
       if (fs.existsSync(envPath)) {
         let envContent = fs.readFileSync(envPath, 'utf-8');
@@ -1156,7 +1217,7 @@ ipcMain.handle("get-license-status", async () => {
 // Check pairing status
 ipcMain.handle("get-pairing-status", async (event, code) => {
   if (!supabase) return { status: "unknown" };
-  
+
   try {
     const shopId = process.env.SHOP_ID;
     const { data, error } = await supabase
@@ -1165,11 +1226,11 @@ ipcMain.handle("get-pairing-status", async (event, code) => {
       .eq("shop_id", shopId)
       .eq("code", code)
       .single();
-    
+
     if (error || !data) return { status: "unknown" };
     return { status: data.status, deviceId: data.device_id, userId: data.user_id };
   } catch {
     return { status: "unknown" };
   }
 });
-
+
