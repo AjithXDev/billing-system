@@ -163,7 +163,7 @@ async function pushStatsSnapshot(shopId) {
     const nearExpiList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, inN);
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
 
-    const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
+    const allProductsList = db.prepare("SELECT name, brand, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
 
 
 
