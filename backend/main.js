@@ -296,9 +296,9 @@ function createWindow() {
         try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) { settings = {}; }
       }
 
-      const url = settings.supabaseUrl || process.env.SUPABASE_URL;
-      const key = settings.supabaseKey || process.env.SUPABASE_KEY;
-      const currentShopId = process.env.SHOP_ID || 'billing-shop';
+      const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+      const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+      const currentShopId = settings.shopId || process.env.SHOP_ID;
 
       // ── Local Notification Alerts (always run, independent of cloud) ──
       const today = new Date().toISOString().split('T')[0];
@@ -514,7 +514,14 @@ ipcMain.handle("ask-ai-consultant", async (event, question) => {
 });
 
 ipcMain.handle("get-shop-id", () => {
-  return process.env.SHOP_ID;
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (settings.shopId) return settings.shopId;
+    }
+  } catch (e) {}
+  return process.env.SHOP_ID || null;
 });
 
 // 🟢 WINDOW CONTROLS
@@ -1009,29 +1016,16 @@ ipcMain.handle("toggle-offer-status", async (event, { id, status }) => {
 ipcMain.handle("get-registration-status", async () => {
   try {
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
-    const envPath = path.join(__dirname, '..', '.env');
 
     let settings = {};
     if (fs.existsSync(configPath)) {
       try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
 
-    // DIRECT FILE CHECK: Don't trust process.env cache
-    let envContent = "";
-    if (fs.existsSync(envPath)) {
-      envContent = fs.readFileSync(envPath, 'utf-8');
-    }
+    // Direct check in app_settings.json for persistence in production
+    const shopIdValue = settings.shopId || process.env.SHOP_ID;
 
-    const hasShopId = envContent.includes("SHOP_ID=");
-    const match = envContent.match(/SHOP_ID=(.+)/);
-    const shopIdValue = match ? match[1].trim() : "";
-
-    if (!hasShopId || !shopIdValue) {
-      // Forcefully Wipe local cache
-      if (settings.shopId) {
-        delete settings.shopId;
-        fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
-      }
+    if (!shopIdValue) {
       return { isRegistered: false, shopId: "" };
     }
 
@@ -1052,8 +1046,8 @@ ipcMain.handle("register-shop", async (event, data) => {
     try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
   }
 
-  const url = settings.supabaseUrl || process.env.SUPABASE_URL;
-  const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+  const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+  const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
 
   if (!url || !key || !url.startsWith('http')) {
     return { success: false, error: "Supabase not configured. Please contact support." };
@@ -1086,20 +1080,10 @@ ipcMain.handle("register-shop", async (event, data) => {
       return { success: false, error: error.message };
     }
 
-    // Save to .env
-    try {
-      const envPath = path.join(__dirname, '..', '.env');
-      let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
-      if (envContent.includes('SHOP_ID=')) {
-        envContent = envContent.replace(/SHOP_ID=.*/g, `SHOP_ID=${newShopId}`);
-      } else {
-        envContent += `\nSHOP_ID=${newShopId}`;
-      }
-      fs.writeFileSync(envPath, envContent);
-      process.env.SHOP_ID = newShopId;
-    } catch (e) { console.error("[Register] .env error:", e.message); }
+    // Save carefully to local process
+    process.env.SHOP_ID = newShopId;
 
-    // Save to app_settings.json
+    // Save to app_settings.json (Source of Truth)
     settings.shopId = newShopId;
     settings.storeName = shopName;
     settings.ownerName = ownerName;
@@ -1124,14 +1108,21 @@ ipcMain.handle("validate-pairing-code", async (event, code) => {
     if (fs.existsSync(configPath)) {
       try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
-    const url = settings.supabaseUrl || process.env.SUPABASE_URL;
-    const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
     if (url && key) initSupabase(url, key);
   }
 
   if (!supabase) return { success: false, error: "Supabase not connected" };
 
-  const shopId = process.env.SHOP_ID;
+  // Load shopId directly from setting since .env may not exist in production
+  let shopId = process.env.SHOP_ID;
+  if (!shopId) {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); shopId = s.shopId; } catch {}
+    }
+  }
   if (!shopId || shopId.length < 8) return { success: false, error: "Shop not registered" };
 
   try {
@@ -1177,15 +1168,21 @@ ipcMain.handle("get-license-status", async () => {
     if (fs.existsSync(configPath)) {
       try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
-    const url = settings.supabaseUrl || process.env.SUPABASE_URL;
-    const key = settings.supabaseKey || process.env.SUPABASE_KEY;
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
     if (url && key) initSupabase(url, key);
   }
 
   if (!supabase) return { is_active: true, hwid: machineId, note: "Offline mode or Supabase not connected" };
 
   try {
-    const shopId = process.env.SHOP_ID || "";
+    let shopId = process.env.SHOP_ID || "";
+    if (!shopId) {
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      if (fs.existsSync(configPath)) {
+        try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); shopId = s.shopId || ""; } catch {}
+      }
+    }
     if (!shopId) return { is_active: false, needsRegistration: true, hwid: machineId, note: "Shop not registered" };
 
     const { data: shopRecord, error } = await supabase
@@ -1200,13 +1197,13 @@ ipcMain.handle("get-license-status", async () => {
       console.log(`[License] ⚠️ Shop ${shopId} not found in cloud. Wiping local registration.`);
 
       const configPath = path.join(app.getPath("userData"), "app_settings.json");
-      const envPath = path.join(__dirname, '..', '.env');
-
-      // Wipe .env entry
-      if (fs.existsSync(envPath)) {
-        let envContent = fs.readFileSync(envPath, 'utf-8');
-        envContent = envContent.replace(/SHOP_ID=.*/g, '');
-        fs.writeFileSync(envPath, envContent);
+      let settings = {};
+      if (fs.existsSync(configPath)) {
+        try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+      }
+      if (settings.shopId) {
+        delete settings.shopId;
+        fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
       }
       process.env.SHOP_ID = "";
 
@@ -1229,7 +1226,13 @@ ipcMain.handle("get-pairing-status", async (event, code) => {
   if (!supabase) return { status: "unknown" };
 
   try {
-    const shopId = process.env.SHOP_ID;
+    let shopId = process.env.SHOP_ID || "";
+    if (!shopId) {
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      if (fs.existsSync(configPath)) {
+        try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); shopId = s.shopId || ""; } catch {}
+      }
+    }
     const { data, error } = await supabase
       .from("pairing_codes")
       .select("status, device_id, user_id")
