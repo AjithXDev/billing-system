@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search } from "lucide-react";
+import { Search, Camera, QrCode } from "lucide-react";
+import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 /* ─────────────────── helpers ─────────────────────────── */
 const todayStr = () => new Date().toISOString().split("T")[0];
@@ -110,6 +111,9 @@ const POS = ({ showQR }) => {
   const [terminalActive, setTerminalActive] = useState(false);
   const [billingMode, setBillingMode] = useState(null); // 'photo' or 'tally'
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scanStatus, setScanStatus] = useState("Waiting for scanner...");
+  const [detectedBarcode, setDetectedBarcode] = useState("");
   
   const inputRefs = useRef({}); 
   const tallyInputRef = useRef(null);
@@ -130,6 +134,124 @@ const POS = ({ showQR }) => {
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
   }, [billingMode, currentRow]);
+
+  const [scanFlash, setScanFlash] = useState(false);
+  
+  // 🟢 Global Barcode Scanner Listener
+  const barcodeBuffer = useRef("");
+  const barcodeTimeout = useRef(null);
+  const lastScanTime = useRef(0);
+
+  useEffect(() => {
+    const handleBarcodeScan = (e) => {
+      // Don't listen when modals are open
+      if (showInvoice || showHeldBills || showQR || isScannerOpen) return;
+
+      if (e.key === "Enter") {
+        const now = Date.now();
+        const scanned = barcodeBuffer.current.trim();
+        barcodeBuffer.current = "";
+        
+        // Prevent double trigger (scanner + search input Enter)
+        if (scanned.length > 3 && (now - lastScanTime.current) > 500) {
+          e.preventDefault();
+          lastScanTime.current = now;
+          
+          const matchedProduct = allProducts.find(p => p.barcode === scanned || p.product_code === scanned);
+          if (matchedProduct) {
+            addProductToCart(matchedProduct);
+            triggerScanFeedback();
+          } else {
+            console.warn("Barcode not found:", scanned);
+          }
+        }
+        return;
+      }
+
+      if (e.key.length === 1) {
+        barcodeBuffer.current += e.key;
+        if (barcodeTimeout.current) clearTimeout(barcodeTimeout.current);
+        barcodeTimeout.current = setTimeout(() => {
+          barcodeBuffer.current = ""; // Reset if too slow (human typing)
+        }, 100); 
+      }
+    };
+    
+    window.addEventListener("keydown", handleBarcodeScan, true);
+    return () => window.removeEventListener("keydown", handleBarcodeScan, true);
+  }, [allProducts, showInvoice, showHeldBills, showQR, billItems, settings, isScannerOpen]);
+
+  // Visual/Audio Feedback
+  const triggerScanFeedback = () => {
+    setScanFlash(true);
+    setTimeout(() => setScanFlash(false), 300);
+    // Simple synth beep if browser allows
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } catch(e) {}
+  };
+
+  // 📷 Camera Scanner Effect
+  const scannerRef = useRef(null);
+  useEffect(() => {
+    if (isScannerOpen && !scannerRef.current) {
+      const scanner = new Html5QrcodeScanner("pos-reader", { 
+        fps: 20, 
+        qrbox: (viewfinderWidth, viewfinderHeight) => {
+          const width = viewfinderWidth * 0.8;
+          const height = viewfinderHeight * 0.4;
+          return { width, height };
+        },
+        aspectRatio: 1.0,
+        showTorchButtonIfSupported: true,
+        useBarCodeDetectorIfSupported: true,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.ITF
+        ]
+      }, false);
+      scannerRef.current = scanner;
+      
+      scanner.render(async (decodedText) => {
+        setDetectedBarcode(decodedText);
+        setScanStatus("✅ Barcode captured! Processing...");
+        
+        if (scannerRef.current) {
+          try { await scannerRef.current.clear(); } catch(e){}
+          scannerRef.current = null;
+        }
+        setIsScannerOpen(false);
+        const matchedProduct = allProducts.find(p => p.barcode === decodedText || p.product_code === decodedText);
+        if (matchedProduct) {
+          addProductToCart(matchedProduct);
+        } else {
+          alert(`Product with barcode "${decodedText}" not found in inventory.`);
+        }
+      }, (error) => {});
+    }
+
+    return () => {
+      if (!isScannerOpen && scannerRef.current) {
+        scannerRef.current.clear().catch(() => {});
+        scannerRef.current = null;
+      }
+    };
+  }, [isScannerOpen, allProducts]);
 
   // Full Screen Trigger
   const enterFullScreen = () => {
@@ -728,6 +850,17 @@ const POS = ({ showQR }) => {
 
   return (
     <div className="pos-container" style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", zIndex: 1000, background: "var(--bg)" }}>
+      {/* ── SCAN FLASH OVERLAY ── */}
+      {scanFlash && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(37, 99, 235, 0.15)", zIndex: 99999,
+          pointerEvents: "none", border: "10px solid var(--primary)",
+          animation: "flash 0.3s forwards"
+        }}>
+          <style>{`@keyframes flash { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }`}</style>
+        </div>
+      )}
 
       {/* ── REFRESH OVERLAY ── */}
       {isRefreshing && (
@@ -754,6 +887,47 @@ const POS = ({ showQR }) => {
           onResume={resumeBill}
           onClose={() => { setShowHeldBills(false); refreshHeldCount(); }}
         />
+      )}
+
+      {/* ── CAMERA SCANNER MODAL ── */}
+      {isScannerOpen && (
+        <div className="modal-overlay" onClick={() => setIsScannerOpen(false)}>
+          <div className="invoice-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 450, padding: 30 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <QrCode size={24} color="var(--primary)" /> 
+                Scan Product Barcode
+              </h3>
+              <button onClick={() => setIsScannerOpen(false)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#94a3b8' }}>×</button>
+            </div>
+            
+            <div id="pos-reader" style={{ width: '100%', borderRadius: 12, overflow: 'hidden', border: '2px solid var(--border)', background: '#000' }}></div>
+            
+            <div style={{ marginTop: 20, padding: 15, background: '#f8fafc', borderRadius: 10, textAlign: 'center' }}>
+               <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                  Scanner Status
+               </div>
+               <div style={{ fontSize: '14px', fontWeight: '800', color: scanStatus.includes('✅') ? '#059669' : '#2563eb' }}>
+                  {scanStatus}
+               </div>
+               
+               {detectedBarcode && (
+                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '10px', color: '#94a3b8' }}>DETECTED NUMBER</div>
+                    <div style={{ fontSize: '18px', fontWeight: '900', color: '#1e293b', letterSpacing: '1px' }}>{detectedBarcode}</div>
+                 </div>
+               )}
+            </div>
+
+            <button 
+              onClick={() => setIsScannerOpen(false)} 
+              className="btn-outline" 
+              style={{ width: '100%', marginTop: 20, height: 45, fontWeight: 700 }}
+            >
+              Cancel Scanning
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── CHECKOUT MODAL ───── */}
@@ -872,21 +1046,33 @@ const POS = ({ showQR }) => {
                     )}
 
                     {paymentMode === "UPI" && (
-                      <div style={{ display: "flex", alignItems: "center", gap: "20px", backgroundColor: "#f8fafc", padding: "20px", borderRadius: "8px" }}>
-                        <div style={{ width: "80px", height: "80px", background: "#e2e8f0", display: "flex", justifyContent: "center", alignItems: "center", borderRadius: "8px" }}>
-                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                            <rect x="7" y="7" width="3" height="3"></rect>
-                            <rect x="14" y="7" width="3" height="3"></rect>
-                            <rect x="7" y="14" width="3" height="3"></rect>
-                            <rect x="14" y="14" width="3" height="3"></rect>
-                          </svg>
+                      <div style={{ textAlign: 'center', backgroundColor: "#f8fafc", padding: "20px", borderRadius: "8px" }}>
+                        <div style={{ fontWeight: "bold", color: "#0f172a", fontSize: "1.2rem", marginBottom: 15 }}>Scan to Pay ₹{grandTotal}</div>
+                        
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
+                  {/* Dynamic QR */}
+                  {settings.upiId ? (
+                    <div style={{ background: '#fff', padding: 10, borderRadius: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+                      <img 
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${settings.upiId}&pn=${settings.storeName || 'Shop'}&am=${grandTotal}&cu=INR`)}`}
+                        alt="Dynamic UPI QR"
+                        style={{ width: 180, height: 180 }}
+                      />
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 8 }}>DYNAMIC AMOUNT QR</div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: 20, border: '2px dashed #cbd5e1', borderRadius: 12, color: '#64748b', fontSize: 12, maxWidth: 200 }}>
+                      UPI ID not set in Settings.<br/>Cannot generate dynamic QR.
+                    </div>
+                  )}
+                </div>
+
+                        <div style={{ marginTop: 20, padding: 12, background: '#fff', borderRadius: 8, fontSize: 13, color: '#1e293b', border: '1px solid #e2e8f0' }}>
+                           VPA: <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{settings.upiId || 'Not Configured'}</span>
                         </div>
-                        <div>
-                          <div style={{ fontWeight: "bold", color: "#0f172a", fontSize: "1.1rem" }}>Scan Shop QR</div>
-                          <div style={{ fontSize: "0.9rem", color: "#64748b", marginTop: "5px" }}>
-                            Validate the exact payment of <b>₹{grandTotal}</b> on your phone before confirming this bill.
-                          </div>
+                        
+                        <div style={{ fontSize: "0.9rem", color: "#64748b", marginTop: "15px" }}>
+                          Ask customer to scan and verify the amount <b>₹{grandTotal}</b>.
                         </div>
                       </div>
                     )}
@@ -894,9 +1080,15 @@ const POS = ({ showQR }) => {
 
                   <div style={{ display: "flex", justifyContent: "space-between", gap: "15px" }}>
                     <button onClick={() => setCheckoutStep(1)} className="btn-outline">Back</button>
-                    <button onClick={finalizeInvoice} className="btn-primary" style={{ flex: 1, fontSize: "1.05rem" }}>
-                      Complete Payment ✓
-                    </button>
+                    {paymentMode === "UPI" ? (
+                      <button onClick={finalizeInvoice} className="btn-primary" style={{ flex: 1, fontSize: "1.05rem", background: '#059669' }}>
+                        ✅ Payment Done & Generate Bill
+                      </button>
+                    ) : (
+                      <button onClick={finalizeInvoice} className="btn-primary" style={{ flex: 1, fontSize: "1.05rem" }}>
+                        Complete Payment ✓
+                      </button>
+                    )}
                   </div>
                 </>
               )}
@@ -1021,6 +1213,13 @@ const POS = ({ showQR }) => {
               <div style={{ fontSize: 12, color: "var(--text-4)" }}>Terminal Active · Full Screen Mode</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
+              <button 
+                onClick={() => setIsScannerOpen(true)} 
+                className="btn-primary" 
+                style={{ padding: "6px 14px", fontSize: 11, background: "#059669", display: 'flex', gap: '6px', alignItems: 'center' }}
+              >
+                <Camera size={14} /> Scan Barcode
+              </button>
               <button onClick={handleLocalRefresh} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>🔄 Refresh</button>
               <button onClick={() => { setTerminalActive(false); if(document.exitFullscreen) document.exitFullscreen(); }} className="btn-outline" style={{ padding: "6px 12px", fontSize: 11 }}>Exit Terminal</button>
             </div>

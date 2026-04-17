@@ -363,7 +363,7 @@ ipcMain.handle("get-categories", async () => {
   return db.prepare("SELECT * FROM categories").all();
 });
 
-// 🟢 ADD PRODUCT (with expiry_date)
+// 🟢 ADD PRODUCT (with expiry_date and weight)
 ipcMain.handle("add-product", async (event, product) => {
   const {
     name,
@@ -378,13 +378,15 @@ ipcMain.handle("add-product", async (event, product) => {
     barcode,
     expiry_date,
     image,
-    default_discount
+    default_discount,
+    weight,
+    brand
   } = product;
 
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
@@ -398,15 +400,17 @@ ipcMain.handle("add-product", async (event, product) => {
     barcode ? String(barcode) : null,
     expiry_date || null,
     image || null,
-    default_discount || 0
+    default_discount || 0,
+    weight || null,
+    brand || null
   );
 
   return { message: "Product added" };
 });
 
-// 🟢 EDIT PRODUCT (with expiry_date)
+// 🟢 EDIT PRODUCT (with expiry_date and weight)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount } = product;
+  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand } = product;
 
   // Fetch current to optionally reset flags if restocked
   const oldP = db.prepare("SELECT quantity, expiry_date FROM products WHERE id=?").get(id);
@@ -415,12 +419,12 @@ ipcMain.handle("edit-product", async (event, product) => {
 
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?,
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?, weight=?, brand=?,
         flag_low_stock = CASE WHEN ? THEN 0 ELSE flag_low_stock END,
         flag_out_of_stock = CASE WHEN ? THEN 0 ELSE flag_out_of_stock END,
         flag_expiry = CASE WHEN ? THEN 0 ELSE flag_expiry END
     WHERE id=?
-  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, default_discount || 0, resetStock ? 1 : 0, resetStock ? 1 : 0, resetExpiry ? 1 : 0, id);
+  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, default_discount || 0, weight || null, brand || null, resetStock ? 1 : 0, resetStock ? 1 : 0, resetExpiry ? 1 : 0, id);
   return { message: "Product updated" };
 });
 

@@ -17,6 +17,7 @@ const DEFAULTS = {
   supabaseUrl: "",
   supabaseKey: "",
   billLogo: "",
+  upiId: "",
 };
 
 function SettingRow({ label, children, hint }) {
@@ -180,6 +181,13 @@ export default function Settings() {
 
         <SettingRow label="Invoice Prefix">
           <input style={{ ...inputStyle, width: 100 }} value={cfg.invoicePrefix} onChange={e => set("invoicePrefix", e.target.value.toUpperCase())} placeholder="INV" maxLength={6} />
+        </SettingRow>
+
+        {/* ── UPI PAYMENT SETTINGS ── */}
+        <SectionTitle icon="" title="UPI Payment (QR Code)" />
+        
+        <SettingRow label="UPI ID (VPA)" hint="Used to generate dynamic QR codes for customers to pay. (e.g. shopname@okicici)">
+          <input style={inputStyle} value={cfg.upiId} onChange={e => set("upiId", e.target.value)} placeholder="yourname@upi" />
         </SettingRow>
 
         {/* ── LOGO FOR BILL ── */}

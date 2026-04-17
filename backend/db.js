@@ -93,6 +93,8 @@ try { db.prepare("ALTER TABLE products ADD COLUMN flag_low_stock INTEGER DEFAULT
 try { db.prepare("ALTER TABLE products ADD COLUMN flag_out_of_stock INTEGER DEFAULT 0").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN flag_expiry INTEGER DEFAULT 0").run(); } catch (e) { }
 try { db.prepare("ALTER TABLE products ADD COLUMN flag_dead_stock INTEGER DEFAULT 0").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN weight TEXT").run(); } catch (e) { }
+try { db.prepare("ALTER TABLE products ADD COLUMN brand TEXT").run(); } catch (e) { }
 
 // Migration: If gst_rate is 0 and category_id exists, copy gst from categories
 try {

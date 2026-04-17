@@ -66,7 +66,8 @@ const ProductList = () => {
         gst_rate: Number(editingProduct.gst_rate) || 0,
         product_code: editingProduct.product_code || null,
         price_type: editingProduct.price_type || 'exclusive',
-        default_discount: Number(editingProduct.default_discount) || 0
+        default_discount: Number(editingProduct.default_discount) || 0,
+        weight: editingProduct.weight || null
       });
       setEditModalOpen(false);
       load();
@@ -264,8 +265,16 @@ const ProductList = () => {
           <div className="invoice-modal" onClick={e => e.stopPropagation()}>
             <h2 style={{ marginBottom: '20px', color: '#0f172a' }}>Edit Product</h2>
             <div className="form-group">
-              <label className="form-label">Product Name</label>
-              <input className="form-input" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
+              <div style={{ display: 'flex', gap: '15px' }}>
+                <div style={{ flex: 2 }}>
+                  <label className="form-label">Product Name</label>
+                  <input className="form-input" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="form-label">Weight/Size</label>
+                  <input className="form-input" value={editingProduct.weight || ""} onChange={e => setEditingProduct({...editingProduct, weight: e.target.value})} placeholder="e.g. 50g" />
+                </div>
+              </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
               <div className="form-group">
@@ -431,6 +440,7 @@ const ProductList = () => {
                             )}
                             <div>
                                {p.name}
+                               {p.weight && <span style={{ color: '#64748b', fontWeight: 500 }}> ({p.weight})</span>}
                                {expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}
                             </div>
                           </div>
