@@ -23,6 +23,7 @@ const Store = {
 
 const Label = ({ children }) => <Text style={styles.l}>{children}</Text>;
 const ErrBox = ({ msg }) => <Text style={styles.eb}>⚠️ {msg}</Text>;
+const SuccessBox = ({ msg }) => <Text style={styles.sb}>✅ {msg}</Text>;
 
 function OwnerApp() {
   const [screen, setScreen] = useState('loading');
@@ -30,10 +31,19 @@ function OwnerApp() {
   const [password, setPassword] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [shopId, setShopId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [deviceId, setDeviceId] = useState('');
+
+  // New state for Shop ID input, Forgot Password, and OTP
+  const [shopIdInput, setShopIdInput] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetAccessToken, setResetAccessToken] = useState('');
 
   const pollRef = useRef(null);
   const [dashData, setDashData] = useState(null);
@@ -73,7 +83,7 @@ function OwnerApp() {
 
   useEffect(() => {
     const init = async () => {
-      const timeout = setTimeout(() => { if(screen === 'loading') setScreen('login'); }, 6000);
+      const timeout = setTimeout(() => { if(screen === 'loading') setScreen('start'); }, 6000);
       let did = await Store.get('iva_device_id') || 'dev-' + Math.random().toString(36).substr(2, 8);
       Store.set('iva_device_id', did); setDeviceId(did);
 
@@ -85,11 +95,21 @@ function OwnerApp() {
           const activeDevices = await sbFetch('paired_devices', 'GET', null, `?shop_id=eq.${sid}&device_id=eq.${did}&is_active=eq.true`);
           clearTimeout(timeout);
           if (activeDevices && activeDevices.length > 0) { setScreen('dashboard'); }
-          else { setScreen('login'); }
-        } catch { clearTimeout(timeout); setScreen('login'); }
-      } else { clearTimeout(timeout); setScreen('login'); }
+          else { setScreen('start'); }
+        } catch { clearTimeout(timeout); setScreen('start'); }
+      } else { clearTimeout(timeout); setScreen('start'); }
     };
     init();
+
+    const handleWebMsg = (e) => {
+      if (e.data === 'logout') {
+        Store.del('iva_paired'); Store.del('iva_shop_id'); setScreen('start');
+      }
+    };
+    if (Platform.OS === 'web') {
+      window.addEventListener('message', handleWebMsg);
+      return () => window.removeEventListener('message', handleWebMsg);
+    }
   }, []);
 
   const fetchDashboardData = async () => {
@@ -112,41 +132,160 @@ function OwnerApp() {
     }
   }, [screen, shopId]);
 
-  const login = async () => {
+  // ────────────────────────────────────────────
+  // AUTH FLOW 1: Sign In (new user → Shop ID → Pair Key)
+  // ────────────────────────────────────────────
+  const signIn = async () => {
+    if (!email || !password) { setError('Enter credentials'); return; }
+    setLoading(true); setError('');
+    try {
+      await sbAuth('token?grant_type=password', { email: email.trim().toLowerCase(), password });
+      setScreen('enter_shop_id');
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  // ────────────────────────────────────────────
+  // SHOP ID ENTRY → auto-generate pairing code
+  // ────────────────────────────────────────────
+  const submitShopId = async () => {
+    const sid = shopIdInput.trim();
+    if (!sid) { setError('Enter your Shop ID'); return; }
+    setLoading(true); setError('');
+    try {
+      // Validate the shop exists
+      const shops = await sbFetch('shops', 'GET', null, `?id=eq.${sid}&select=id`);
+      if (!shops || shops.length === 0) { setError('Invalid Shop ID. Please check and try again.'); setLoading(false); return; }
+      setShopId(sid);
+      // Automatically generate pairing code
+      await autoGeneratePairingCode(sid);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  // ────────────────────────────────────────────
+  // AUTH FLOW 2: Login (returning user → dashboard or re-pair)
+  // ────────────────────────────────────────────
+  const quickLogin = async () => {
     if (!email || !password) { setError('Enter credentials'); return; }
     setLoading(true); setError('');
     try {
       await sbAuth('token?grant_type=password', { email: email.trim().toLowerCase(), password });
       const shops = await sbFetch('shops', 'GET', null, `?owner_email=eq.${email.trim().toLowerCase()}&select=id`);
-      if (shops && shops.length > 0) { setShopId(shops[0].id); setScreen('pairing_jump'); }
-      else { setError('No shop found for this account.'); }
+      if (!shops || shops.length === 0) { setError('No shop found for this account.'); setLoading(false); return; }
+      const sid = shops[0].id;
+      setShopId(sid);
+      // Check if this device is already paired
+      const activeDevices = await sbFetch('paired_devices', 'GET', null, `?shop_id=eq.${sid}&device_id=eq.${deviceId}&is_active=eq.true`);
+      if (activeDevices && activeDevices.length > 0) {
+        // Device already paired — go straight to dashboard
+        Store.set('iva_paired', 'true');
+        Store.set('iva_shop_id', sid);
+        setScreen('dashboard');
+      } else {
+        // Device not paired — generate pairing code
+        await autoGeneratePairingCode(sid);
+      }
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
 
-  const generatePairingCode = async () => {
-    if (!shopId) { setError('Shop ID required'); return; }
-    setLoading(true); setError('');
+  // ────────────────────────────────────────────
+  // AUTO PAIR: Generate code + start polling
+  // ────────────────────────────────────────────
+  const autoGeneratePairingCode = async (sid) => {
     try {
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      await sbFetch('pairing_codes', 'POST', { shop_id: shopId, code, device_id: deviceId, status: 'pending', expires_at: new Date(Date.now() + 10 * 60000).toISOString() });
-      setPairingCode(code); setScreen('pairing');
+      await sbFetch('pairing_codes', 'POST', { shop_id: sid, code, device_id: deviceId, status: 'pending', expires_at: new Date(Date.now() + 10 * 60000).toISOString() });
+      setPairingCode(code);
+      setScreen('pairing');
+      // Clear any old poll
+      if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
         try {
-          const data = await sbFetch('pairing_codes', 'GET', null, `?shop_id=eq.${shopId}&code=eq.${code}&select=status`);
+          const data = await sbFetch('pairing_codes', 'GET', null, `?shop_id=eq.${sid}&code=eq.${code}&select=status`);
           if (data && data[0] && data[0].status === 'used') {
             clearInterval(pollRef.current);
-            const existing = await sbFetch('paired_devices', 'GET', null, `?shop_id=eq.${shopId}&device_id=eq.${deviceId}`);
+            const existing = await sbFetch('paired_devices', 'GET', null, `?shop_id=eq.${sid}&device_id=eq.${deviceId}`);
             if (existing && existing.length > 0) { await sbFetch('paired_devices', 'PATCH', { is_active: true, last_seen: new Date().toISOString() }, `?id=eq.${existing[0].id}`); }
-            else { await sbFetch('paired_devices', 'POST', { shop_id: shopId, device_id: deviceId, device_name: Platform.OS, is_active: true }); }
-            Store.set('iva_paired', 'true'); Store.set('iva_shop_id', shopId); setScreen('dashboard');
+            else { await sbFetch('paired_devices', 'POST', { shop_id: sid, device_id: deviceId, device_name: Platform.OS, is_active: true }); }
+            Store.set('iva_paired', 'true'); Store.set('iva_shop_id', sid); setScreen('dashboard');
           }
         } catch { }
       }, 3000);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  // ────────────────────────────────────────────
+  // FORGOT PASSWORD FLOW
+  // ────────────────────────────────────────────
+  const sendResetOtp = async () => {
+    const em = resetEmail.trim().toLowerCase();
+    if (!em) { setError('Enter your email address'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: em }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error_description || data.message || 'Failed to send reset code.');
+      }
+      setScreen('verify_otp');
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
 
+  const verifyOtp = async () => {
+    if (!otp.trim()) { setError('Enter the verification code'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/verify`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'recovery', token: otp.trim(), email: resetEmail.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Invalid or expired code');
+      
+      // Successfully verified! Now we have a session to update the password.
+      setResetAccessToken(data.access_token);
+      setScreen('reset_password');
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const updatePassword = async () => {
+    if (!newPassword || !confirmPassword) { setError('Fill in both fields'); return; }
+    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
+    if (newPassword.length < 6) { setError('Password must be at least 6 characters'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${resetAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      if (!res.ok) { const data = await res.json(); throw new Error(data.message || 'Failed to update password'); }
+      // Reset all forgot-password state
+      setOtp(''); setNewPassword(''); setConfirmPassword(''); setResetEmail(''); setResetAccessToken('');
+      setSuccess('Password updated successfully! You can now login.');
+      setScreen('quick_login');
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  // ────────────────────────────────────────────
+  // DASHBOARD HTML (unchanged)
+  // ────────────────────────────────────────────
   const buildDashboardHtml = (stats, ts, shopInfo) => {
     const json = JSON.stringify({ stats, ts, shopId, shop: shopInfo, deviceId }).replace(/`/g, '\\`').replace(/\$/g, '\\$');
     return `<!DOCTYPE html><html><head>
@@ -195,7 +334,7 @@ body{font-family:'Lexend',sans-serif;background:var(--bg);color:var(--text);heig
 var D = ${json}; var s = D.stats || {}; var currentProdTab = "ALL";
 function toggleSidebar(){ document.getElementById("sidebar").classList.toggle("on"); }
 function closeM(){ document.getElementById("modal").style.display="none"; }
-function safeLogout(){ if(confirm("Logout from Innoaivators?")) { if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage("logout"); } } }
+function safeLogout(){ if(confirm("Logout from Innoaivators?")) { if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage("logout"); } else { window.parent.postMessage("logout", "*"); } } }
 
 function handleAiSend(){
   var inp = document.getElementById("ai-inp"); if(!inp || !inp.value.trim()) return;
@@ -235,7 +374,7 @@ function render(){
     '<div class="lbl" style="margin-top:25px;color:var(--orange)">⚠️ EXPIRY TRACKER</div>' + ((s.expiringProducts||[]).map(p=>'<div class="item" style="border-left:4px solid var(--orange)"><div>'+p.name+'</div><div style="color:var(--orange);font-weight:800">EXP: '+getExp(p)+'</div></div>').join("") || '<p style="color:var(--text-s)">No near-term expiries.</p>') +
     '</div></div>';
   var ai = '<div id="pg-ai" class="pg">'+h("AI Assistant")+'<div class="cont" style="display:flex;flex-direction:column;height:calc(100vh - 100px)"><div id="ai-chat-box" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px"><div class="ai-msg ai-l">Hello Captain! I am your business consultant. How is Indian Mart doing today?</div></div><div class="ai-input-wrap"><input type="text" id="ai-inp" class="ai-input" placeholder="Ask about sales, profit..."><button class="ai-send" data-action="ai-send">SEND</button></div></div></div>';
-  var pf = '<div id="pg-prof" class="pg">'+h("Control Center")+'<div class="cont"><div style="text-align:center;margin-bottom:30px"><div style="width:72px;height:72px;background:linear-gradient(135deg,#1e1e2d 0%,#0a0a0f 100%);border:1px solid var(--border);border-radius:24px;margin:0 auto 15px;display:flex;align-items:center;justify-content:center;font-size:32px">🏢</div><h2 style="font-weight:800;letter-spacing:1px">'+(D.shop?.name||"INDIAN MART")+'</h2><div style="color:var(--accent);font-size:12px;font-weight:800;margin-top:5px">'+D.shopId+'</div></div><div class="card"><div style="margin-bottom:15px"><div class="lbl">Business Owner</div><div style="font-weight:600">'+(D.shop?.owner_name || "N/A")+'</div></div><div style="margin-bottom:15px"><div class="lbl">Registered Address</div><div style="font-weight:600;font-size:13px;line-height:1.5">'+(D.shop?.address || s.settings?.storeAddress || "N/A")+'</div></div><div><div class="lbl">GST Identification Number</div><div style="font-weight:800;color:var(--green)">'+(D.shop?.gst_number || s.settings?.gstNumber || "N/A")+'</div></div></div><button data-action="logout" style="width:100%;text-align:center;background:#1a1a24;color:var(--red);border:1px solid #301010;padding:20px;border-radius:20px;font-weight:800;cursor:pointer;margin-top:20px">TERMINATE SESSION</button></div></div>';
+  var pf = '<div id="pg-prof" class="pg">'+h("Control Center")+'<div class="cont"><div style="text-align:center;margin-bottom:30px"><div style="width:72px;height:72px;background:linear-gradient(135deg,#1e1e2d 0%,#0a0a0f 100%);border:1px solid var(--border);border-radius:24px;margin:0 auto 15px;display:flex;align-items:center;justify-content:center;font-size:32px">🏢</div><h2 style="font-weight:800;letter-spacing:1px">'+(D.shop?.name||"INDIAN MART")+'</h2><div style="color:var(--accent);font-size:12px;font-weight:800;margin-top:5px">'+D.shopId+'</div></div><div class="card"><div style="margin-bottom:15px"><div class="lbl">Business Owner</div><div style="font-weight:600">'+(D.shop?.owner_name || "N/A")+'</div></div><div style="margin-bottom:15px"><div class="lbl">Registered Address</div><div style="font-weight:600;font-size:13px;line-height:1.5">'+(D.shop?.address || s.settings?.storeAddress || "N/A")+'</div></div><div><div class="lbl">GST Identification Number</div><div style="font-weight:800;color:var(--green)">'+(D.shop?.gst_number || s.settings?.gstNumber || "N/A")+'</div></div></div><button data-action="logout" style="width:100%;text-align:center;background:#1a1a24;color:var(--red);border:1px solid #301010;padding:20px;border-radius:20px;font-weight:800;cursor:pointer;margin-top:20px">LOGOUT</button></div></div>';
 
   document.getElementById("app").innerHTML = ov + it + bl + al + ai + pf;
   renderItems();
@@ -268,6 +407,170 @@ render();
 </script></body></html>`;
   };
 
+  // ────────────────────────────────────────────
+  // RENDER: First Page (Start Screen)
+  // ────────────────────────────────────────────
+  const renderStart = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}>
+        <Text style={styles.bt}>INNO<Text style={{color:'#6366f1'}}>AIVATORS</Text></Text>
+        <Text style={styles.h}>Owner Access</Text>
+      </View>
+      <View style={styles.cg}>
+        <TouchableOpacity style={styles.pb} onPress={() => { setError(''); setSuccess(''); setScreen('login'); }}>
+          <Text style={styles.pt}>Sign In</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={{marginTop: 20, alignSelf: 'center'}} 
+          onPress={() => { setError(''); setSuccess(''); setScreen('quick_login'); }}
+        >
+          <Text style={{color:'#888', fontSize: 13, fontWeight: '700'}}>
+            Already have an account? <Text style={{color: '#6366f1'}}>Login</Text>
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Sign In Page (Internal Email + Pass for Sign In Flow)
+  // ────────────────────────────────────────────
+  const renderSignIn = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}>
+        <Text style={styles.bt}>INNO<Text style={{color:'#6366f1'}}>AIVATORS</Text></Text>
+        <Text style={styles.h}>Sign In</Text>
+      </View>
+      <View style={styles.cg}>
+        <Label>Email</Label>
+        <TextInput style={styles.i} value={email} onChangeText={setEmail} placeholder="owner@email.com" placeholderTextColor="#444" autoCapitalize="none" />
+        <Label>Password</Label>
+        <TextInput style={styles.i} value={password} onChangeText={setPassword} placeholder="••••••••" placeholderTextColor="#444" secureTextEntry />
+        {error ? <ErrBox msg={error} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={signIn}>
+          <Text style={styles.pt}>{loading ? 'Authenticating...' : 'Sign In'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.ob} onPress={() => setScreen('start')}>
+          <Text style={styles.ot}>Back</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Quick Login Page (For Existing Users)
+  // ────────────────────────────────────────────
+  const renderQuickLogin = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}>
+        <Text style={styles.bt}>INNO<Text style={{color:'#6366f1'}}>AIVATORS</Text></Text>
+        <Text style={styles.h}>Login</Text>
+      </View>
+      <View style={styles.cg}>
+        <Label>Email</Label>
+        <TextInput style={styles.i} value={email} onChangeText={setEmail} placeholder="owner@email.com" placeholderTextColor="#444" autoCapitalize="none" />
+        <Label>Password</Label>
+        <TextInput style={styles.i} value={password} onChangeText={setPassword} placeholder="••••••••" placeholderTextColor="#444" secureTextEntry />
+        {error ? <ErrBox msg={error} /> : null}
+        {success ? <SuccessBox msg={success} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={quickLogin}>
+          <Text style={styles.pt}>{loading ? 'Logging In...' : 'Login'}</Text>
+        </TouchableOpacity>
+        <View style={{flexDirection:'row', justifyContent:'center', marginTop: 16}}>
+          <TouchableOpacity onPress={() => { setError(''); setSuccess(''); setResetEmail(email); setScreen('forgot'); }}>
+            <Text style={{color:'#888', fontSize:13, fontWeight:'700'}}>Forgot Password?</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={styles.ob} onPress={() => setScreen('start')}>
+          <Text style={styles.ot}>Back</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Pairing screen (auto-generated code shown)
+  // ────────────────────────────────────────────
+  const renderPairing = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}><Text style={styles.h}>Verification Code</Text><Text style={styles.sh}>Enter this code in your POS Desktop under Mobile Sync.</Text></View>
+      <View style={styles.cg}>
+        <Text style={{fontSize: 48, fontWeight: '900', color: '#6366f1', letterSpacing: 8, textAlign: 'center', marginVertical: 20}}>{pairingCode}</Text>
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={{color: '#888', textAlign: 'center', marginTop: 15}}>Waiting for desktop POS to approve...</Text>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Shop ID entry screen
+  // ────────────────────────────────────────────
+  const renderEnterShopId = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}><Text style={styles.h}>Enter Shop ID</Text><Text style={styles.sh}>Enter the Shop ID provided during registration to link your device.</Text></View>
+      <View style={styles.cg}>
+        <Label>Shop ID</Label>
+        <TextInput style={styles.i} value={shopIdInput} onChangeText={setShopIdInput} placeholder="e.g. shop_abc123" placeholderTextColor="#444" autoCapitalize="none" />
+        {error ? <ErrBox msg={error} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={submitShopId}><Text style={styles.pt}>{loading ? 'Verifying...' : 'Continue'}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.ob} onPress={() => { setError(''); setScreen('login'); }}><Text style={styles.ot}>Back</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Forgot Password - enter email
+  // ────────────────────────────────────────────
+  const renderForgotPassword = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}><Text style={styles.h}>Forgot Password</Text><Text style={styles.sh}>Enter your registered email. We'll send a verification code.</Text></View>
+      <View style={styles.cg}>
+        <Label>Email</Label>
+        <TextInput style={styles.i} value={resetEmail} onChangeText={setResetEmail} placeholder="owner@email.com" placeholderTextColor="#444" autoCapitalize="none" keyboardType="email-address" />
+        {error ? <ErrBox msg={error} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={sendResetOtp}><Text style={styles.pt}>{loading ? 'Sending...' : 'Send Verification Code'}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.ob} onPress={() => { setError(''); setScreen('quick_login'); }}><Text style={styles.ot}>Back</Text></TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Verify OTP
+  // ────────────────────────────────────────────
+  const renderVerifyOtp = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}><Text style={styles.h}>Enter Verification Code</Text><Text style={styles.sh}>Check your email for a 6-digit code sent to {resetEmail}</Text></View>
+      <View style={styles.cg}>
+        <Label>Verification Code</Label>
+        <TextInput style={[styles.i, {textAlign: 'center', fontSize: 24, letterSpacing: 8}]} value={otp} onChangeText={setOtp} placeholder="000000" placeholderTextColor="#444" keyboardType="number-pad" maxLength={6} />
+        {error ? <ErrBox msg={error} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={verifyOtp}><Text style={styles.pt}>{loading ? 'Verifying...' : 'Verify Code'}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.ob} onPress={() => { setError(''); setScreen('forgot'); }}><Text style={styles.ot}>Resend Code</Text></TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Reset Password (new + confirm)
+  // ────────────────────────────────────────────
+  const renderResetPassword = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}><Text style={styles.h}>Set New Password</Text><Text style={styles.sh}>Create a strong password for your account.</Text></View>
+      <View style={styles.cg}>
+        <Label>New Password</Label>
+        <TextInput style={styles.i} value={newPassword} onChangeText={setNewPassword} placeholder="••••••••" placeholderTextColor="#444" secureTextEntry />
+        <Label>Confirm Password</Label>
+        <TextInput style={styles.i} value={confirmPassword} onChangeText={setConfirmPassword} placeholder="••••••••" placeholderTextColor="#444" secureTextEntry />
+        {error ? <ErrBox msg={error} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={updatePassword}><Text style={styles.pt}>{loading ? 'Updating...' : 'Update Password'}</Text></TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  // ────────────────────────────────────────────
+  // RENDER: Dashboard (unchanged)
+  // ────────────────────────────────────────────
   const renderDashboard = () => {
     if (dashLoading && !dashData) return <View style={{ flex: 1, justifyContent: 'center', backgroundColor: '#020205' }}><ActivityIndicator size="large" color="#6366f1" /></View>;
     if (dashError) return <View style={styles.sw}><ErrBox msg={dashError} /><TouchableOpacity style={styles.pb} onPress={fetchDashboardData}><Text style={styles.pt}>Retry</Text></TouchableOpacity></View>;
@@ -278,7 +581,7 @@ render();
           <iframe srcDoc={html} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#020205' }} title="Dashboard" />
         ) : (
           RNWebView ? (
-            <RNWebView source={{ html }} style={{ flex: 1, backgroundColor: '#020205' }} onMessage={(e) => { if (e.nativeEvent.data === 'logout') { Store.del('iva_paired'); Store.del('iva_shop_id'); setScreen('login'); } }} />
+            <RNWebView source={{ html }} style={{ flex: 1, backgroundColor: '#020205' }} onMessage={(e) => { if (e.nativeEvent.data === 'logout') { Store.del('iva_paired'); Store.del('iva_shop_id'); setScreen('start'); } }} />
           ) : (
             <View style={{flex:1, justifyContent:'center', alignItems:'center'}}><Text style={{color:'white'}}>System initializing...</Text></View>
           )
@@ -290,19 +593,15 @@ render();
   return (
     <SafeAreaView style={styles.c}><StatusBar barStyle="light-content" backgroundColor="#020205" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        {screen === 'loading' && <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator size="large" color="#6366f1" /><TouchableOpacity style={{marginTop:20, alignSelf:'center'}} onPress={()=>setScreen('login')}><Text style={{color:'#6366f1'}}>Jump to Login</Text></TouchableOpacity></View>}
-        {screen === 'login' && (
-          <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
-            <View style={styles.bh}><Text style={styles.bt}>INNO<Text style={{color:'#6366f1'}}>AIVATORS</Text></Text><Text style={styles.h}>Owner Access</Text></View>
-            <View style={styles.cg}><Label>Email</Label><TextInput style={styles.i} value={email} onChangeText={setEmail} placeholder="owner@email.com" placeholderTextColor="#444" autoCapitalize="none" />
-            <Label>Password</Label><TextInput style={styles.i} value={password} onChangeText={setPassword} placeholder="••••••••" placeholderTextColor="#444" secureTextEntry />
-            {error ? <ErrBox msg={error} /> : null}<TouchableOpacity style={styles.pb} disabled={loading} onPress={login}><Text style={styles.pt}>{loading ? 'Authenticating...' : 'Sign In'}</Text></TouchableOpacity>
-            </View>
-          </ScrollView>
-        )}
-        {screen === 'shopId' && renderShopId()}
-        {screen === 'pairing_jump' && renderPairingJump()}
+        {screen === 'loading' && <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator size="large" color="#6366f1" /><TouchableOpacity style={{marginTop:20, alignSelf:'center'}} onPress={()=>setScreen('start')}><Text style={{color:'#6366f1'}}>Jump to Start</Text></TouchableOpacity></View>}
+        {screen === 'start' && renderStart()}
+        {screen === 'login' && renderSignIn()}
+        {screen === 'quick_login' && renderQuickLogin()}
+        {screen === 'enter_shop_id' && renderEnterShopId()}
         {screen === 'pairing' && renderPairing()}
+        {screen === 'forgot' && renderForgotPassword()}
+        {screen === 'verify_otp' && renderVerifyOtp()}
+        {screen === 'reset_password' && renderResetPassword()}
         {screen === 'dashboard' && renderDashboard()}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -326,4 +625,5 @@ const styles = StyleSheet.create({
   ob: { padding: 18, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#151520', marginTop: 12 },
   ot: { color: '#888', fontWeight: '700' },
   eb: { color: '#ef4444', fontSize: 12, marginTop: 16, textAlign: 'center', backgroundColor: 'rgba(239,68,68,0.1)', padding: 12, borderRadius: 12 },
+  sb: { color: '#22c55e', fontSize: 12, marginTop: 16, textAlign: 'center', backgroundColor: 'rgba(34,197,94,0.1)', padding: 12, borderRadius: 12 },
 });

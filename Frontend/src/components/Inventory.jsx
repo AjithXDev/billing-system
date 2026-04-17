@@ -170,18 +170,21 @@ const Inventory = () => {
             }
 
             const rawName = product.product_name || product.product_name_en || product.generic_name || "";
-            if (rawName) {
-              updates.name = product.brands ? `${product.brands} ${rawName}` : rawName;
-            } else if (product.brands) {
-              updates.name = product.brands;
+            let baseName = product.brands ? `${product.brands} ${rawName}` : rawName;
+            if (!baseName && product.brands) baseName = product.brands;
+
+            // Integrates weight/size directly into the name as requested
+            let weight = product.quantity || product.serving_size || "";
+            if (weight && baseName) {
+              updates.name = `${baseName} (${weight})`;
+            } else if (baseName) {
+              updates.name = baseName;
+            } else if (weight) {
+              updates.name = `Product (${weight})`;
             }
 
-            // 2. WEIGHT / SIZE
-            if (product.quantity) {
-              updates.weight = product.quantity;
-            } else if (product.serving_size) {
-              updates.weight = product.serving_size;
-            }
+            // Still save weight to DB field for data integrity, even though UI input is removed
+            if (weight) updates.weight = weight;
 
             // 3. IMAGE
             if (product.image_front_url || product.image_url || product.image_small_url) {
@@ -290,16 +293,8 @@ const Inventory = () => {
                </div>
                <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px' }}>
                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ display: 'flex', gap: '15px' }}>
-                      <div style={{ flex: 2 }}>
-                        <label className="form-label">Product Name</label>
-                        <input className="form-input" name="name" value={form.name} onChange={handleChange} required autoFocus />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <label className="form-label">Weight/Size</label>
-                        <input className="form-input" name="weight" value={form.weight} onChange={handleChange} placeholder="e.g. (50g)" />
-                      </div>
-                    </div>
+                    <label className="form-label">Product Name</label>
+                    <input className="form-input" name="name" value={form.name} onChange={handleChange} placeholder="e.g. Dairy Milk (20g)" required autoFocus />
                  </div>
                   <div className="form-group">
                     <label className="form-label">Category</label>
