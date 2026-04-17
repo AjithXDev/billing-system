@@ -15,7 +15,7 @@
   },
   "build": {
     "appId": "com.smart.billing",
-    "productName": "Innoaivators billing",
+    "productName": "Innoaivators Billing System",
     "copyright": "Copyright © 2026 AjithXDev",
     "directories": {
       "output": "dist-electron"
@@ -31,12 +31,12 @@
         "nsis",
         "portable"
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.png"
     },
     "mac": {
       "target": "dmg",
       "category": "public.app-category.business",
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.png"
     },
     "linux": {
       "target": [
@@ -51,7 +51,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Innoaivators billing"
+      "shortcutName": "Innoaivators Billing System"
     }
   },
   "keywords": [],

@@ -224,7 +224,7 @@ function createWindow() {
     fullscreen: true,
     frame: false,
     kiosk: true,
-    title: "Innoaivators billing",
+    title: "Innoaivators Billing System",
     icon: path.join(__dirname, "assets", "logo.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -264,7 +264,7 @@ function createWindow() {
   // Completely remove the default top menu bar (File, Edit, View, etc.)
   mainWindow.setMenu(null);
 
-  // Force the title to stay "Innoaivators billing" regardless of page content
+  // Force the title to stay "Innoaivators Billing System" regardless of page content
   mainWindow.on('page-title-updated', (e) => e.preventDefault());
 
   if (app.isPackaged) {
