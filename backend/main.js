@@ -104,6 +104,8 @@ async function registerShop(shopId) {
       owner_name: ownerName,
       mobile_number: mobile,
       owner_email: email,
+      address: settings.storeAddress || '',
+      gst_number: settings.gstNumber || '',
       master_key: process.env.MASTER_KEY || "owner123",
       updated_at: new Date().toISOString()
     });
@@ -161,7 +163,11 @@ async function pushStatsSnapshot(shopId) {
     const outOfStockList = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
     const expiredList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
     const nearExpiList = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, inN);
-    const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+    const rawInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+    const recentInvoices = rawInvoices.map(inv => {
+      const items = db.prepare("SELECT ii.*, p.name FROM invoice_items ii JOIN products p ON ii.product_id = p.id WHERE ii.invoice_id = ?").all(inv.id);
+      return { ...inv, items, date: inv.bill_date || inv.created_at };
+    });
 
     const allProductsList = db.prepare("SELECT name, brand, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
 

@@ -90,14 +90,14 @@ async function startTunnel(mainWindow) {
     }
 
     tunnelObj.on("close", () => {
-      console.log("[Sync Engine] Tunnel lost. Attempting reconnect in 30s...");
+      // Quiet background reconnect
       tunnelURL = null;
-      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 30000);
+      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 45000);
     });
 
     tunnelObj.on("error", (err) => {
-      console.error("[Sync Engine] Tunnel error:", err.message);
-      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 30000);
+      // Quiet background error handling
+      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 45000);
     });
 
   } catch (e) {
