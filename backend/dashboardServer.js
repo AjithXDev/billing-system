@@ -151,6 +151,7 @@ async function syncStatsToSupabase() {
     const outOfStockProducts = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
     const expiredProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
     const expiringProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, inExp);
+    const customerBehavior = db.prepare("SELECT customer_name, customer_phone, COUNT(*) as visit_count, SUM(total_amount) as total_spent FROM invoices WHERE customer_phone IS NOT NULL AND customer_phone != '' GROUP BY customer_phone ORDER BY total_spent DESC LIMIT 20").all();
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
     const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
 
@@ -166,7 +167,7 @@ async function syncStatsToSupabase() {
         topProducts, dailySales: dailySalesData, monthlySalesBreakdown: monthlyBreakdown,
         yearlyBreakdown, weeklyBreakdown, peakHours: peakHoursData, paymentBreakdown: paymentBreakdownData,
         deadStock: deadStockData, lowStockProducts, outOfStockProducts, expiredProducts, expiringProducts,
-        recentInvoices, allProductsList,
+        recentInvoices, allProductsList, customerBehavior,
         settings: {
           storeName: settings.storeName || '', storeAddress: settings.storeAddress || '',
           storeTagline: settings.storeTagline || '', gstNumber: settings.gstNumber || '',
