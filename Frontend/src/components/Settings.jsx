@@ -55,6 +55,23 @@ export default function Settings() {
   const [expoUrl, setExpoUrl] = useState("");
   const [showQR, setShowQR] = useState(false);
 
+  // Shop Supabase Connection
+  const [shopUrl, setShopUrl] = useState("");
+  const [shopKey, setShopKey] = useState("");
+  const [shopConnStatus, setShopConnStatus] = useState("idle"); // idle, testing, connected, error
+  const [shopConnMsg, setShopConnMsg] = useState("");
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle, syncing, done, error
+  const [syncMsg, setSyncMsg] = useState("");
+  const [lastSynced, setLastSynced] = useState("");
+
+  // Local Database
+  const [localDbPath, setLocalDbPath] = useState("");
+  const [localDbSaved, setLocalDbSaved] = useState(false);
+  const [localDbMsg, setLocalDbMsg] = useState("");
+
+  // Validity
+  const [validity, setValidity] = useState(null);
+
   const loadSettingsData = () => {
     try {
       const raw = localStorage.getItem("smart_billing_settings");
@@ -71,6 +88,26 @@ export default function Settings() {
 
     window.api?.getShopId?.().then(id => {
       if (id) setCfg(prev => ({ ...prev, shopId: id }));
+    });
+
+    // Load shop Supabase config
+    window.api?.getShopSupabase?.().then(config => {
+      if (config) {
+        setShopUrl(config.supabase_url || "");
+        setShopKey(config.supabase_key || "");
+        setShopConnStatus(config.is_connected ? "connected" : "idle");
+        setLastSynced(config.last_synced || "");
+      }
+    });
+
+    // Load local DB path
+    window.api?.getLocalDbPath?.().then(p => {
+      if (p) setLocalDbPath(p);
+    });
+
+    // Load validity
+    window.api?.getValidity?.().then(v => {
+      if (v) setValidity(v);
     });
   };
 
@@ -107,6 +144,101 @@ export default function Settings() {
     reader.readAsDataURL(file);
   };
 
+  // Shop Supabase handlers
+  const handleSaveShopSupabase = async () => {
+    if (!shopUrl || !shopKey) {
+      setShopConnMsg("Please enter both URL and Key.");
+      setShopConnStatus("error");
+      return;
+    }
+    setShopConnStatus("testing");
+    setShopConnMsg("Testing connection...");
+    try {
+      const testResult = await window.api.testShopConnection({ url: shopUrl, key: shopKey });
+      if (testResult.success) {
+        const saveResult = await window.api.saveShopSupabase({ url: shopUrl, key: shopKey });
+        if (saveResult.success) {
+          setShopConnStatus("connected");
+          setShopConnMsg("✅ Connected and saved successfully!");
+        } else {
+          setShopConnStatus("error");
+          setShopConnMsg("Save failed: " + saveResult.error);
+        }
+      } else {
+        setShopConnStatus("error");
+        setShopConnMsg("Connection failed: " + testResult.error);
+      }
+    } catch (e) {
+      setShopConnStatus("error");
+      setShopConnMsg("Error: " + e.message);
+    }
+  };
+
+  const handleSyncShop = async () => {
+    setSyncStatus("syncing");
+    setSyncMsg("Syncing data to cloud...");
+    try {
+      const res = await window.api.syncShopData();
+      if (res.success) {
+        setSyncStatus("done");
+        setSyncMsg("✅ " + res.message);
+        setLastSynced(new Date().toLocaleString());
+      } else {
+        setSyncStatus("error");
+        setSyncMsg("❌ " + res.error);
+      }
+    } catch (e) {
+      setSyncStatus("error");
+      setSyncMsg("Error: " + e.message);
+    }
+    setTimeout(() => setSyncStatus("idle"), 5000);
+  };
+
+  const handleRestoreFromCloud = async () => {
+    if (!confirm("This will restore all data from your cloud database. Existing local data may be overwritten. Continue?")) return;
+    setSyncStatus("syncing");
+    setSyncMsg("Restoring data from cloud...");
+    try {
+      const res = await window.api.restoreFromCloud();
+      if (res.success) {
+        setSyncStatus("done");
+        setSyncMsg("✅ " + res.message);
+      } else {
+        setSyncStatus("error");
+        setSyncMsg("❌ " + res.error);
+      }
+    } catch (e) {
+      setSyncStatus("error");
+      setSyncMsg("Error: " + e.message);
+    }
+    setTimeout(() => setSyncStatus("idle"), 8000);
+  };
+
+  // Local DB handlers
+  const handleBrowseFolder = async () => {
+    const p = await window.api?.browseFolder?.();
+    if (p) setLocalDbPath(p);
+  };
+
+  const handleSaveLocalDb = async () => {
+    if (!localDbPath) {
+      setLocalDbMsg("Please enter a storage path.");
+      return;
+    }
+    try {
+      const res = await window.api.saveLocalDbPath(localDbPath);
+      if (res.success) {
+        setLocalDbSaved(true);
+        setLocalDbMsg("✅ " + res.message);
+        setTimeout(() => { setLocalDbSaved(false); setLocalDbMsg(""); }, 3000);
+      } else {
+        setLocalDbMsg("❌ " + res.error);
+      }
+    } catch (e) {
+      setLocalDbMsg("Error: " + e.message);
+    }
+  };
+
   const inputStyle = {
     height: 36, padding: "0 12px", borderRadius: 8,
     border: "1px solid var(--border-2)",
@@ -131,6 +263,14 @@ export default function Settings() {
     transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
   });
 
+  const actionBtnStyle = (color, isActive) => ({
+    height: 36, padding: "0 18px", borderRadius: 8,
+    border: "none", background: isActive ? "#16a34a" : color,
+    color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+    transition: "all .3s", opacity: isActive ? 0.8 : 1,
+    display: "inline-flex", alignItems: "center", gap: 6
+  });
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{
@@ -153,6 +293,197 @@ export default function Settings() {
 
       <div style={{ flex: 1, overflowY: "auto", paddingRight: 10 }}>
         
+        {/* ── SUPABASE CONNECTION (Shop-Specific) ── */}
+        <SectionTitle icon="🔗" title="Supabase Connection (Shop Database)" />
+        
+        <div style={{ 
+          padding: "20px", background: "linear-gradient(135deg, rgba(99,102,241,0.05), rgba(139,92,246,0.05))", 
+          borderRadius: 12, border: "1px solid rgba(99,102,241,0.15)", marginBottom: 12, marginTop: 8 
+        }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
+            Connect this shop to its <strong>own Supabase project</strong>. Each shop should have a separate Supabase database.
+            After entering your credentials, click <strong>Save</strong> to connect and <strong>Sync</strong> to push/pull data.
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", marginBottom: 4, display: "block" }}>Supabase URL</label>
+              <input 
+                style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12 }} 
+                value={shopUrl} 
+                onChange={e => setShopUrl(e.target.value)} 
+                placeholder="https://your-project.supabase.co" 
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", marginBottom: 4, display: "block" }}>Supabase Anon Key</label>
+              <input 
+                style={{ ...inputStyle, fontFamily: "monospace", fontSize: 11 }} 
+                value={shopKey} 
+                onChange={e => setShopKey(e.target.value)} 
+                placeholder="eyJhbGciOiJIUzI1NiIs..." 
+              />
+            </div>
+
+            {/* Connection Status */}
+            {shopConnMsg && (
+              <div style={{
+                padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                background: shopConnStatus === "connected" ? "rgba(16,185,129,0.1)" : shopConnStatus === "error" ? "rgba(239,68,68,0.1)" : "rgba(99,102,241,0.1)",
+                color: shopConnStatus === "connected" ? "#10b981" : shopConnStatus === "error" ? "#ef4444" : "#6366f1",
+                border: `1px solid ${shopConnStatus === "connected" ? "rgba(16,185,129,0.2)" : shopConnStatus === "error" ? "rgba(239,68,68,0.2)" : "rgba(99,102,241,0.2)"}`
+              }}>
+                {shopConnMsg}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button 
+                onClick={handleSaveShopSupabase} 
+                disabled={shopConnStatus === "testing"}
+                style={actionBtnStyle("#6366f1", shopConnStatus === "connected")}
+              >
+                {shopConnStatus === "testing" ? "⏳ Testing..." : shopConnStatus === "connected" ? "✅ Connected" : "💾 Save & Connect"}
+              </button>
+
+              <button 
+                onClick={handleSyncShop} 
+                disabled={syncStatus === "syncing" || shopConnStatus !== "connected"}
+                style={actionBtnStyle("#0ea5e9", syncStatus === "done")}
+              >
+                {syncStatus === "syncing" ? "⏳ Syncing..." : "🔄 Sync Data"}
+              </button>
+
+              <button 
+                onClick={handleRestoreFromCloud} 
+                disabled={syncStatus === "syncing" || shopConnStatus !== "connected"}
+                style={actionBtnStyle("#f59e0b", false)}
+              >
+                📥 Restore from Cloud
+              </button>
+            </div>
+
+            {/* Sync Status */}
+            {syncMsg && (
+              <div style={{
+                padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                background: syncStatus === "done" ? "rgba(16,185,129,0.1)" : syncStatus === "error" ? "rgba(239,68,68,0.1)" : "rgba(14,165,233,0.1)",
+                color: syncStatus === "done" ? "#10b981" : syncStatus === "error" ? "#ef4444" : "#0ea5e9",
+              }}>
+                {syncMsg}
+              </div>
+            )}
+
+            {lastSynced && (
+              <div style={{ fontSize: 11, color: "var(--text-4)" }}>
+                Last synced: {lastSynced}
+              </div>
+            )}
+          </div>
+        </div>
+
+
+        {/* ── LOCAL DATABASE ── */}
+        <SectionTitle icon="💾" title="Local Database" />
+        
+        <div style={{ 
+          padding: "20px", background: "rgba(255,255,255,0.03)", 
+          borderRadius: 12, border: "1px solid var(--border)", marginBottom: 12, marginTop: 8 
+        }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
+            Store all billing data locally at a custom path. Data will be saved here first, and automatically synced to your online database when internet is available.
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <input 
+              style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: 12 }} 
+              value={localDbPath} 
+              onChange={e => setLocalDbPath(e.target.value)} 
+              placeholder="D:\BillingData\MyShop" 
+            />
+            <button 
+              onClick={handleBrowseFolder}
+              style={{
+                height: 36, padding: "0 14px", borderRadius: 8,
+                border: "1px solid var(--border-2)", background: "var(--surface-2)",
+                color: "var(--text-1)", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                whiteSpace: "nowrap"
+              }}
+            >
+              📁 Browse
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button 
+              onClick={handleSaveLocalDb}
+              style={actionBtnStyle("#334155", localDbSaved)}
+            >
+              {localDbSaved ? "✅ Path Saved" : "💾 Save Path"}
+            </button>
+            
+            {localDbMsg && (
+              <span style={{ 
+                fontSize: 12, fontWeight: 600, 
+                color: localDbMsg.startsWith("✅") ? "#10b981" : "#ef4444" 
+              }}>
+                {localDbMsg}
+              </span>
+            )}
+          </div>
+
+          {localDbPath && (
+            <div style={{ 
+              marginTop: 12, padding: "10px 14px", borderRadius: 8,
+              background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.15)",
+              fontSize: 11, color: "#10b981", fontFamily: "monospace"
+            }}>
+              📂 Active Path: {localDbPath}
+            </div>
+          )}
+        </div>
+
+
+        {/* ── VALIDITY STATUS ── */}
+        {validity && (
+          <>
+            <SectionTitle icon="⏳" title="Subscription Status" />
+            <div style={{ 
+              padding: "20px", borderRadius: 12, marginBottom: 12, marginTop: 8,
+              background: validity.valid 
+                ? (validity.warningPhase ? "linear-gradient(135deg, rgba(245,158,11,0.08), rgba(251,191,36,0.08))" : "linear-gradient(135deg, rgba(16,185,129,0.08), rgba(52,211,153,0.08))")
+                : "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(248,113,113,0.08))",
+              border: `1px solid ${validity.valid ? (validity.warningPhase ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)") : "rgba(239,68,68,0.2)"}`
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ 
+                    fontSize: 14, fontWeight: 800, 
+                    color: validity.valid ? (validity.warningPhase ? "#f59e0b" : "#10b981") : "#ef4444" 
+                  }}>
+                    {validity.valid 
+                      ? (validity.warningPhase ? "⚠️ Subscription Expiring Soon" : "✅ Subscription Active")
+                      : "🔴 Subscription Expired"
+                    }
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
+                    {validity.validityEnd ? `Expires: ${new Date(validity.validityEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ""}
+                    {validity.isOffline ? " (Offline cache)" : ""}
+                  </div>
+                </div>
+                <div style={{ 
+                  fontSize: 28, fontWeight: 900, 
+                  color: validity.valid ? (validity.warningPhase ? "#f59e0b" : "#10b981") : "#ef4444"
+                }}>
+                  {validity.daysLeft} <span style={{ fontSize: 12, fontWeight: 600 }}>days left</span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+
         {/* ── STORE INFO ── */}
         <SectionTitle icon="" title="Store Information" />
 

@@ -141,6 +141,68 @@ app.post('/api/shops/:id/toggle', requireAuth, async (req, res) => {
   }
 });
 
+// Toggle Payment Status & Renew Validity
+app.post('/api/shops/:id/toggle-payment', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_paid } = req.body;
+    const supabase = getSupabase();
+    
+    if (is_paid) {
+      // Renew for 30 days
+      const now = new Date();
+      const end = new Date(now.getTime() + 30 * 86400000);
+      const { error } = await supabase
+        .from('shops')
+        .update({ 
+          is_paid: true, 
+          is_active: true,
+          validity_start: now.toISOString(),
+          validity_end: end.toISOString()
+        })
+        .eq('id', id);
+      if (error) throw error;
+      res.json({ success: true, validity_end: end.toISOString() });
+    } else {
+      const { error } = await supabase
+        .from('shops')
+        .update({ is_paid: false })
+        .eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Validity Info for a specific shop
+app.get('/api/shops/:id/validity', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('shops')
+      .select('is_active, is_paid, validity_start, validity_end')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    
+    const now = new Date();
+    const end = data.validity_end ? new Date(data.validity_end) : null;
+    const daysLeft = end ? Math.ceil((end - now) / 86400000) : null;
+    
+    res.json({ 
+      ...data, 
+      daysLeft: daysLeft !== null ? Math.max(0, daysLeft) : null,
+      warningPhase: daysLeft !== null && daysLeft <= 7 && daysLeft > 0,
+      expired: daysLeft !== null && daysLeft <= 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── DELETE Shop + Owner Account ──
 app.delete('/api/shops/:id', async (req, res) => {
   try {

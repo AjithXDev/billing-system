@@ -70,4 +70,21 @@ contextBridge.exposeInMainWorld("api", {
   minimizeWindow: () => ipcRenderer.invoke("minimize-window"),
   closeWindow:    () => ipcRenderer.invoke("close-window"),
   createBackup:   () => ipcRenderer.invoke("create-backup"),
+
+  // 🔗 Shop Supabase Connection (Separate DB per shop)
+  saveShopSupabase:    (data)         => ipcRenderer.invoke("save-shop-supabase", data),
+  getShopSupabase:     ()             => ipcRenderer.invoke("get-shop-supabase"),
+  syncShopData:        ()             => ipcRenderer.invoke("sync-shop-data"),
+  restoreFromCloud:    ()             => ipcRenderer.invoke("restore-from-cloud"),
+  testShopConnection:  (data)         => ipcRenderer.invoke("test-shop-connection", data),
+
+  // 💾 Local Database Path
+  saveLocalDbPath:     (path)         => ipcRenderer.invoke("save-local-db-path", path),
+  getLocalDbPath:      ()             => ipcRenderer.invoke("get-local-db-path"),
+  browseFolder:        ()             => ipcRenderer.invoke("browse-folder"),
+
+  // ⏳ Validity / Subscription System
+  getValidity:         ()             => ipcRenderer.invoke("get-validity"),
+  onValidityWarning:   (cb)           => ipcRenderer.on("validity-warning", (_e, data) => cb(data)),
+  onValidityExpired:   (cb)           => ipcRenderer.on("validity-expired", (_e) => cb()),
 });

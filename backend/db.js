@@ -208,4 +208,49 @@ CREATE TABLE IF NOT EXISTS offers (
 )
 `).run();
 
+// 🟢 SHOP SUPABASE CONFIG (Separate DB per shop)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS shop_supabase_config (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supabase_url TEXT NOT NULL,
+  supabase_key TEXT NOT NULL,
+  is_connected INTEGER DEFAULT 0,
+  last_synced DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
+// 🟢 LOCAL DATABASE CONFIG (Path for local storage)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS local_db_config (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  storage_path TEXT NOT NULL,
+  is_active INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
+// 🟢 VALIDITY CACHE (Offline validity check)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS validity_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  validity_start TEXT,
+  validity_end TEXT,
+  is_paid INTEGER DEFAULT 0,
+  last_checked DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
+// 🟢 SYNC QUEUE (Track pending sync items for local→cloud)
+db.prepare(`
+CREATE TABLE IF NOT EXISTS sync_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  table_name TEXT NOT NULL,
+  record_id INTEGER NOT NULL,
+  action TEXT NOT NULL DEFAULT 'upsert',
+  synced INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`).run();
+
 module.exports = db;

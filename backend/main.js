@@ -22,10 +22,297 @@ function getMachineId() {
 }
 
 // ── CLOUD SYNC ENGINE ──
+// Admin Supabase (central — for shop management, activation, validity)
 let supabase = null;
 function initSupabase(url, key) {
   if (!supabase && url && key) {
     try { supabase = createClient(url, key); } catch (e) { }
+  }
+}
+
+// Shop-specific Supabase (separate DB per shop — for billing data)
+let shopSupabase = null;
+let shopSupabaseUrl = '';
+let shopSupabaseKey = '';
+function initShopSupabase(url, key) {
+  if (url && key && url.startsWith('http')) {
+    try {
+      shopSupabase = createClient(url, key);
+      shopSupabaseUrl = url;
+      shopSupabaseKey = key;
+      console.log('[ShopDB] ✅ Connected to shop Supabase:', url);
+      return true;
+    } catch (e) {
+      console.error('[ShopDB] Connection failed:', e.message);
+      return false;
+    }
+  }
+  return false;
+}
+
+// ── Load shop Supabase config from SQLite on startup ──
+function loadShopSupabaseConfig() {
+  try {
+    const config = db.prepare('SELECT * FROM shop_supabase_config ORDER BY id DESC LIMIT 1').get();
+    if (config && config.supabase_url && config.supabase_key) {
+      initShopSupabase(config.supabase_url, config.supabase_key);
+    }
+  } catch (e) { }
+}
+
+// ── LOCAL FILE BACKUP ──
+function getLocalDbPath() {
+  try {
+    const config = db.prepare('SELECT storage_path FROM local_db_config WHERE is_active = 1 ORDER BY id DESC LIMIT 1').get();
+    return config ? config.storage_path : null;
+  } catch (e) { return null; }
+}
+
+function syncToLocalPath() {
+  const localPath = getLocalDbPath();
+  if (!localPath) return;
+  try {
+    if (!fs.existsSync(localPath)) fs.mkdirSync(localPath, { recursive: true });
+    const sourcePath = db.name;
+    const destPath = path.join(localPath, 'billing_local.db');
+    fs.copyFileSync(sourcePath, destPath);
+    
+    // Also save a JSON export for human-readable backup
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      products: db.prepare('SELECT * FROM products').all(),
+      categories: db.prepare('SELECT * FROM categories').all(),
+      customers: db.prepare('SELECT * FROM customers').all(),
+      invoices: db.prepare('SELECT * FROM invoices').all(),
+      invoice_items: db.prepare('SELECT * FROM invoice_items').all(),
+      offers: db.prepare('SELECT * FROM offers').all(),
+      held_bills: db.prepare('SELECT * FROM held_bills').all(),
+    };
+    fs.writeFileSync(path.join(localPath, 'billing_data.json'), JSON.stringify(exportData, null, 2));
+    console.log('[LocalDB] ✅ Data synced to:', localPath);
+  } catch (e) {
+    console.error('[LocalDB] Sync error:', e.message);
+  }
+}
+
+// ── SYNC TO SHOP'S OWN SUPABASE ──
+async function syncToShopSupabase() {
+  if (!shopSupabase) return;
+  try {
+    // 1. Sync Products
+    const products = db.prepare('SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.is_synced = 0').all();
+    for (const p of products) {
+      const { id, is_synced, flag_low_stock, flag_out_of_stock, flag_expiry, flag_dead_stock, ...data } = p;
+      const { error } = await shopSupabase.from('products').upsert({
+        ...data,
+        local_id: id,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'local_id' });
+      if (!error) db.prepare('UPDATE products SET is_synced = 1 WHERE id = ?').run(id);
+      else console.error('[ShopSync] Product error:', error.message);
+    }
+
+    // 2. Sync Invoices
+    const invoices = db.prepare('SELECT * FROM invoices WHERE is_synced = 0').all();
+    for (const inv of invoices) {
+      const { id, is_synced, ...data } = inv;
+      const { error } = await shopSupabase.from('invoices').upsert({
+        ...data,
+        local_id: id
+      }, { onConflict: 'local_id' });
+      if (!error) {
+        db.prepare('UPDATE invoices SET is_synced = 1 WHERE id = ?').run(id);
+        // Sync items for this invoice
+        const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id);
+        for (const item of items) {
+          const { id: itemId, ...itemData } = item;
+          await shopSupabase.from('invoice_items').upsert({ ...itemData, local_id: itemId });
+        }
+      }
+    }
+
+    // 3. Sync Customers
+    const customers = db.prepare('SELECT * FROM customers WHERE is_synced = 0').all();
+    for (const c of customers) {
+      const { id, is_synced, ...data } = c;
+      const { error } = await shopSupabase.from('customers').upsert({
+        ...data, local_id: id
+      }, { onConflict: 'local_id' });
+      if (!error) db.prepare('UPDATE customers SET is_synced = 1 WHERE id = ?').run(id);
+    }
+
+    // 4. Sync Categories
+    const categories = db.prepare('SELECT * FROM categories').all();
+    for (const cat of categories) {
+      await shopSupabase.from('categories').upsert(cat, { onConflict: 'id' });
+    }
+
+    // Update last synced time
+    db.prepare('UPDATE shop_supabase_config SET last_synced = datetime("now") WHERE id = (SELECT MAX(id) FROM shop_supabase_config)').run();
+    console.log('[ShopSync] ✅ Data synced to shop Supabase');
+  } catch (e) {
+    console.error('[ShopSync] Error:', e.message);
+  }
+}
+
+// ── RESTORE DATA FROM SHOP SUPABASE ──
+async function restoreFromShopSupabase() {
+  if (!shopSupabase) throw new Error('Shop Supabase not connected');
+  try {
+    // 1. Restore Products
+    const { data: products } = await shopSupabase.from('products').select('*');
+    if (products && products.length > 0) {
+      const insertProduct = db.prepare(`
+        INSERT OR REPLACE INTO products 
+        (id, name, category_id, category_name, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand, is_synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `);
+      const txn = db.transaction((items) => {
+        for (const p of items) {
+          insertProduct.run(
+            p.local_id || null, p.name, p.category_id, p.category_name, p.gst_rate || 0,
+            p.product_code, p.price_type || 'exclusive', p.price, p.cost_price || 0,
+            p.quantity, p.unit, p.barcode, p.expiry_date, p.image,
+            p.default_discount || 0, p.weight, p.brand
+          );
+        }
+      });
+      txn(products);
+      console.log(`[Restore] ✅ ${products.length} products restored`);
+    }
+
+    // 2. Restore Customers
+    const { data: customers } = await shopSupabase.from('customers').select('*');
+    if (customers && customers.length > 0) {
+      const insertCustomer = db.prepare('INSERT OR REPLACE INTO customers (id, name, phone, address, is_synced) VALUES (?, ?, ?, ?, 1)');
+      const txn = db.transaction((items) => {
+        for (const c of items) {
+          insertCustomer.run(c.local_id || null, c.name, c.phone, c.address);
+        }
+      });
+      txn(customers);
+      console.log(`[Restore] ✅ ${customers.length} customers restored`);
+    }
+
+    // 3. Restore Invoices
+    const { data: invoices } = await shopSupabase.from('invoices').select('*');
+    if (invoices && invoices.length > 0) {
+      const insertInvoice = db.prepare(`
+        INSERT OR REPLACE INTO invoices 
+        (id, bill_no, bill_date, customer_name, customer_phone, customer_address, customer_id, payment_mode, total_amount, is_synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `);
+      const txn = db.transaction((items) => {
+        for (const inv of items) {
+          insertInvoice.run(
+            inv.local_id || null, inv.bill_no, inv.bill_date, inv.customer_name,
+            inv.customer_phone, inv.customer_address, inv.customer_id,
+            inv.payment_mode, inv.total_amount
+          );
+        }
+      });
+      txn(invoices);
+      console.log(`[Restore] ✅ ${invoices.length} invoices restored`);
+    }
+
+    // 4. Restore Invoice Items
+    const { data: items } = await shopSupabase.from('invoice_items').select('*');
+    if (items && items.length > 0) {
+      const insertItem = db.prepare(`
+        INSERT OR REPLACE INTO invoice_items 
+        (id, invoice_id, product_id, quantity, price, gst_rate, gst_amount, discount_percent, discount_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const txn = db.transaction((rows) => {
+        for (const i of rows) {
+          insertItem.run(
+            i.local_id || null, i.invoice_id, i.product_id, i.quantity,
+            i.price, i.gst_rate, i.gst_amount, i.discount_percent || 0, i.discount_amount || 0
+          );
+        }
+      });
+      txn(items);
+      console.log(`[Restore] ✅ ${items.length} invoice items restored`);
+    }
+
+    // 5. Restore Categories
+    const { data: categories } = await shopSupabase.from('categories').select('*');
+    if (categories && categories.length > 0) {
+      for (const cat of categories) {
+        try {
+          db.prepare('INSERT OR REPLACE INTO categories (id, name, gst) VALUES (?, ?, ?)').run(cat.id, cat.name, cat.gst);
+        } catch (e) { }
+      }
+    }
+
+    return {
+      products: products?.length || 0,
+      customers: customers?.length || 0,
+      invoices: invoices?.length || 0,
+      items: items?.length || 0,
+      categories: categories?.length || 0
+    };
+  } catch (e) {
+    console.error('[Restore] Error:', e.message);
+    throw e;
+  }
+}
+
+// ── VALIDITY / SUBSCRIPTION SYSTEM ──
+async function checkValidity(shopId) {
+  if (!supabase || !shopId) {
+    // Offline: check cached validity
+    try {
+      const cached = db.prepare('SELECT * FROM validity_cache ORDER BY id DESC LIMIT 1').get();
+      if (cached) {
+        const now = new Date();
+        const end = new Date(cached.validity_end);
+        const daysLeft = Math.ceil((end - now) / 86400000);
+        return {
+          valid: daysLeft > 0 && cached.is_paid,
+          daysLeft: Math.max(0, daysLeft),
+          validityEnd: cached.validity_end,
+          isPaid: !!cached.is_paid,
+          isOffline: true
+        };
+      }
+    } catch (e) { }
+    return { valid: true, daysLeft: 30, isOffline: true, note: 'No cached validity data' };
+  }
+
+  try {
+    const { data: shop, error } = await supabase
+      .from('shops')
+      .select('is_active, is_paid, validity_start, validity_end')
+      .eq('id', shopId)
+      .single();
+
+    if (error || !shop) return { valid: true, daysLeft: 30, note: 'Shop not found in cloud' };
+
+    const now = new Date();
+    const end = shop.validity_end ? new Date(shop.validity_end) : new Date(now.getTime() + 30 * 86400000);
+    const daysLeft = Math.ceil((end - now) / 86400000);
+
+    // Cache validity locally for offline use
+    db.prepare('DELETE FROM validity_cache').run();
+    db.prepare('INSERT INTO validity_cache (validity_start, validity_end, is_paid) VALUES (?, ?, ?)').run(
+      shop.validity_start || now.toISOString(),
+      end.toISOString(),
+      shop.is_paid ? 1 : 0
+    );
+
+    return {
+      valid: shop.is_active && daysLeft > 0,
+      daysLeft: Math.max(0, daysLeft),
+      validityEnd: end.toISOString(),
+      isPaid: !!shop.is_paid,
+      isActive: !!shop.is_active,
+      warningPhase: daysLeft <= 7 && daysLeft > 0,
+      isOffline: false
+    };
+  } catch (e) {
+    console.error('[Validity] Error:', e.message);
+    return { valid: true, daysLeft: 30, note: 'Check error: ' + e.message };
   }
 }
 async function syncToCloud(shopId) {
@@ -290,6 +577,9 @@ function createWindow() {
   startDashboardServer(mainWindow);
 
 
+  // Load shop Supabase config on startup
+  loadShopSupabaseConfig();
+
   // 🟢 Initialize Cloud Sync & Alert Loop
   setInterval(async () => {
     try {
@@ -334,13 +624,11 @@ function createWindow() {
         const names = nearExpiry.slice(0, 5).map(p => p.name).join(', ');
         insertNotif.run('NEAR_EXPIRY', `${nearExpiry.length} Products Expiring Soon!`, `⏰ ${names}`);
       }
-      // ... (remaining notification types continue similarly)
 
       // WhatsApp Alerts (send outside transaction to prevent DB lock during network wait)
       if (settings.ownerPhone) {
         for (const p of lowStock) sendMessage(settings.ownerPhone, `📉 ${p.name} is low Stock (${p.quantity}).`);
         for (const p of outOfStock) sendMessage(settings.ownerPhone, `🚫 ${p.name} out of Stock!`);
-        // ... etc
       }
 
       // UPDATE FLAGS IN ONE TRANSACTION TO REDUCE DISK I/O
@@ -353,11 +641,33 @@ function createWindow() {
       });
       resetFlags();
 
-      // ── Cloud Sync ──
+      // ── Admin Cloud Sync (central Supabase) ──
       if (url && key && url.startsWith('http')) {
         initSupabase(url, key);
         if (currentShopId) {
           syncToCloud(currentShopId).catch(console.error);
+        }
+      }
+
+      // ── Shop-specific Supabase Sync ──
+      if (shopSupabase) {
+        syncToShopSupabase().catch(e => console.error('[ShopSync Loop]', e.message));
+      }
+
+      // ── Local Database Path Sync ──
+      syncToLocalPath();
+
+      // ── Validity / Subscription Check ──
+      if (currentShopId && supabase) {
+        const validity = await checkValidity(currentShopId);
+        if (validity.warningPhase && mainWindow) {
+          mainWindow.webContents.send('validity-warning', {
+            daysLeft: validity.daysLeft,
+            validityEnd: validity.validityEnd
+          });
+        }
+        if (!validity.valid && mainWindow) {
+          mainWindow.webContents.send('validity-expired');
         }
       }
     } catch (e) { console.error("[Sync Loop Error]", e.message); }
@@ -1330,3 +1640,154 @@ ipcMain.handle("get-pairing-status", async (event, code) => {
   }
 });
 
+// ============================================================
+// 🔗 SHOP SUPABASE CONNECTION (Separate DB per shop)
+// ============================================================
+
+// Save shop Supabase credentials
+ipcMain.handle("save-shop-supabase", async (event, { url, key }) => {
+  try {
+    // Clear existing config
+    db.prepare('DELETE FROM shop_supabase_config').run();
+    // Insert new config
+    db.prepare('INSERT INTO shop_supabase_config (supabase_url, supabase_key, is_connected) VALUES (?, ?, 1)').run(url, key);
+    initShopSupabase(url, key);
+
+    // Also save to admin Supabase for reference
+    if (supabase) {
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      let settings = {};
+      if (fs.existsSync(configPath)) {
+        try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
+      }
+      const shopId = settings.shopId || process.env.SHOP_ID;
+      if (shopId) {
+        await supabase.from('shops').update({
+          shop_supabase_url: url,
+          shop_supabase_key: key
+        }).eq('id', shopId);
+      }
+    }
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Get shop Supabase config
+ipcMain.handle("get-shop-supabase", async () => {
+  try {
+    const config = db.prepare('SELECT * FROM shop_supabase_config ORDER BY id DESC LIMIT 1').get();
+    return config || null;
+  } catch (e) {
+    return null;
+  }
+});
+
+// Test shop Supabase connection
+ipcMain.handle("test-shop-connection", async (event, { url, key }) => {
+  try {
+    const testClient = createClient(url, key);
+    // Try to list tables or read from a table
+    const { data, error } = await testClient.from('products').select('id').limit(1);
+    if (error && error.code !== 'PGRST116') {
+      // PGRST116 = table not found, which is OK for a fresh database
+      return { success: false, error: error.message };
+    }
+    return { success: true, message: 'Connection successful!' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Manual sync trigger
+ipcMain.handle("sync-shop-data", async () => {
+  if (!shopSupabase) return { success: false, error: 'Shop Supabase not connected. Enter URL and Key first.' };
+  try {
+    // Mark all records as unsynced to force full sync
+    db.prepare('UPDATE products SET is_synced = 0').run();
+    db.prepare('UPDATE invoices SET is_synced = 0').run();
+    db.prepare('UPDATE customers SET is_synced = 0').run();
+    await syncToShopSupabase();
+    return { success: true, message: 'Data synced successfully!' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Restore data from shop's Supabase
+ipcMain.handle("restore-from-cloud", async () => {
+  if (!shopSupabase) return { success: false, error: 'Shop Supabase not connected. Enter URL and Key first.' };
+  try {
+    const result = await restoreFromShopSupabase();
+    return { success: true, message: `Restored: ${result.products} products, ${result.invoices} invoices, ${result.customers} customers`, data: result };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ============================================================
+// 💾 LOCAL DATABASE PATH CONFIGURATION
+// ============================================================
+
+ipcMain.handle("save-local-db-path", async (event, storagePath) => {
+  try {
+    if (!fs.existsSync(storagePath)) {
+      fs.mkdirSync(storagePath, { recursive: true });
+    }
+    db.prepare('DELETE FROM local_db_config').run();
+    db.prepare('INSERT INTO local_db_config (storage_path, is_active) VALUES (?, 1)').run(storagePath);
+    // Immediately sync
+    syncToLocalPath();
+    return { success: true, message: `Local storage configured: ${storagePath}` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle("get-local-db-path", async () => {
+  try {
+    const config = db.prepare('SELECT * FROM local_db_config WHERE is_active = 1 ORDER BY id DESC LIMIT 1').get();
+    return config ? config.storage_path : '';
+  } catch (e) {
+    return '';
+  }
+});
+
+ipcMain.handle("browse-folder", async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+      title: 'Select Local Database Storage Folder'
+    });
+    if (result.canceled || !result.filePaths.length) return '';
+    return result.filePaths[0];
+  } catch (e) {
+    return '';
+  }
+});
+
+// ============================================================
+// ⏳ VALIDITY / SUBSCRIPTION SYSTEM
+// ============================================================
+
+ipcMain.handle("get-validity", async () => {
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings = {};
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
+    }
+    const shopId = settings.shopId || process.env.SHOP_ID;
+    
+    // Initialize admin supabase if needed
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+    if (url && key) initSupabase(url, key);
+
+    return await checkValidity(shopId);
+  } catch (e) {
+    return { valid: true, daysLeft: 30, note: 'Error: ' + e.message };
+  }
+});

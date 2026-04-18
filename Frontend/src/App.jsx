@@ -58,6 +58,10 @@ function WhatsAppQRModal({ qrData, onClose }) {
 
 /* ── Lock Screen ────────────────────────────────────────────── */
 function LockScreen({ hwid, onRetry, note }) {
+  // Determine the type of lock
+  const isDeactivated = note === "Access denied. Admin has deactivated this shop.";
+  const isExpired = note?.includes("expired") || note?.includes("Subscription");
+
   return (
     <div style={{
       height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column',
@@ -70,31 +74,35 @@ function LockScreen({ hwid, onRetry, note }) {
         border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)',
         textAlign: 'center', maxWidth: '450px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)'
       }}>
-        <div style={{ fontSize: '48px', marginBottom: '20px' }}>🔒</div>
+        <div style={{ fontSize: '48px', marginBottom: '20px' }}>{isExpired ? '⏳' : '🔒'}</div>
         <h1 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '10px' }}>
-          {note === "Access denied. Admin has deactivated this shop." ? "Access Denied" : "Software Not Activated"}
+          {isExpired ? 'Subscription Expired' : isDeactivated ? 'Access Denied' : 'Activation Required'}
         </h1>
         <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', marginBottom: '30px' }}>
-          {note === "Access denied. Admin has deactivated this shop." 
-            ? <strong style={{ color: '#ef4444' }}>Access denied. Admin has deactivated this shop.</strong>
-            : <>This installation of <strong>Smart Billing</strong> is locked. Please send your Machine ID to the developer to activate this shop.</>
+          {isExpired 
+            ? <><strong style={{ color: '#f59e0b' }}>Your subscription has expired.</strong><br/>Please complete your payment to continue using the application. Contact your administrator to renew.</>
+            : isDeactivated 
+              ? <strong style={{ color: '#ef4444' }}>Access denied. Admin has deactivated this shop.</strong>
+              : <>This installation of <strong>Smart Billing</strong> is locked. Please send your Machine ID to the developer to activate this shop.</>
           }
         </p>
-        <div style={{ 
-          background: 'rgba(0,0,0,0.3)', padding: '12px 16px', borderRadius: '12px', 
-          fontSize: '13px', fontFamily: 'monospace', color: '#38bdf8',
-          border: '1px dashed rgba(56,189,248,0.3)', marginBottom: '30px', wordBreak: 'break-all'
-        }}>
-          {hwid}
-        </div>
+        {hwid && (
+          <div style={{ 
+            background: 'rgba(0,0,0,0.3)', padding: '12px 16px', borderRadius: '12px', 
+            fontSize: '13px', fontFamily: 'monospace', color: '#38bdf8',
+            border: '1px dashed rgba(56,189,248,0.3)', marginBottom: '30px', wordBreak: 'break-all'
+          }}>
+            {hwid}
+          </div>
+        )}
         <button onClick={onRetry} style={{
-          width: '100%', padding: '14px', background: '#4f46e5', color: 'white',
+          width: '100%', padding: '14px', background: isExpired ? '#f59e0b' : '#4f46e5', color: 'white',
           border: 'none', borderRadius: '12px', fontWeight: '700', cursor: 'pointer'
         }}>
-          Check Activation Status
+          {isExpired ? 'Check Payment Status' : 'Check Activation Status'}
         </button>
         <p style={{ marginTop: '20px', fontSize: '12px', color: '#64748b' }}>
-          Once activated by the developer, click check status to unlock.
+          {isExpired ? 'Once payment is confirmed by admin, click above to unlock.' : 'Once activated by the developer, click check status to unlock.'}
         </p>
       </div>
     </div>
@@ -113,6 +121,8 @@ function App() {
   const [isRegistered, setIsRegistered] = useState(true);
   const [shopId, setShopId]             = useState('');
   const [showPairing, setShowPairing]   = useState(false);
+  const [validityWarning, setValidityWarning] = useState(null); // { daysLeft, validityEnd }
+  const [subscriptionExpired, setSubscriptionExpired] = useState(false);
 
   const navItems = [
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> },
@@ -156,6 +166,16 @@ function App() {
       if (res.needsRegistration) {
         setIsRegistered(false);
       }
+      // Also check validity/subscription
+      const validity = await window.api.getValidity?.();
+      if (validity) {
+        if (validity.warningPhase) {
+          setValidityWarning({ daysLeft: validity.daysLeft, validityEnd: validity.validityEnd });
+        }
+        if (!validity.valid && validity.daysLeft <= 0) {
+          setSubscriptionExpired(true);
+        }
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -182,6 +202,16 @@ function App() {
     window.api.onWhatsappStatus(status => {
       setWaStatus(status);
       if (status === 'ready') setShowQR(false);
+    });
+
+    // Listen for validity warnings from main process
+    window.api.onValidityWarning?.((data) => {
+      setValidityWarning(data);
+    });
+
+    // Listen for subscription expiry
+    window.api.onValidityExpired?.(() => {
+      setSubscriptionExpired(true);
     });
 
     return () => {
@@ -215,6 +245,15 @@ function App() {
   }
 
   if (!license.is_active) return <LockScreen hwid={license.hwid} note={license.note} onRetry={checkLicense} />;
+
+  // Subscription expired — show lock screen
+  if (subscriptionExpired) return <LockScreen hwid={''} note="Subscription expired" onRetry={async () => {
+    const validity = await window.api?.getValidity?.();
+    if (validity?.valid) {
+      setSubscriptionExpired(false);
+      setValidityWarning(null);
+    }
+  }} />;
 
   return (
     <ErrorBoundary>
@@ -278,6 +317,30 @@ function App() {
 
         {/* ── Main Workspace ──────────────────────────────────── */}
         <main className="enterprise-main">
+
+          {/* ── Validity Warning Banner ── */}
+          {validityWarning && (
+            <div style={{
+              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              padding: '10px 20px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              color: 'white', fontSize: 13, fontWeight: 700,
+              animation: 'pulse 2s ease-in-out infinite',
+              borderBottom: '2px solid #b45309'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>⚠️</span>
+                <span>
+                  Your subscription expires in <strong>{validityWarning.daysLeft} day{validityWarning.daysLeft !== 1 ? 's' : ''}</strong>.
+                  Please complete payment to continue using the application.
+                </span>
+              </div>
+              <button onClick={() => setValidityWarning(null)} style={{
+                background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
+                padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700
+              }}>Dismiss</button>
+            </div>
+          )}
           
           {/* Dashboard Header */}
           <header className="enterprise-header">

@@ -56,20 +56,11 @@
         }
 
         @keyframes slideIn {
-            from {
-                transform: translateY(20px);
-                opacity: 0;
-            }
-
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
 
-        .page-animate {
-            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-        }
+        .page-animate { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
 
         .custom-modal {
             background: rgba(15, 23, 42, 0.95);
@@ -77,6 +68,29 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
             box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
         }
+
+        /* Toggle switch */
+        .toggle-switch {
+            width: 44px; height: 24px; border-radius: 12px;
+            position: relative; cursor: pointer; transition: background 0.3s;
+            border: none; padding: 0;
+        }
+        .toggle-switch.on { background: #10b981; }
+        .toggle-switch.off { background: #ef4444; }
+        .toggle-knob {
+            width: 18px; height: 18px; border-radius: 50%;
+            background: white; position: absolute; top: 3px;
+            transition: left 0.3s; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        }
+        .toggle-switch.on .toggle-knob { left: 23px; }
+        .toggle-switch.off .toggle-knob { left: 3px; }
+
+        /* Pulse animation for warnings */
+        @keyframes pulse-warn {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .pulse-warn { animation: pulse-warn 2s ease-in-out infinite; }
     </style>
 </head>
 
@@ -92,6 +106,21 @@
 
         const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+        // Helper: Calculate remaining days
+        function getDaysLeft(validityEnd) {
+            if (!validityEnd) return null;
+            const now = new Date();
+            const end = new Date(validityEnd);
+            const diff = Math.ceil((end - now) / 86400000);
+            return Math.max(0, diff);
+        }
+
+        // Helper: Format date
+        function formatDate(d) {
+            if (!d) return 'N/A';
+            return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
         // Custom Modal Component
         function Modal({ show, title, message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel", isAlert = false }) {
             if (!show) return null;
@@ -104,7 +133,7 @@
                             {!isAlert && (
                                 <button onClick={onCancel} className="flex-1 h-12 rounded-2xl bg-white/5 text-slate-300 font-bold hover:bg-white/10">{cancelText}</button>
                             )}
-                            <button onClick={onConfirm} className={`flex-1 h-12 rounded-2xl font-bold text-white ${confirmText === 'Delete' ? 'bg-red-500' : 'btn-grad'}`}>{confirmText}</button>
+                            <button onClick={onConfirm} className={`flex-1 h-12 rounded-2xl font-bold text-white ${confirmText === 'Delete' || confirmText === 'Yes, Delete Everything' ? 'bg-red-500' : 'btn-grad'}`}>{confirmText}</button>
                         </div>
                     </div>
                 </div>
@@ -207,15 +236,18 @@
                     setShops(list || []);
                     let rev = 0;
                     let activeCount = 0;
+                    let paidCount = 0;
                     list?.forEach(s => {
                         rev += Number(s.shop_stats?.stats_json?.overallSales || 0);
                         if (s.is_active) activeCount++;
+                        if (s.is_paid) paidCount++;
                     });
                     setStats({
                         revenue: rev,
                         shopsTotal: list?.length || 0,
                         activeShops: activeCount,
-                        subscriptionRev: activeCount * 1500
+                        paidShops: paidCount,
+                        subscriptionRev: paidCount * 1500
                     });
                 } catch (e) { }
                 setLoading(false);
@@ -228,8 +260,34 @@
                 if (!error) loadData();
             };
 
+            // Toggle payment status (is_paid) & renew validity
+            const togglePayment = async (shopId, currentPaid) => {
+                try {
+                    if (!currentPaid) {
+                        // Turning ON → Renew for 30 days
+                        const now = new Date();
+                        const end = new Date(now.getTime() + 30 * 86400000);
+                        const { error } = await sb.from('shops').update({
+                            is_paid: true,
+                            is_active: true,
+                            validity_start: now.toISOString(),
+                            validity_end: end.toISOString()
+                        }).eq('id', shopId);
+                        if (!error) {
+                            setModal({ show: true, isAlert: true, title: '✅ Renewed!', message: `Payment confirmed. Validity renewed for 30 days.\n\nNew expiry: ${formatDate(end)}`, confirmText: 'OK', onConfirm: () => setModal({ show: false }) });
+                            loadData();
+                        }
+                    } else {
+                        // Turning OFF → Mark as unpaid
+                        const { error } = await sb.from('shops').update({ is_paid: false }).eq('id', shopId);
+                        if (!error) loadData();
+                    }
+                } catch (e) {
+                    setModal({ show: true, isAlert: true, title: 'Error', message: e.message, confirmText: 'Close', onConfirm: () => setModal({ show: false }) });
+                }
+            };
+
             const confirmDelete = (shopId, shopName) => {
-                const shop = shops.find(s => s.id === shopId);
                 const msg = `🛑 CRITICAL ACTION: PERMANENT DELETION\n\nShop Name: ${shopName.toUpperCase()}\nUnique ID: ${shopId}\n\nWARNING:\n1. This will PERMANENTLY ERASE all products, invoices, and analytics from the cloud database.\n2. ALL paired Mobile Apps for this shop will stop working immediately.\n3. This action CANNOT be undone.\n\nAre you absolutely sure you want to destroy this shop record?`;
                 setModal({
                     show: true,
@@ -259,10 +317,18 @@
                 </div>
             );
 
-            // SVG Reach Chart Aggregation Logic
+            // SVG Chart
             const reachData = shops.map(s => Number(s.shop_stats?.stats_json?.overallBills || 0)).slice(0, 10);
             const maxReach = Math.max(...reachData, 1);
             const chartPoints = reachData.map((v, i) => `${(i * 10)},${60 - (v / maxReach * 50)}`).join(' ');
+
+            // Days left badge color
+            const getDaysBadge = (daysLeft) => {
+                if (daysLeft === null || daysLeft === undefined) return { bg: 'bg-slate-500/10', text: 'text-slate-400', label: 'N/A' };
+                if (daysLeft <= 0) return { bg: 'bg-red-500/10', text: 'text-red-500', label: 'EXPIRED' };
+                if (daysLeft <= 7) return { bg: 'bg-orange-500/10', text: 'text-orange-400', label: `${daysLeft}d left` };
+                return { bg: 'bg-emerald-500/10', text: 'text-emerald-400', label: `${daysLeft}d left` };
+            };
 
             return (
                 <div className="flex h-screen bg-[#020617] overflow-hidden">
@@ -279,6 +345,7 @@
                             {[
                                 { id: 'overview', label: 'Overview', icon: 'M4 6h16M4 12h16M4 18h7' },
                                 { id: 'shops', label: 'Software Installed', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1' },
+                                { id: 'validity', label: 'Subscription & Validity', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
                                 { id: 'owners', label: 'Owner Records', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' }
                             ].map(item => (
                                 <div key={item.id} onClick={() => setActiveTab(item.id)} className={`sidebar-item flex items-center gap-4 px-6 py-4 rounded-2xl font-bold text-sm ${activeTab === item.id ? 'active' : 'text-slate-500 hover:text-slate-300'}`}>
@@ -301,6 +368,7 @@
                     <main className="flex-1 overflow-y-auto p-12 relative">
                         {loading && <div className="absolute inset-0 bg-bg/50 backdrop-blur-md z-50 flex items-center justify-center text-indigo-400 font-bold">Updating Data...</div>}
 
+                        {/* ═══ OVERVIEW TAB ═══ */}
                         {activeTab === 'overview' && (
                             <div className="page-animate">
                                 <PageHeader title="Business Intelligence" subtitle="System Performance Summary" />
@@ -310,7 +378,7 @@
                                         { label: 'Total Reach', val: stats.shopsTotal, col: 'text-white' },
                                         { label: 'Active Shops', val: stats.activeShops, col: 'text-emerald-400' },
                                         { label: 'Global Sales', val: '₹' + stats.revenue.toLocaleString(), col: 'text-indigo-400' },
-                                        { label: 'Subscription Revenue', val: '₹' + stats.subscriptionRev.toLocaleString(), col: 'text-orange-400' }
+                                        { label: 'Subscription Revenue', val: '₹' + (stats.subscriptionRev || 0).toLocaleString(), col: 'text-orange-400' }
                                     ].map(s => (
                                         <div key={s.label} className="glass-card p-6 rounded-[28px]">
                                             <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.label}</p>
@@ -341,7 +409,7 @@
                                         {shops.slice(0, 1).map(s => (
                                             <div key={s.id}>
                                                 <p className="text-3xl font-black text-white mb-2">{s.name}</p>
-                                                <p className="text-slate-400 text-sm mb-6">{s.owner_name} &middot; {s.mobile_number}</p>
+                                                <p className="text-slate-400 text-sm mb-6 font-medium">{s.owner_name} &middot; {s.mobile_number}</p>
                                                 <div className="flex gap-4">
                                                     <div className="bg-indigo-500/10 px-4 py-2 rounded-xl">
                                                         <p className="text-[9px] font-bold text-indigo-400 uppercase">Lifetime Sales</p>
@@ -359,6 +427,7 @@
                             </div>
                         )}
 
+                        {/* ═══ SHOPS TAB ═══ */}
                         {activeTab === 'shops' && (
                             <div className="page-animate">
                                 <PageHeader title="Shop Ecosystem" subtitle="Software Installations & Activation Control" />
@@ -368,61 +437,187 @@
                                             <tr>
                                                 <th className="px-8 py-5">Installation ID</th>
                                                 <th className="px-8 py-5">Store Name</th>
-                                                <th className="px-8 py-5 text-center">Software status</th>
+                                                <th className="px-6 py-5 text-center">Validity</th>
+                                                <th className="px-8 py-5 text-center">Software Status</th>
                                                 <th className="px-8 py-5 text-right">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/[0.03]">
-                                            {shops.map(shop => (
-                                                <tr key={shop.id} className="hover:bg-white/[0.01] transition-colors">
-                                                    <td className="px-8 py-6 font-mono text-[10px] text-slate-500 uppercase tracking-tighter">{shop.id}</td>
-                                                    <td className="px-8 py-6">
-                                                        <p className="font-bold text-white text-sm">{shop.name}</p>
-                                                        <p className="text-[10px] text-slate-500 font-medium">Synced: {new Date(shop.updated_at).toLocaleDateString()}</p>
-                                                    </td>
-                                                    <td className="px-8 py-6">
-                                                        <div className="flex justify-center">
-                                                            <button onClick={() => toggleShop(shop.id, shop.is_active)} className={`flex items-center gap-2 px-5 py-2 rounded-full text-[10px] font-black transition-all ${shop.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                                                                <span className={`w-1.5 h-1.5 rounded-full ${shop.is_active ? 'bg-emerald-400' : 'bg-red-500'}`}></span>
-                                                                {shop.is_active ? 'ACTIVATED' : 'DEACTIVATED'}
+                                            {shops.map(shop => {
+                                                const daysLeft = getDaysLeft(shop.validity_end);
+                                                const badge = getDaysBadge(daysLeft);
+                                                return (
+                                                    <tr key={shop.id} className="hover:bg-white/[0.01] transition-colors">
+                                                        <td className="px-8 py-6 font-mono text-[10px] text-slate-500 uppercase tracking-tighter">{shop.id}</td>
+                                                        <td className="px-8 py-6">
+                                                            <p className="font-bold text-white text-sm">{shop.name}</p>
+                                                            <p className="text-[10px] text-slate-500 font-medium">Synced: {new Date(shop.updated_at).toLocaleDateString()}</p>
+                                                        </td>
+                                                        <td className="px-6 py-6">
+                                                            <div className="flex justify-center">
+                                                                <span className={`px-3 py-1 rounded-full text-[10px] font-black ${badge.bg} ${badge.text} ${daysLeft !== null && daysLeft <= 7 ? 'pulse-warn' : ''}`}>
+                                                                    {badge.label}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-8 py-6">
+                                                            <div className="flex justify-center">
+                                                                <button onClick={() => toggleShop(shop.id, shop.is_active)} className={`flex items-center gap-2 px-5 py-2 rounded-full text-[10px] font-black transition-all ${shop.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+                                                                    <span className={`w-1.5 h-1.5 rounded-full ${shop.is_active ? 'bg-emerald-400' : 'bg-red-500'}`}></span>
+                                                                    {shop.is_active ? 'ACTIVATED' : 'DEACTIVATED'}
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-8 py-6 text-right">
+                                                            <button onClick={() => confirmDelete(shop.id, shop.name)} className="w-9 h-9 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center ml-auto hover:bg-red-500 hover:text-white transition">
+                                                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                             </button>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-8 py-6 text-right">
-                                                        <button onClick={() => confirmDelete(shop.id, shop.name)} className="w-9 h-9 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center ml-auto hover:bg-red-500 hover:text-white transition">
-                                                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
                             </div>
                         )}
 
+                        {/* ═══ VALIDITY / SUBSCRIPTION TAB ═══ */}
+                        {activeTab === 'validity' && (
+                            <div className="page-animate">
+                                <PageHeader title="Subscription Management" subtitle="Validity Control & Payment Tracking" />
+
+                                {/* Summary Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                                    <div className="glass-card p-6 rounded-[28px]">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Shops</p>
+                                        <p className="text-3xl font-black text-white">{stats.shopsTotal}</p>
+                                    </div>
+                                    <div className="glass-card p-6 rounded-[28px]">
+                                        <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Paid & Active</p>
+                                        <p className="text-3xl font-black text-emerald-400">{shops.filter(s => s.is_paid).length}</p>
+                                    </div>
+                                    <div className="glass-card p-6 rounded-[28px]">
+                                        <p className="text-[9px] font-black text-red-400 uppercase tracking-widest mb-1">Unpaid / Expired</p>
+                                        <p className="text-3xl font-black text-red-400">{shops.filter(s => !s.is_paid || getDaysLeft(s.validity_end) <= 0).length}</p>
+                                    </div>
+                                </div>
+
+                                {/* Validity Table */}
+                                <div className="glass-card rounded-[32px] overflow-hidden">
+                                    <table className="w-full text-left">
+                                        <thead className="bg-white/[0.02] text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5">
+                                            <tr>
+                                                <th className="px-6 py-5">Shop</th>
+                                                <th className="px-6 py-5 text-center">Start Date</th>
+                                                <th className="px-6 py-5 text-center">Expiry Date</th>
+                                                <th className="px-6 py-5 text-center">Remaining</th>
+                                                <th className="px-6 py-5 text-center">Payment Status</th>
+                                                <th className="px-6 py-5 text-center">Toggle Paid</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/[0.03]">
+                                            {shops.map(shop => {
+                                                const daysLeft = getDaysLeft(shop.validity_end);
+                                                const badge = getDaysBadge(daysLeft);
+                                                const isPaid = !!shop.is_paid;
+                                                return (
+                                                    <tr key={shop.id} className="hover:bg-white/[0.01] transition-colors">
+                                                        <td className="px-6 py-5">
+                                                            <p className="font-bold text-white text-sm">{shop.name}</p>
+                                                            <p className="text-[10px] text-slate-500 font-mono">{shop.id}</p>
+                                                        </td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <span className="text-xs text-slate-400 font-medium">{formatDate(shop.validity_start)}</span>
+                                                        </td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <span className={`text-xs font-bold ${daysLeft !== null && daysLeft <= 7 ? 'text-orange-400' : 'text-slate-300'}`}>
+                                                                {formatDate(shop.validity_end)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-black ${badge.bg} ${badge.text} ${daysLeft !== null && daysLeft <= 7 ? 'pulse-warn' : ''}`}>
+                                                                {daysLeft !== null && daysLeft > 0 && (
+                                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                                )}
+                                                                {daysLeft !== null ? `${daysLeft} days` : 'Not set'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-5 text-center">
+                                                            <span className={`px-3 py-1 rounded-full text-[10px] font-black ${isPaid ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+                                                                {isPaid ? '🟢 PAID' : '🔴 NOT PAID'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-5">
+                                                            <div className="flex justify-center">
+                                                                <button
+                                                                    onClick={() => togglePayment(shop.id, isPaid)}
+                                                                    className={`toggle-switch ${isPaid ? 'on' : 'off'}`}
+                                                                    title={isPaid ? 'Click to mark as unpaid' : 'Click to confirm payment & renew 30 days'}
+                                                                >
+                                                                    <div className="toggle-knob"></div>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* Info Note */}
+                                <div className="mt-8 glass-card p-6 rounded-[24px] border-l-4 border-indigo-500/30">
+                                    <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                                        <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                        How Validity Works
+                                    </h4>
+                                    <div className="text-xs text-slate-400 space-y-2 leading-relaxed">
+                                        <p>• Each shop gets <strong className="text-white">30 days</strong> of validity upon activation/payment.</p>
+                                        <p>• In the <strong className="text-orange-400">last 7 days</strong>, a warning is shown on both the desktop app and owner mobile app.</p>
+                                        <p>• After expiry, the desktop app <strong className="text-red-400">automatically locks</strong> with an "Activation Required" screen.</p>
+                                        <p>• Toggle the <strong className="text-emerald-400">Paid</strong> switch to ON to renew for another 30 days.</p>
+                                        <p>• <strong className="text-indigo-400">Online:</strong> Clicking "Deactivate" in the Shops tab immediately disables the shop.</p>
+                                        <p>• <strong className="text-indigo-400">Offline:</strong> The validity timer continues running locally — app auto-locks on expiry even without internet.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ OWNERS TAB ═══ */}
                         {activeTab === 'owners' && (
                             <div className="page-animate">
                                 <PageHeader title="Owner Directory" subtitle="Managing Shop Owner Identities" />
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    {shops.map(shop => (
-                                        <div key={shop.id} className="glass-card p-6 rounded-[32px] border-l-4 border-indigo-500/30">
-                                            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-4">Master Account</p>
-                                            <p className="text-xl font-black text-white mb-1">{shop.owner_name || 'No Name Set'}</p>
-                                            <p className="text-slate-400 text-sm mb-4 font-medium">{shop.owner_email}</p>
+                                    {shops.map(shop => {
+                                        const daysLeft = getDaysLeft(shop.validity_end);
+                                        return (
+                                            <div key={shop.id} className="glass-card p-6 rounded-[32px] border-l-4 border-indigo-500/30">
+                                                <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-4">Master Account</p>
+                                                <p className="text-xl font-black text-white mb-1">{shop.owner_name || 'No Name Set'}</p>
+                                                <p className="text-slate-400 text-sm mb-4 font-medium">{shop.owner_email}</p>
 
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                                                    {shop.mobile_number || 'N/A'}
-                                                </div>
-                                                <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1" /></svg>
-                                                    Works at: <span className="text-white font-bold ml-1">{shop.name}</span>
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                                                        {shop.mobile_number || 'N/A'}
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1" /></svg>
+                                                        Works at: <span className="text-white font-bold ml-1">{shop.name}</span>
+                                                    </div>
+                                                    {daysLeft !== null && (
+                                                        <div className="flex items-center gap-3 text-xs">
+                                                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                            <span className={daysLeft <= 7 ? 'text-orange-400 font-bold' : 'text-slate-500'}>
+                                                                Validity: {daysLeft} days remaining
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
