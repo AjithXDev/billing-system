@@ -8,43 +8,9 @@ const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
 const { v4: uuidv4 } = require("uuid");
 const { createClient } = require('@supabase/supabase-js');
-const nodemailer = require('nodemailer');
 
-// ── EMAIL OTP SYSTEM ──
-const otpStore = new Map(); // email -> { code, expiresAt }
-
-const emailTransporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: 'innoaivators@gmail.com',
-    pass: 'xjhq ofge pmkh tqof'  // Gmail App Password
-  }
-});
-
-async function sendOtpEmail(toEmail, otpCode) {
-  const mailOptions = {
-    from: '"Innoaivators" <innoaivators@gmail.com>',
-    to: toEmail,
-    subject: `🔐 Your Verification Code: ${otpCode}`,
-    html: `
-      <div style="font-family: 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; background: #0f172a; border-radius: 16px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px; text-align: center;">
-          <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 800;">INNOAIVATORS</h1>
-          <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 13px;">Smart Billing System</p>
-        </div>
-        <div style="padding: 32px; text-align: center;">
-          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">Your email verification code is:</p>
-          <div style="background: rgba(99,102,241,0.1); border: 2px dashed #6366f1; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-            <span style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #f8fafc; font-family: monospace;">${otpCode}</span>
-          </div>
-          <p style="color: #64748b; font-size: 12px;">This code expires in <strong style="color: #f59e0b;">10 minutes</strong>.</p>
-          <p style="color: #475569; font-size: 11px; margin-top: 20px;">If you did not request this, please ignore this email.</p>
-        </div>
-      </div>
-    `
-  };
-  return emailTransporter.sendMail(mailOptions);
-}
+// ── EMAIL OTP SYSTEM (uses Supabase Auth — zero SMTP config needed) ──
+const otpStore = new Map(); // email -> { code, expiresAt } — fallback store
 
 // ── HARDWARE LICENSING ──
 function getMachineId() {
@@ -1496,39 +1462,60 @@ ipcMain.handle("check-email-exists", async (event, email) => {
   }
 });
 
-// Send OTP to email
+// Send OTP to email (uses Supabase Auth built-in email — works instantly)
 ipcMain.handle("send-otp", async (event, email) => {
+  // Ensure supabase is initialized
+  if (!supabase) {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings = {};
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
+    }
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+    if (url && key) initSupabase(url, key);
+  }
+  if (!supabase) return { success: false, error: 'Cloud not connected. Check internet.' };
+
   try {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-    otpStore.set(email.trim().toLowerCase(), { code, expiresAt });
-    
-    await sendOtpEmail(email.trim(), code);
-    console.log(`[OTP] ✅ Verification code sent to ${email}`);
+    // Use Supabase Auth to send OTP email (built-in email service, no SMTP needed)
+    const { data, error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        shouldCreateUser: true,
+      }
+    });
+
+    if (error) {
+      console.error('[OTP] Supabase Auth error:', error.message);
+      return { success: false, error: error.message };
+    }
+
+    console.log(`[OTP] \u2705 Verification code sent to ${email} via Supabase Auth`);
     return { success: true, message: 'Verification code sent to your email.' };
   } catch (e) {
-    console.error('[OTP] ❌ Failed to send:', e.message);
-    return { success: false, error: 'Failed to send email. Check your internet connection.' };
+    console.error('[OTP] \u274c Failed:', e.message);
+    return { success: false, error: 'Failed to send verification code: ' + e.message };
   }
 });
 
-// Verify OTP
+// Verify OTP (uses Supabase Auth built-in verification)
 ipcMain.handle("verify-otp", async (event, { email, code }) => {
+  if (!supabase) return { success: false, error: 'Cloud not connected.' };
+
   try {
-    const stored = otpStore.get(email.trim().toLowerCase());
-    if (!stored) {
-      return { success: false, error: 'No verification code found. Please request a new one.' };
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: code.trim(),
+      type: 'email'
+    });
+
+    if (error) {
+      console.error('[OTP] Verify error:', error.message);
+      return { success: false, error: error.message };
     }
-    if (Date.now() > stored.expiresAt) {
-      otpStore.delete(email.trim().toLowerCase());
-      return { success: false, error: 'Code expired. Please request a new one.' };
-    }
-    if (stored.code !== code.trim()) {
-      return { success: false, error: 'Invalid code. Please check and try again.' };
-    }
-    // Success — clean up
-    otpStore.delete(email.trim().toLowerCase());
-    console.log(`[OTP] ✅ Email ${email} verified successfully!`);
+
+    console.log(`[OTP] \u2705 Email ${email} verified successfully!`);
     return { success: true };
   } catch (e) {
     return { success: false, error: 'Verification failed: ' + e.message };
