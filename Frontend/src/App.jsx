@@ -122,6 +122,7 @@ function App() {
   const [shopId, setShopId]             = useState('');
   const [showPairing, setShowPairing]   = useState(false);
   const [validityWarning, setValidityWarning] = useState(null); // { daysLeft, validityEnd }
+  const [warningDismissed, setWarningDismissed] = useState(false);
   const [subscriptionExpired, setSubscriptionExpired] = useState(false);
 
   const navItems = [
@@ -173,11 +174,13 @@ function App() {
       // Also check validity/subscription
       const validity = await window.api.getValidity?.();
       if (validity) {
-        if (validity.warningPhase) {
+        if (validity.warningPhase && !warningDismissed) {
           setValidityWarning({ daysLeft: validity.daysLeft, validityEnd: validity.validityEnd });
         }
-        if (!validity.valid && validity.daysLeft <= 0) {
+        if (!validity.valid) {
           setSubscriptionExpired(true);
+        } else {
+          setSubscriptionExpired(false);
         }
       }
     } catch (e) {
@@ -258,12 +261,15 @@ function App() {
   if (!license.is_active) return <LockScreen hwid={license.hwid} note={license.note} onRetry={checkLicense} />;
 
   // Subscription expired — show lock screen
-  if (subscriptionExpired) return <LockScreen hwid={''} note="Subscription expired" onRetry={async () => {
+  if (subscriptionExpired) return <LockScreen hwid={''} note="You cannot open the desktop application because the subscription amount has not been paid." onRetry={async () => {
     const validity = await window.api?.getValidity?.();
-    if (validity?.valid) {
+    if (validity && validity.valid) {
       setSubscriptionExpired(false);
       setValidityWarning(null);
+      setWarningDismissed(false);
     }
+    // Also recheck license to ensure active
+    checkLicense();
   }} />;
 
   return (
@@ -404,6 +410,24 @@ function App() {
 
         {/* ── Pairing Code Modal ─────────────────────────────── */}
         {showPairing && <PairingCode shopId={shopId} onClose={() => setShowPairing(false)} />}
+
+        {/* ── Validity Warning Modal ─────────────────────────────── */}
+        {validityWarning && !warningDismissed && (
+          <div className="modal-overlay" style={{ zIndex: 9999 }}>
+            <div className="modal-content" style={{ maxWidth: '420px', textAlign: 'center', padding: '30px', borderRadius: '16px', background: '#1e293b', border: '1px solid #eab308' }}>
+              <div style={{ fontSize: '40px', marginBottom: '10px' }}>\u23f3</div>
+              <h2 style={{ color: '#f8fafc', marginBottom: '10px', fontSize: '20px' }}>Subscription Notice</h2>
+              <p style={{ color: '#cbd5e1', fontSize: '15px', marginBottom: '25px' }}>
+                Only <strong style={{ color: '#eab308' }}>{validityWarning.daysLeft} days</strong> remaining. Please pay the subscription amount.
+              </p>
+              <button 
+                onClick={() => { setWarningDismissed(true); setValidityWarning(null); }}
+                style={{ background: '#3b82f6', color: 'white', padding: '10px 24px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', outline: 'none' }}>
+                OK
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     </ErrorBoundary>

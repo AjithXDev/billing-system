@@ -366,8 +366,9 @@ async function checkValidity(shopId) {
         const now = new Date();
         const end = new Date(cached.validity_end);
         const daysLeft = Math.ceil((end - now) / 86400000);
+        const isExpired = (daysLeft <= 0) && (!cached.is_paid);
         return {
-          valid: daysLeft > 0 && cached.is_paid,
+          valid: !isExpired,
           daysLeft: Math.max(0, daysLeft),
           validityEnd: cached.validity_end,
           isPaid: !!cached.is_paid,
@@ -399,13 +400,15 @@ async function checkValidity(shopId) {
       shop.is_paid ? 1 : 0
     );
 
+    const isExpired = (daysLeft <= 0) && (!shop.is_paid);
+
     return {
-      valid: shop.is_active && daysLeft > 0,
-      daysLeft: Math.max(0, daysLeft),
+      valid: !isExpired,
+      daysLeft: Math.floor(daysLeft), // Can be negative internally, but UI displays max(0) usually.
       validityEnd: end.toISOString(),
       isPaid: !!shop.is_paid,
       isActive: !!shop.is_active,
-      warningPhase: daysLeft <= 7 && daysLeft > 0,
+      warningPhase: (daysLeft <= 7 && daysLeft > 0),
       isOffline: false
     };
   } catch (e) {
@@ -1577,6 +1580,8 @@ ipcMain.handle("register-shop", async (event, data) => {
     const newShopId = `shop-${uuidv4().slice(0, 8)}`;
 
     // Create shop in Supabase (status default is disabled in DB)
+    const now = new Date();
+    const end = new Date(now.getTime() + 30 * 86400000);
     const { error } = await supabase
       .from("shops")
       .insert({
@@ -1587,7 +1592,10 @@ ipcMain.handle("register-shop", async (event, data) => {
         name: shopName,
         shop_email: shopEmail || email,
         master_key: settings.masterKey || "owner123",
-        is_active: false 
+        is_active: false,
+        is_paid: true,
+        validity_start: now.toISOString(),
+        validity_end: end.toISOString()
       });
 
     if (error) {
