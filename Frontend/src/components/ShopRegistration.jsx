@@ -6,11 +6,14 @@ import logoUrl from "../assets/logo.png";
  * Implements a world-class split-screen layout similar to top-tier SaaS products.
  */
 export default function ShopRegistration({ onRegistered }) {
+  const [isLoginMode, setIsLoginMode] = useState(false);
   const [shopName, setShopName]   = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [mobile, setMobile]       = useState("");
   const [email, setEmail]         = useState("");
-  const [loading, setLoading]     = useState(false);  const [error, setError]         = useState("");
+  const [masterKey, setMasterKey] = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState("");
 
     const handleRegister = async () => {
         if (!shopName.trim() || !ownerName.trim() || !mobile.trim() || !email.trim()) {
@@ -38,26 +41,7 @@ export default function ShopRegistration({ onRegistered }) {
             });
 
             if (result.success) {
-                try {
-                    const currentSettings = await window.api.getAppSettings() || {};
-                    const newSettings = {
-                        ...currentSettings,
-                        storeName: shopName.trim(),
-                        ownerName: ownerName.trim(),
-                        ownerPhone: mobile.trim(),
-                        ownerEmail: email.trim()
-                    };
-                    await window.api.saveAppSettings(newSettings);
-                    
-                    // Sync with localStorage so App.jsx picks it up immediately
-                    localStorage.setItem("smart_billing_settings", JSON.stringify(newSettings));
-                    
-                    if (window.api.setWindowTitle) window.api.setWindowTitle(shopName.trim());
-                    window.dispatchEvent(new CustomEvent('settings_updated'));
-                    
-                    // Transition to Terminal instantly as requested
-                    onRegistered(result.shopId);
-                } catch (err) { console.error("Sync error:", err); }
+                await completeAuthAndLaunch(result.shopId, shopName, ownerName, mobile, email, "owner123");
             } else {
                 setError(result.error || "Cloud gateway timeout. Check connection.");
             }
@@ -66,6 +50,52 @@ export default function ShopRegistration({ onRegistered }) {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleLogin = async () => {
+        if (!email.trim() || !masterKey.trim()) {
+            setError("Identification email and master key are required.");
+            return;
+        }
+        setLoading(true);
+        setError("");
+
+        try {
+            const result = await window.api.loginShop({
+                email: email.trim(),
+                masterKey: masterKey.trim()
+            });
+
+            if (result.success) {
+                await completeAuthAndLaunch(result.shopId, result.name, result.ownerName, result.mobileNumber, email, masterKey);
+            } else {
+                setError(result.error || "Invalid credentials. Try again.");
+            }
+        } catch (e) {
+            setError("Failed to verify credentials with cloud.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const completeAuthAndLaunch = async (id, name, owner, phone, email, mKey) => {
+        try {
+            const currentSettings = await window.api.getAppSettings() || {};
+            const newSettings = {
+                ...currentSettings,
+                shopId: id,
+                storeName: name || currentSettings.storeName,
+                ownerName: owner || currentSettings.ownerName,
+                ownerPhone: phone || currentSettings.ownerPhone,
+                ownerEmail: email || currentSettings.ownerEmail,
+                masterKey: mKey || currentSettings.masterKey
+            };
+            await window.api.saveAppSettings(newSettings);
+            localStorage.setItem("smart_billing_settings", JSON.stringify(newSettings));
+            if (window.api.setWindowTitle && name) window.api.setWindowTitle(name);
+            window.dispatchEvent(new CustomEvent('settings_updated'));
+            onRegistered(id);
+        } catch (err) { console.error("Sync error:", err); }
     };
 
 
@@ -96,63 +126,99 @@ export default function ShopRegistration({ onRegistered }) {
           </div>
       </div>
 
-      {/* RIGHT PANEL: Registration Form */}
+      {/* RIGHT PANEL: Registration/Login Form */}
       <div className="form-panel">
           <div className="form-inner">
               <div className="form-header">
-                <h1>Initial Setup</h1>
-                <p>Register your terminal to begin operations.</p>
+                <h1>{isLoginMode ? "Existing System Link" : "Initial Setup"}</h1>
+                <p>{isLoginMode ? "Sign in to synchronize your existing shop data." : "Register your terminal to begin operations."}</p>
               </div>
 
               <div className="setup-form">
-                  <div className="input-group">
-                      <label>Business / Venture Name</label>
-                      <input
-                        type="text"
-                        value={shopName}
-                        onChange={(e) => setShopName(e.target.value)}
-                        placeholder="e.g. Phoenix Enterprises"
-                        autoFocus
-                      />
-                  </div>
+                  {isLoginMode ? (
+                      <>
+                          <div className="input-group">
+                              <label>Business Email</label>
+                              <input
+                                  type="email"
+                                  value={email}
+                                  onChange={(e) => setEmail(e.target.value)}
+                                  placeholder="owner@enterprise.com"
+                                  autoFocus
+                              />
+                          </div>
+                          <div className="input-group">
+                              <label>Master Access Key</label>
+                              <input
+                                  type="password"
+                                  value={masterKey}
+                                  onChange={(e) => setMasterKey(e.target.value)}
+                                  placeholder="••••••••"
+                                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                              />
+                          </div>
+                      </>
+                  ) : (
+                      <>
+                          <div className="input-group">
+                              <label>Business / Venture Name</label>
+                              <input
+                                type="text"
+                                value={shopName}
+                                onChange={(e) => setShopName(e.target.value)}
+                                placeholder="e.g. Phoenix Enterprises"
+                                autoFocus
+                              />
+                          </div>
 
-                  <div className="input-group">
-                      <label>Primary Owner Identity</label>
-                      <input
-                        type="text"
-                        value={ownerName}
-                        onChange={(e) => setOwnerName(e.target.value)}
-                        placeholder="Full Legal Name"
-                      />
-                  </div>
+                          <div className="input-group">
+                              <label>Primary Owner Identity</label>
+                              <input
+                                type="text"
+                                value={ownerName}
+                                onChange={(e) => setOwnerName(e.target.value)}
+                                placeholder="Full Legal Name"
+                              />
+                          </div>
 
-                  <div className="input-group">
-                      <label>Business Email</label>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="owner@enterprise.com"
-                      />
-                  </div>
+                          <div className="input-group">
+                              <label>Business Email</label>
+                              <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="owner@email.com"
+                              />
+                          </div>
 
-                  <div className="input-group">
-                      <label>Communication Hub (Mobile)</label>
-                      <input
-                        type="tel"
-                        value={mobile}
-                        onChange={(e) => setMobile(e.target.value.replace(/[^0-9+]/g, ""))}
-                        placeholder="+91 XXXX XXXX XX"
-                        maxLength={15}
-                        onKeyDown={(e) => e.key === "Enter" && handleRegister()}
-                      />
-                  </div>
+                          <div className="input-group">
+                              <label>Communication Hub (Mobile)</label>
+                              <input
+                                type="tel"
+                                value={mobile}
+                                onChange={(e) => setMobile(e.target.value.replace(/[^0-9+]/g, ""))}
+                                placeholder="+91 XXXX XXXX XX"
+                                maxLength={15}
+                                onKeyDown={(e) => e.key === "Enter" && handleRegister()}
+                              />
+                          </div>
+                      </>
+                  )}
 
                   {error && <div className="setup-error">⚠️ {error}</div>}
 
-                  <button className="setup-submit-btn" onClick={handleRegister} disabled={loading}>
-                      {loading ? "Establishing Secure Connection..." : "Register & Launch Terminal"}
+                  <button className="setup-submit-btn" onClick={isLoginMode ? handleLogin : handleRegister} disabled={loading}>
+                      {loading ? "Establishing Secure Connection..." : isLoginMode ? "Verify & Link Terminal" : "Register & Launch Terminal"}
                   </button>
+
+                  <div style={{ textAlign: "center", marginTop: 10 }}>
+                      <button 
+                        onClick={() => { setIsLoginMode(!isLoginMode); setError(""); }}
+                        style={{ background: "none", border: "none", color: "#6366f1", fontWeight: "700", cursor: "pointer", fontSize: 13 }}
+                      >
+                          {isLoginMode ? "Don't have a shop? Register New" : "Already have a shop? Sign In"}
+                      </button>
+                  </div>
               </div>
 
               <div className="form-footer">

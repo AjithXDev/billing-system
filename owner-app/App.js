@@ -44,6 +44,12 @@ function OwnerApp() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetAccessToken, setResetAccessToken] = useState('');
+  const [userToken, setUserToken] = useState('');
+  
+  // Sign up state
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupName, setSignupName] = useState('');
 
   const pollRef = useRef(null);
   const [dashData, setDashData] = useState(null);
@@ -54,7 +60,7 @@ function OwnerApp() {
     const url = `${SUPABASE_URL}/rest/v1/${table}${query}`;
     const headers = { 
       'apikey': SUPABASE_KEY, 
-      'Authorization': `Bearer ${SUPABASE_KEY}`, 
+      'Authorization': `Bearer ${userToken || SUPABASE_KEY}`, 
       'Content-Type': 'application/json',
       'Prefer': method === 'POST' ? 'return=representation' : undefined
     };
@@ -139,8 +145,31 @@ function OwnerApp() {
     if (!email || !password) { setError('Enter credentials'); return; }
     setLoading(true); setError('');
     try {
-      await sbAuth('token?grant_type=password', { email: email.trim().toLowerCase(), password });
-      setScreen('enter_shop_id');
+      const data = await sbAuth('token?grant_type=password', { email: email.trim().toLowerCase(), password });
+      setUserToken(data.access_token);
+      
+      // Check if they have a shop
+      const shops = await sbFetch('shops', 'GET', null, `?owner_email=eq.${email.trim().toLowerCase()}&select=id`);
+      if (shops && shops.length > 0) {
+        setShopId(shops[0].id);
+        setScreen('dashboard');
+      } else {
+        setScreen('enter_shop_id');
+      }
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const signUp = async () => {
+    if (!signupEmail || !signupPassword || !signupName) { setError('Fill in all fields'); return; }
+    if (signupPassword.length < 6) { setError('Password must be at least 6 characters'); return; }
+    setLoading(true); setError('');
+    try {
+      // 1. Create Auth User
+      await sbAuth('signup', { email: signupEmail.trim().toLowerCase(), password: signupPassword, data: { full_name: signupName } });
+      setSuccess('Account created! Please check your email for verification (if enabled) or just login.');
+      setEmail(signupEmail);
+      setScreen('login');
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
@@ -170,9 +199,15 @@ function OwnerApp() {
     if (!email || !password) { setError('Enter credentials'); return; }
     setLoading(true); setError('');
     try {
-      await sbAuth('token?grant_type=password', { email: email.trim().toLowerCase(), password });
+      const data = await sbAuth('token?grant_type=password', { email: email.trim().toLowerCase(), password });
+      setUserToken(data.access_token);
+      
       const shops = await sbFetch('shops', 'GET', null, `?owner_email=eq.${email.trim().toLowerCase()}&select=id`);
-      if (!shops || shops.length === 0) { setError('No shop found for this account.'); setLoading(false); return; }
+      if (!shops || shops.length === 0) {
+        setScreen('enter_shop_id'); 
+        setLoading(false); 
+        return; 
+      }
       const sid = shops[0].id;
       setShopId(sid);
       // Check if this device is already paired
@@ -417,16 +452,38 @@ render();
         <Text style={styles.h}>Owner Access</Text>
       </View>
       <View style={styles.cg}>
-        <TouchableOpacity style={styles.pb} onPress={() => { setError(''); setSuccess(''); setScreen('login'); }}>
-          <Text style={styles.pt}>Sign In</Text>
+        <TouchableOpacity style={styles.pb} onPress={() => { setError(''); setSuccess(''); setScreen('signup'); }}>
+          <Text style={styles.pt}>Create Account</Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={{marginTop: 20, alignSelf: 'center'}} 
-          onPress={() => { setError(''); setSuccess(''); setScreen('quick_login'); }}
+          style={styles.ob} 
+          onPress={() => { setError(''); setSuccess(''); setScreen('login'); }}
         >
-          <Text style={{color:'#888', fontSize: 13, fontWeight: '700'}}>
-            Already have an account? <Text style={{color: '#6366f1'}}>Login</Text>
-          </Text>
+          <Text style={styles.ot}>Login to Existing Account</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  const renderSignUp = () => (
+    <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
+      <View style={styles.bh}>
+        <Text style={styles.bt}>INNO<Text style={{color:'#6366f1'}}>AIVATORS</Text></Text>
+        <Text style={styles.h}>Create Account</Text>
+      </View>
+      <View style={styles.cg}>
+        <Label>Full Name</Label>
+        <TextInput style={styles.i} value={signupName} onChangeText={setSignupName} placeholder="John Doe" placeholderTextColor="#444" />
+        <Label>Email</Label>
+        <TextInput style={styles.i} value={signupEmail} onChangeText={setSignupEmail} placeholder="owner@email.com" placeholderTextColor="#444" autoCapitalize="none" keyboardType="email-address" />
+        <Label>Password</Label>
+        <TextInput style={styles.i} value={signupPassword} onChangeText={setSignupPassword} placeholder="••••••••" placeholderTextColor="#444" secureTextEntry />
+        {error ? <ErrBox msg={error} /> : null}
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={signUp}>
+          <Text style={styles.pt}>{loading ? 'Creating...' : 'Create Account'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.ob} onPress={() => setScreen('start')}>
+          <Text style={styles.ot}>Back</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -507,12 +564,15 @@ render();
   // ────────────────────────────────────────────
   const renderEnterShopId = () => (
     <ScrollView contentContainerStyle={styles.sw} keyboardShouldPersistTaps="handled">
-      <View style={styles.bh}><Text style={styles.h}>Enter Shop ID</Text><Text style={styles.sh}>Enter the Shop ID provided during registration to link your device.</Text></View>
+      <View style={styles.bh}>
+        <Text style={styles.h}>Link Your POS</Text>
+        <Text style={styles.sh}>Look at your Desktop POS screen and enter the Shop ID shown there.</Text>
+      </View>
       <View style={styles.cg}>
-        <Label>Shop ID</Label>
-        <TextInput style={styles.i} value={shopIdInput} onChangeText={setShopIdInput} placeholder="e.g. shop_abc123" placeholderTextColor="#444" autoCapitalize="none" />
+        <Label>Shop ID from Desktop</Label>
+        <TextInput style={styles.i} value={shopIdInput} onChangeText={setShopIdInput} placeholder="e.g. shop_iva_9923" placeholderTextColor="#444" autoCapitalize="none" />
         {error ? <ErrBox msg={error} /> : null}
-        <TouchableOpacity style={styles.pb} disabled={loading} onPress={submitShopId}><Text style={styles.pt}>{loading ? 'Verifying...' : 'Continue'}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.pb} disabled={loading} onPress={submitShopId}><Text style={styles.pt}>{loading ? 'Connecting...' : 'Generate 6-Digit Code'}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.ob} onPress={() => { setError(''); setScreen('login'); }}><Text style={styles.ot}>Back</Text>
         </TouchableOpacity>
       </View>
@@ -595,6 +655,7 @@ render();
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         {screen === 'loading' && <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator size="large" color="#6366f1" /><TouchableOpacity style={{marginTop:20, alignSelf:'center'}} onPress={()=>setScreen('start')}><Text style={{color:'#6366f1'}}>Jump to Start</Text></TouchableOpacity></View>}
         {screen === 'start' && renderStart()}
+        {screen === 'signup' && renderSignUp()}
         {screen === 'login' && renderSignIn()}
         {screen === 'quick_login' && renderQuickLogin()}
         {screen === 'enter_shop_id' && renderEnterShopId()}

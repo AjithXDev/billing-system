@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld("api", {
 
   // 🏪 Shop Registration & Pairing
   registerShop:        (data)         => ipcRenderer.invoke("register-shop", data),
+  loginShop:           (data)         => ipcRenderer.invoke("login-shop", data),
   getRegistrationStatus: ()           => ipcRenderer.invoke("get-registration-status"),
   validatePairingCode: (code)         => ipcRenderer.invoke("validate-pairing-code", code),
   getPairingStatus:    (code)         => ipcRenderer.invoke("get-pairing-status", code),
@@ -68,4 +69,5 @@ contextBridge.exposeInMainWorld("api", {
   // 🪟 Window Controls
   minimizeWindow: () => ipcRenderer.invoke("minimize-window"),
   closeWindow:    () => ipcRenderer.invoke("close-window"),
+  createBackup:   () => ipcRenderer.invoke("create-backup"),
 });

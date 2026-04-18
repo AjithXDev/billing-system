@@ -29,8 +29,11 @@ function initSupabase(url, key) {
   }
 }
 async function syncToCloud(shopId) {
-  if (!supabase) return;
+  if (!supabase || !shopId) return;
   try {
+    // 0. Ensure shop is registered in cloud first
+    await registerShop(shopId);
+
     // 1. Sync Products (with category name join)
     const products = db.prepare(`
       SELECT p.*, c.name as category_name 
@@ -353,10 +356,9 @@ function createWindow() {
       // ── Cloud Sync ──
       if (url && key && url.startsWith('http')) {
         initSupabase(url, key);
-        // Register shop in Supabase for mobile auth from anywhere
-        registerShop(currentShopId).catch(() => { });
-        // Cloud sync is async and network-bound, keep it separate from tight local loops
-        syncToCloud(currentShopId).catch(console.error);
+        if (currentShopId) {
+          syncToCloud(currentShopId).catch(console.error);
+        }
       }
     } catch (e) { console.error("[Sync Loop Error]", e.message); }
   }, 60000);
@@ -533,6 +535,26 @@ ipcMain.handle("close-window", () => {
   if (mainWindow) mainWindow.close();
 });
 
+ipcMain.handle("create-backup", async () => {
+  try {
+    const backupDir = path.join(os.homedir(), "Documents", "Innoaivators_Backups");
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const sourcePath = db.name; // In better-sqlite3, db.name is the file path
+    const backupPath = path.join(backupDir, `billing_backup_${timestamp}.db`);
+    
+    fs.copyFileSync(sourcePath, backupPath);
+    
+    // Open the folder for them
+    shell.showItemInFolder(backupPath);
+    
+    return { success: true, message: `Backup saved to Documents/Innoaivators_Backups`, path: backupPath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle("get-sync-status", () => {
   const pendingInvoices = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE is_synced = 0").get().cnt;
   const pendingProducts = db.prepare("SELECT COUNT(*) as cnt FROM products WHERE is_synced = 0").get().cnt;
@@ -691,6 +713,18 @@ ipcMain.handle("create-invoice", async (event, data) => {
   });
 
   transaction(cart);
+
+  // 🔥 Trigger immediate cloud sync after local save
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const shopIdValue = settings.shopId || process.env.SHOP_ID;
+      if (shopIdValue && supabase) {
+        syncToCloud(shopIdValue).catch(e => console.error("[Sync] Post-bill error:", e.message));
+      }
+    }
+  } catch (e) { }
 
   return responseData;
 });
@@ -1096,6 +1130,52 @@ ipcMain.handle("register-shop", async (event, data) => {
   } catch (e) {
     console.error("[Register] Critical error:", e.message);
     return { success: false, error: "System error: " + e.message };
+  }
+});
+
+// 🟢 LOGIN TO EXISTING SHOP
+ipcMain.handle("login-shop", async (event, data) => {
+  const { email, masterKey } = data;
+
+  const configPath = path.join(app.getPath("userData"), "app_settings.json");
+  let settings = {};
+  if (fs.existsSync(configPath)) {
+    try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
+  }
+
+  const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+  const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+
+  initSupabase(url, key);
+  if (!supabase) return { success: false, error: "Cloud connection failed." };
+
+  try {
+    // Find shop by email and master key
+    const { data: shopRecord, error } = await supabase
+      .from("shops")
+      .select("*")
+      .eq("owner_email", email.trim().toLowerCase())
+      .eq("master_key", masterKey)
+      .single();
+
+    if (error || !shopRecord) {
+      return { success: false, error: "Invalid Email or Master Key. Check your credentials." };
+    }
+
+    // Save to local storage
+    process.env.SHOP_ID = shopRecord.id;
+    settings.shopId = shopRecord.id;
+    settings.storeName = shopRecord.name;
+    settings.ownerName = shopRecord.owner_name;
+    settings.ownerEmail = shopRecord.owner_email;
+    settings.ownerMobile = shopRecord.mobile_number;
+    settings.masterKey = shopRecord.master_key;
+    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+
+    console.log("[Login] Shop linked successfully:", shopRecord.id);
+    return { success: true, shopId: shopRecord.id, name: shopRecord.name };
+  } catch (e) {
+    return { success: false, error: "Authentication failed: " + e.message };
   }
 });
 

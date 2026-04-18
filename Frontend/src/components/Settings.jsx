@@ -300,6 +300,30 @@ export default function Settings() {
         </SettingRow>
 
 
+        {/* ── BACKUP SETTINGS ── */}
+        <SectionTitle icon="🛡️" title="Backup & Protection" />
+        <div style={{ padding: "20px", background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid var(--border)", marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Database Backup</div>
+          <p style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 16 }}>
+            Safely export your entire business database to your computer. We recommend doing this once a week.
+          </p>
+          <button 
+            onClick={async () => {
+              const res = await window.api.createBackup();
+              if (res.success) alert(res.message);
+              else alert("Backup failed: " + res.error);
+            }}
+            style={{
+              background: "#334155", color: "white", border: "none", 
+              padding: "10px 16px", borderRadius: 8, fontSize: 12, 
+              fontWeight: 700, cursor: "pointer"
+            }}
+          >
+            Create Local Backup Now
+          </button>
+        </div>
+
+
         {/* ── ABOUT BRAND ── */}
         <SectionTitle icon="" title="About Software" />
 

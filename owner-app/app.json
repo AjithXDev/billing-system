@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "owner-app",
-    "slug": "innoaivators-owner-app",
+    "slug": "iva-owner-app-mani",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -28,7 +28,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "5f2a7450-87f4-4d12-ad34-7d1eb6ff4a9d"
+        "projectId": "2590c6c9-1d12-4f6f-b7ed-4423fb882461"
       }
     }
   }

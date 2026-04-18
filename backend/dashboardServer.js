@@ -106,10 +106,13 @@ async function startTunnel(mainWindow) {
   }
 }
 
-/* ── Sync Stats to Supabase Cloud (works standalone without Electron) ── */
+/* ── Sync Stats to Supabase Cloud ── */
 async function syncStatsToSupabase() {
   if (!supabase) return;
-  const shopId = process.env.SHOP_ID;
+  
+  // DRYNAMIC SHOP_ID: Prioritize local settings (Real-world ready)
+  const settings = getSettings();
+  const shopId = settings.shopId || process.env.SHOP_ID;
   if (!shopId) return;
 
   try {
@@ -155,6 +158,17 @@ async function syncStatsToSupabase() {
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
     const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
 
+    // Register/update shop in Supabase FIRST (To prevent Foreign Key errors in stats)
+    await supabase.from("shops").upsert({
+      id: shopId, 
+      name: settings.storeName || 'My Shop',
+      owner_name: settings.ownerName || 'Shop Owner',
+      mobile_number: settings.ownerPhone || '',
+      owner_email: settings.ownerEmail || '',
+      master_key: process.env.MASTER_KEY || 'owner123',
+      updated_at: new Date().toISOString()
+    });
+
     const { error: statsErr } = await supabase.from("shop_stats").upsert({
       shop_id: shopId,
       stats_json: {
@@ -179,15 +193,6 @@ async function syncStatsToSupabase() {
     });
     if (statsErr) { console.error("[Sync] Stats push error:", statsErr.message); return; }
 
-    // Register/update shop in Supabase
-    await supabase.from("shops").upsert({
-      id: shopId, name: settings.storeName || 'My Shop',
-      owner_name: settings.ownerName || 'Shop Owner',
-      mobile_number: settings.ownerPhone || '',
-      owner_email: settings.ownerEmail || '',
-      master_key: process.env.MASTER_KEY || 'owner123',
-      updated_at: new Date().toISOString()
-    });
     console.log("[Sync] \u2705 Stats synced to Supabase at", new Date().toLocaleTimeString());
   } catch (e) {
     console.error("[Sync] Error:", e.message);
@@ -210,11 +215,12 @@ function startDashboardServer(mainWindow) {
     
     let html = fs.readFileSync(mobilePath, "utf-8");
     const settings = getSettings();
+    const currentShopId = settings.shopId || process.env.SHOP_ID || "";
     
     // Inject credentials
     html = html.replace("__SUPABASE_URL__", process.env.SUPABASE_URL || "");
     html = html.replace("__SUPABASE_KEY__", process.env.SUPABASE_KEY || "");
-    html = html.replace("__SHOP_ID__",      process.env.SHOP_ID || "");
+    html = html.replace("__SHOP_ID__",      currentShopId);
     html = html.replace("__MASTER_KEY__",   process.env.MASTER_KEY || settings.masterKey || "");
     html = html.replace("__LOCAL_API__",    `http://${localIP}:${PORT}`);
     
@@ -269,10 +275,12 @@ function startDashboardServer(mainWindow) {
 
   // ── Config endpoint for mobile to get Supabase credentials ──
   expressApp.get("/api/config", (req, res) => {
+    const settings = getSettings();
+    const currentShopId = settings.shopId || process.env.SHOP_ID || "";
     res.json({
       supabaseUrl: process.env.SUPABASE_URL || "",
       supabaseKey: process.env.SUPABASE_KEY || "",
-      shopId: process.env.SHOP_ID || "",
+      shopId: currentShopId,
       localApi: `http://${localIP}:${PORT}`
     });
   });
@@ -282,7 +290,8 @@ function startDashboardServer(mainWindow) {
     const { createClient } = require("@supabase/supabase-js");
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_KEY;
-    const shopId = process.env.SHOP_ID;
+    const settings = getSettings();
+    const shopId = settings.shopId || process.env.SHOP_ID;
     const { code } = req.body;
     
     if (!url || !key || !shopId) {
@@ -735,8 +744,36 @@ function startDashboardServer(mainWindow) {
           updateStock.run(item.qty, item.id);
         }
       })(cart);
+      
+      // Trigger sync immediately after bill creation
+      syncStatsToSupabase();
+      
       res.json({ message: "Invoice created", invoiceId });
     } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+  });
+
+  /* ══════════════════════════════════════════════════════
+     API: BACKUP & DATA PROTECTION
+  ══════════════════════════════════════════════════════ */
+  expressApp.post("/api/system/backup", (req, res) => {
+    try {
+      const backupDir = path.join(os.homedir(), "Documents", "Innoaivators_Backups");
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const backupPath = path.join(backupDir, `billing_backup_${timestamp}.db`);
+      
+      // Copy the active database file
+      fs.copyFileSync(db.name, backupPath);
+      
+      res.json({ 
+        success: true, 
+        message: "Backup created successfully!", 
+        path: backupPath 
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   expressApp.post("/api/held-bills", (req, res) => {
@@ -909,7 +946,7 @@ function stopDashboardServer() {
 function getDashboardURL() { return `http://${localIP}:${PORT}`; }
 function getTunnelURL() { return tunnelURL; }
 
-module.exports = { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL };
+module.exports = { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL, syncStatsToSupabase };
 
 // Self-start when run directly (e.g., `node dashboardServer.js`)
 if (require.main === module) {
