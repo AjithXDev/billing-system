@@ -1755,10 +1755,21 @@ ipcMain.handle("get-license-status", async () => {
       .single();
 
     if (error || !shopRecord) {
-      // Shop not found in cloud — could be pending sync or deleted.
-      // NEVER wipe local registration. Just show lock screen.
-      console.log(`[License] \u26a0\ufe0f Shop ${shopId} not found in cloud. Showing lock screen.`);
-      return { is_active: false, hwid: machineId, note: "Shop pending activation. Your registration is being processed." };
+      // Shop DELETED by admin — wipe local registration so owner must re-register
+      console.log(`[License] \ud83d\uddd1\ufe0f Shop ${shopId} deleted from cloud by admin. Clearing local data.`);
+
+      const configPath2 = path.join(app.getPath("userData"), "app_settings.json");
+      let settings2 = {};
+      if (fs.existsSync(configPath2)) {
+        try { settings2 = JSON.parse(fs.readFileSync(configPath2, 'utf-8')); } catch {}
+      }
+      if (settings2.shopId) {
+        delete settings2.shopId;
+        fs.writeFileSync(configPath2, JSON.stringify(settings2, null, 2));
+      }
+      process.env.SHOP_ID = "";
+
+      return { is_active: false, needsRegistration: true, hwid: machineId, note: "Shop was deleted by admin. Please register again." };
     }
 
     if (!shopRecord.is_active) {

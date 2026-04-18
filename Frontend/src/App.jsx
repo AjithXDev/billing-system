@@ -163,6 +163,13 @@ function App() {
     try {
       const res = await window.api.getLicenseStatus();
       setLicense(res);
+
+      // Admin DELETED the shop → force registration page
+      if (res.needsRegistration) {
+        setIsRegistered(false);
+        setShopId('');
+      }
+
       // Also check validity/subscription
       const validity = await window.api.getValidity?.();
       if (validity) {
@@ -190,6 +197,12 @@ function App() {
       return () => window.removeEventListener('settings_updated', loadSettings);
     }
 
+    // 🔄 Poll license every 30 seconds — reacts to admin delete/deactivate instantly
+    const licensePoller = setInterval(() => {
+      checkLicense();
+      checkRegistration();
+    }, 30000);
+
     window.api.onWhatsappQR(qr => {
       setQrData(qr);
       setWaStatus('qr');
@@ -213,6 +226,7 @@ function App() {
 
     return () => {
       window.removeEventListener('settings_updated', loadSettings);
+      clearInterval(licensePoller);
     };
   }, []);
 
