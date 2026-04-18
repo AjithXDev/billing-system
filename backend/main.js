@@ -366,7 +366,8 @@ async function checkValidity(shopId) {
         const now = new Date();
         const end = new Date(cached.validity_end);
         const daysLeft = Math.ceil((end - now) / 86400000);
-        const isExpired = (daysLeft <= 0) && (!cached.is_paid);
+        // Strict time-based expiry (enforced offline automatically)
+        const isExpired = (daysLeft <= 0);
         return {
           valid: !isExpired,
           daysLeft: Math.max(0, daysLeft),
@@ -400,7 +401,8 @@ async function checkValidity(shopId) {
       shop.is_paid ? 1 : 0
     );
 
-    const isExpired = (daysLeft <= 0) && (!shop.is_paid);
+    // Strict time-based expiry
+    const isExpired = (daysLeft <= 0);
 
     return {
       valid: !isExpired,
