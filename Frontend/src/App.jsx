@@ -163,9 +163,6 @@ function App() {
     try {
       const res = await window.api.getLicenseStatus();
       setLicense(res);
-      if (res.needsRegistration) {
-        setIsRegistered(false);
-      }
       // Also check validity/subscription
       const validity = await window.api.getValidity?.();
       if (validity) {
