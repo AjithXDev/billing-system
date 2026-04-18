@@ -1071,7 +1071,7 @@ ipcMain.handle("get-registration-status", async () => {
 
 // Register shop in Supabase → get UUID
 ipcMain.handle("register-shop", async (event, data) => {
-  const { shopName, ownerName, mobileNumber, email } = data;
+  const { shopName, ownerName, mobileNumber, email, shopEmail } = data;
 
   // Get Supabase client  
   const configPath = path.join(app.getPath("userData"), "app_settings.json");
@@ -1102,11 +1102,12 @@ ipcMain.handle("register-shop", async (event, data) => {
       .insert({
         id: newShopId,
         owner_name: ownerName,
-        owner_email: email, // New field for email login
+        owner_email: email, 
         mobile_number: mobileNumber,
-        name: shopName || settings.storeName || "My Shop",
-        master_key: process.env.MASTER_KEY || settings.masterKey || "owner123",
-        is_active: false // Explicitly set to false until admin reviews
+        name: shopName,
+        shop_email: shopEmail || email,
+        master_key: settings.masterKey || "owner123",
+        is_active: false 
       });
 
     if (error) {
@@ -1121,7 +1122,8 @@ ipcMain.handle("register-shop", async (event, data) => {
     settings.shopId = newShopId;
     settings.storeName = shopName;
     settings.ownerName = ownerName;
-    settings.ownerEmail = email; // Save locally
+    settings.ownerEmail = email; 
+    settings.shopEmail = shopEmail || email;
     settings.ownerMobile = mobileNumber;
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
 
@@ -1168,6 +1170,7 @@ ipcMain.handle("login-shop", async (event, data) => {
     settings.storeName = shopRecord.name;
     settings.ownerName = shopRecord.owner_name;
     settings.ownerEmail = shopRecord.owner_email;
+    settings.shopEmail = shopRecord.shop_email || shopRecord.owner_email;
     settings.ownerMobile = shopRecord.mobile_number;
     settings.masterKey = shopRecord.master_key;
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));

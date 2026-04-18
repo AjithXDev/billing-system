@@ -11,6 +11,7 @@ export default function ShopRegistration({ onRegistered }) {
   const [ownerName, setOwnerName] = useState("");
   const [mobile, setMobile]       = useState("");
   const [email, setEmail]         = useState("");
+  const [shopEmail, setShopEmail] = useState("");
   const [masterKey, setMasterKey] = useState("");
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
@@ -25,7 +26,7 @@ export default function ShopRegistration({ onRegistered }) {
             return;
         }
         if (!email.includes("@")) {
-            setError("Please enter a valid business email.");
+            setError("Please enter a valid personal/owner email.");
             return;
         }
 
@@ -37,11 +38,12 @@ export default function ShopRegistration({ onRegistered }) {
                 shopName: shopName.trim(),
                 ownerName: ownerName.trim(),
                 mobileNumber: mobile.trim(),
-                email: email.trim()
+                email: email.trim(),
+                shopEmail: shopEmail.trim() || email.trim()
             });
 
             if (result.success) {
-                await completeAuthAndLaunch(result.shopId, shopName, ownerName, mobile, email, "owner123");
+                await completeAuthAndLaunch(result.shopId, shopName, ownerName, mobile, email, shopEmail || email, "owner123");
             } else {
                 setError(result.error || "Cloud gateway timeout. Check connection.");
             }
@@ -67,7 +69,7 @@ export default function ShopRegistration({ onRegistered }) {
             });
 
             if (result.success) {
-                await completeAuthAndLaunch(result.shopId, result.name, result.ownerName, result.mobileNumber, email, masterKey);
+                await completeAuthAndLaunch(result.shopId, result.name, result.ownerName, result.mobileNumber, email, result.shopEmail, masterKey);
             } else {
                 setError(result.error || "Invalid credentials. Try again.");
             }
@@ -78,7 +80,7 @@ export default function ShopRegistration({ onRegistered }) {
         }
     };
 
-    const completeAuthAndLaunch = async (id, name, owner, phone, email, mKey) => {
+    const completeAuthAndLaunch = async (id, name, owner, phone, email, sEmail, mKey) => {
         try {
             const currentSettings = await window.api.getAppSettings() || {};
             const newSettings = {
@@ -88,6 +90,7 @@ export default function ShopRegistration({ onRegistered }) {
                 ownerName: owner || currentSettings.ownerName,
                 ownerPhone: phone || currentSettings.ownerPhone,
                 ownerEmail: email || currentSettings.ownerEmail,
+                shopEmail: sEmail || currentSettings.shopEmail,
                 masterKey: mKey || currentSettings.masterKey
             };
             await window.api.saveAppSettings(newSettings);
@@ -182,12 +185,22 @@ export default function ShopRegistration({ onRegistered }) {
                           </div>
 
                           <div className="input-group">
-                              <label>Business Email</label>
+                              <label>Owner Personal Email</label>
                               <input
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                placeholder="owner@email.com"
+                                placeholder="owner@gmail.com"
+                              />
+                          </div>
+
+                          <div className="input-group">
+                              <label>Business / Shop Email</label>
+                              <input
+                                type="email"
+                                value={shopEmail}
+                                onChange={(e) => setShopEmail(e.target.value)}
+                                placeholder="contact@yourbusiness.com"
                               />
                           </div>
 
