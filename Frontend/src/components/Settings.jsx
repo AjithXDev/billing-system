@@ -152,14 +152,28 @@ export default function Settings() {
       return;
     }
     setShopConnStatus("testing");
-    setShopConnMsg("Testing connection...");
+    setShopConnMsg("Connecting to Cloud...");
     try {
       const testResult = await window.api.testShopConnection({ url: shopUrl, key: shopKey });
       if (testResult.success) {
         const saveResult = await window.api.saveShopSupabase({ url: shopUrl, key: shopKey });
         if (saveResult.success) {
           setShopConnStatus("connected");
-          setShopConnMsg("✅ Connected and saved successfully!");
+          setShopConnMsg("✅ Cloud Connected.");
+          
+          // 🔄 AUTOMATIC RESTORE
+          // If we just linked a Supabase, we should automatically pull data.
+          setSyncStatus("syncing");
+          setSyncMsg("🔄 Automatically restoring your data from cloud...");
+          const restoreRes = await window.api.restoreFromCloud();
+          if (restoreRes.success) {
+            setSyncStatus("done");
+            setSyncMsg("✅ Data Restored Successfully! Refreshing...");
+            setTimeout(() => window.location.reload(), 2000);
+          } else {
+            setSyncStatus("error");
+            setSyncMsg("Connection ok, but restore failed: " + restoreRes.error);
+          }
         } else {
           setShopConnStatus("error");
           setShopConnMsg("Save failed: " + saveResult.error);

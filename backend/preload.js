@@ -59,9 +59,13 @@ contextBridge.exposeInMainWorld("api", {
   getSyncStatus:       ()             => ipcRenderer.invoke("get-sync-status"),
   getLicenseStatus:    ()             => ipcRenderer.invoke("get-license-status"),
 
+  // 📧 Email Verification (OTP)
+  checkEmailExists:    (email)        => ipcRenderer.invoke("check-email-exists", email),
+  sendOtp:             (email)        => ipcRenderer.invoke("send-otp", email),
+  verifyOtp:           (data)         => ipcRenderer.invoke("verify-otp", data),
+
   // 🏪 Shop Registration & Pairing
   registerShop:        (data)         => ipcRenderer.invoke("register-shop", data),
-  loginShop:           (data)         => ipcRenderer.invoke("login-shop", data),
   getRegistrationStatus: ()           => ipcRenderer.invoke("get-registration-status"),
   validatePairingCode: (code)         => ipcRenderer.invoke("validate-pairing-code", code),
   getPairingStatus:    (code)         => ipcRenderer.invoke("get-pairing-status", code),

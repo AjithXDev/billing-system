@@ -8,6 +8,43 @@ const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
 const { v4: uuidv4 } = require("uuid");
 const { createClient } = require('@supabase/supabase-js');
+const nodemailer = require('nodemailer');
+
+// ── EMAIL OTP SYSTEM ──
+const otpStore = new Map(); // email -> { code, expiresAt }
+
+const emailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'innoaivators@gmail.com',
+    pass: 'xjhq ofge pmkh tqof'  // Gmail App Password
+  }
+});
+
+async function sendOtpEmail(toEmail, otpCode) {
+  const mailOptions = {
+    from: '"Innoaivators" <innoaivators@gmail.com>',
+    to: toEmail,
+    subject: `🔐 Your Verification Code: ${otpCode}`,
+    html: `
+      <div style="font-family: 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; background: #0f172a; border-radius: 16px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 800;">INNOAIVATORS</h1>
+          <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 13px;">Smart Billing System</p>
+        </div>
+        <div style="padding: 32px; text-align: center;">
+          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">Your email verification code is:</p>
+          <div style="background: rgba(99,102,241,0.1); border: 2px dashed #6366f1; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            <span style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #f8fafc; font-family: monospace;">${otpCode}</span>
+          </div>
+          <p style="color: #64748b; font-size: 12px;">This code expires in <strong style="color: #f59e0b;">10 minutes</strong>.</p>
+          <p style="color: #475569; font-size: 11px; margin-top: 20px;">If you did not request this, please ignore this email.</p>
+        </div>
+      </div>
+    `
+  };
+  return emailTransporter.sendMail(mailOptions);
+}
 
 // ── HARDWARE LICENSING ──
 function getMachineId() {
@@ -245,12 +282,61 @@ async function restoreFromShopSupabase() {
       }
     }
 
+    // 6. Restore Offers
+    const { data: offers } = await shopSupabase.from('offers').select('*');
+    if (offers && offers.length > 0) {
+      for (const off of offers) {
+        try {
+          db.prepare('INSERT OR REPLACE INTO offers (id, name, status, buy_product_id, buy_quantity, free_product_id, free_quantity) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+            off.local_id || null, off.name, off.status || 1, off.buy_product_id, off.buy_quantity, off.free_product_id, off.free_quantity
+          );
+        } catch (e) { }
+      }
+    }
+
+    // 7. Restore Held Bills
+    const { data: held } = await shopSupabase.from('held_bills').select('*');
+    if (held && held.length > 0) {
+      for (const h of held) {
+        try {
+          db.prepare('INSERT OR REPLACE INTO held_bills (id, label, cart_json, customer_json) VALUES (?, ?, ?, ?)').run(
+            h.local_id || null, h.label, h.cart_json, h.customer_json
+          );
+        } catch (e) { }
+      }
+    }
+
+    // 8. Restore Settings
+    const { data: cloud_settings } = await shopSupabase.from('shop_settings').select('*');
+    if (cloud_settings && cloud_settings.length > 0) {
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      let localSett = {};
+      if (fs.existsSync(configPath)) {
+        try { localSett = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
+      }
+      
+      for (const s of cloud_settings) {
+        localSett[s.key] = s.value;
+      }
+      
+      // If we found a shopId in cloud, adopt it to local process/settings
+      if (localSett.shopId) {
+        process.env.SHOP_ID = localSett.shopId;
+      }
+      
+      fs.writeFileSync(configPath, JSON.stringify(localSett, null, 2));
+      console.log(`[Restore] ✅ Application settings restored and adopted.`);
+    }
+
     return {
       products: products?.length || 0,
       customers: customers?.length || 0,
       invoices: invoices?.length || 0,
       items: items?.length || 0,
-      categories: categories?.length || 0
+      categories: categories?.length || 0,
+      offers: offers?.length || 0,
+      held_bills: held?.length || 0,
+      settings_restored: cloud_settings?.length || 0
     };
   } catch (e) {
     console.error('[Restore] Error:', e.message);
@@ -1376,6 +1462,76 @@ ipcMain.handle("get-registration-status", async () => {
     return { isRegistered: true, shopId: shopIdValue };
   } catch (e) {
     return { isRegistered: false, shopId: "" };
+  }
+});
+
+// ============================================================
+// 📧 EMAIL VERIFICATION (OTP) SYSTEM
+// ============================================================
+
+// Check if email already exists in shops table
+ipcMain.handle("check-email-exists", async (event, email) => {
+  if (!supabase) {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings = {};
+    if (fs.existsSync(configPath)) {
+      try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
+    }
+    const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+    if (url && key) initSupabase(url, key);
+  }
+  if (!supabase) return { exists: false };
+
+  try {
+    const { data, error } = await supabase
+      .from('shops')
+      .select('id')
+      .eq('owner_email', email.trim().toLowerCase())
+      .limit(1);
+    if (error) return { exists: false };
+    return { exists: data && data.length > 0 };
+  } catch (e) {
+    return { exists: false };
+  }
+});
+
+// Send OTP to email
+ipcMain.handle("send-otp", async (event, email) => {
+  try {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    otpStore.set(email.trim().toLowerCase(), { code, expiresAt });
+    
+    await sendOtpEmail(email.trim(), code);
+    console.log(`[OTP] ✅ Verification code sent to ${email}`);
+    return { success: true, message: 'Verification code sent to your email.' };
+  } catch (e) {
+    console.error('[OTP] ❌ Failed to send:', e.message);
+    return { success: false, error: 'Failed to send email. Check your internet connection.' };
+  }
+});
+
+// Verify OTP
+ipcMain.handle("verify-otp", async (event, { email, code }) => {
+  try {
+    const stored = otpStore.get(email.trim().toLowerCase());
+    if (!stored) {
+      return { success: false, error: 'No verification code found. Please request a new one.' };
+    }
+    if (Date.now() > stored.expiresAt) {
+      otpStore.delete(email.trim().toLowerCase());
+      return { success: false, error: 'Code expired. Please request a new one.' };
+    }
+    if (stored.code !== code.trim()) {
+      return { success: false, error: 'Invalid code. Please check and try again.' };
+    }
+    // Success — clean up
+    otpStore.delete(email.trim().toLowerCase());
+    console.log(`[OTP] ✅ Email ${email} verified successfully!`);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: 'Verification failed: ' + e.message };
   }
 });
 
