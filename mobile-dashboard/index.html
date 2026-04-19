@@ -503,12 +503,48 @@
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>
       </svg>
     </div>
-    <h1 class="login-title">Owner Dashboard</h1>
-    <p class="login-sub">Enter your master access key to continue</p>
-    <input id="master-key-input" type="password" class="login-input" placeholder="Access Key" />
-    <button id="login-btn" class="login-btn" onclick="attemptLogin()">Unlock Dashboard</button>
+    <h1 class="login-title">iVA Owner Dashboard</h1>
+    <p class="login-sub">Enter your credentials to link your terminal</p>
+    
+    <div style="text-align: left; margin-bottom: 24px;">
+      <label style="font-size: 11px; text-transform: uppercase; color: var(--text-4); font-weight: 800; display: block; margin-bottom: 8px; margin-left: 4px;">Shop Identifier</label>
+      <input id="shop-id-input" type="text" class="login-input" placeholder="e.g. shop-XXXXXXXX" style="letter-spacing: normal; font-size: 16px; margin-bottom: 16px;" />
+      
+      <label style="font-size: 11px; text-transform: uppercase; color: var(--text-4); font-weight: 800; display: block; margin-bottom: 8px; margin-left: 4px;">Master Access Key</label>
+      <input id="master-key-input" type="password" class="login-input" placeholder="Access Key" />
+    </div>
+
+    <button id="login-btn" class="login-btn" onclick="attemptLogin()" style="margin-bottom: 12px;">Link Dashboard</button>
+    
+    <p style="font-size: 12px; color: var(--text-4); margin: 16px 0;">— OR —</p>
+    
+    <button id="pairing-btn" onclick="showPairingScreen()" style="width: 100%; padding: 14px; background: transparent; border: 1px dashed var(--border-2); border-radius: 14px; color: var(--text-2); font-weight: 700; cursor: pointer;">
+      📱 Generate Pairing Code
+    </button>
+
     <div id="login-error" class="login-error">❌ Invalid key. Please try again.</div>
     <div id="login-mode" class="login-mode" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     PAIRING SCREEN
+═══════════════════════════════════════════════════ -->
+<div id="pairing-screen" class="hidden">
+  <div class="login-box">
+    <div style="font-size: 48px; margin-bottom: 24px;">📟</div>
+    <h1 class="login-title">New Device Pairing</h1>
+    <p class="login-sub">Enter this code on your Desktop Terminal under "Pair Mobile Device"</p>
+    
+    <div id="pair-code-display" style="font-size: 42px; font-weight: 900; letter-spacing: 0.2em; color: var(--accent); margin: 40px 0; background: var(--bg-card); padding: 24px; border-radius: 20px; border: 1px solid var(--border);">
+      ------
+    </div>
+
+    <div id="pair-status" style="font-size: 13px; color: var(--text-3); margin-bottom: 32px;">
+      Waiting for desktop validation...
+    </div>
+
+    <button onclick="hidePairingScreen()" style="color: var(--text-4); background: transparent; border: none; font-weight: 700;">Cancel Pairing</button>
   </div>
 </div>
 
@@ -868,78 +904,86 @@ window.addEventListener("offline", updateOnlineStatus);
 /* ══════════════════════════════════════════════════════
    AUTH — Works both locally and via Supabase
 ══════════════════════════════════════════════════════ */
+// ── CONTROL PLANE CONFIG (Central Supabase) ──
+const CONTROL_URL = "https://baawqrqihlhsrghvjlpx.supabase.co";
+const CONTROL_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0";
+
 async function attemptLogin() {
+  const sid = document.getElementById("shop-id-input").value.trim();
   const key = document.getElementById("master-key-input").value.trim();
-  if (!key) return;
+  if (!sid || !key) return;
 
   const errorEl = document.getElementById("login-error");
   
-  // Try local auth first
-  if (dataMode === 'local' && localAPI) {
-    try {
-      const res = await fetch(`${localAPI}/api/auth`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key })
-      });
-      if (res.ok) {
-        localStorage.setItem("iva_auth_key", key);
-        // Also grab Supabase config from local API for future remote use
-        try {
-          const config = await (await fetch(`${localAPI}/api/config`)).json();
-          if (config.supabaseUrl) localStorage.setItem("iva_supabase_url", config.supabaseUrl);
-          if (config.supabaseKey) localStorage.setItem("iva_supabase_key", config.supabaseKey);
-          if (config.shopId) localStorage.setItem("iva_shop_id", config.shopId);
-        } catch(e) {}
-        showApp();
-        return;
-      } else {
-        errorEl.textContent = "❌ Invalid key. Please try again.";
-        errorEl.style.display = "block";
-        setTimeout(() => errorEl.style.display = "none", 3000);
-        return;
-      }
-    } catch(e) {
-      console.log("[Auth] Local auth failed, trying cloud...");
+  try {
+    const controlClient = supabase.createClient(CONTROL_URL, CONTROL_KEY);
+    const { data: shop, error } = await controlClient.from("shops").select("*").eq("id", sid).single();
+
+    if (error || !shop) {
+      errorEl.textContent = "❌ Shop not found. Check Shop ID.";
+      errorEl.style.display = "block";
+      return;
     }
-  }
 
-  // Cloud auth — verify against shops table in Supabase
-  if (supabaseClient && shopId) {
-    try {
-      const { data, error } = await supabaseClient
-        .from("shops")
-        .select("master_key")
-        .eq("id", shopId)
-        .single();
-      
-      if (!error && data && data.master_key === key) {
-        localStorage.setItem("iva_auth_key", key);
-        showApp();
-        return;
-      }
-    } catch(e) {
-      console.warn("[Auth] Cloud auth error:", e.message);
+    if (shop.master_key !== key) {
+      errorEl.textContent = "❌ Invalid Master Key.";
+      errorEl.style.display = "block";
+      return;
     }
-  }
 
-  // Offline fallback — check saved key
-  const savedKey = localStorage.getItem("iva_auth_key");
-  if (savedKey && savedKey === key) {
-    showApp();
-    return;
-  }
-
-  // Check injected master key
-  if (INJECTED_MASTER_KEY && !INJECTED_MASTER_KEY.includes("__MASTER_KEY__") && key === INJECTED_MASTER_KEY) {
+    // Success
+    shopId = shop.id;
+    localStorage.setItem("iva_shop_id", shopId);
     localStorage.setItem("iva_auth_key", key);
+    localStorage.setItem("iva_supabase_url", shop.shop_supabase_url || CONTROL_URL);
+    localStorage.setItem("iva_supabase_key", shop.shop_supabase_key || CONTROL_KEY);
+    
+    initDataSource();
     showApp();
-    return;
+  } catch (e) {
+    errorEl.textContent = "❌ Error: " + e.message;
+    errorEl.style.display = "block";
   }
+}
 
-  errorEl.textContent = "❌ Invalid key. Please try again.";
-  errorEl.style.display = "block";
-  setTimeout(() => errorEl.style.display = "none", 3000);
+let pairingSub = null;
+async function showPairingScreen() {
+  const sid = document.getElementById("shop-id-input").value.trim();
+  if (!sid) { alert("Enter Shop ID first"); return; }
+  
+  document.getElementById("login-screen").classList.add("hidden");
+  document.getElementById("pairing-screen").classList.remove("hidden");
+  
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  document.getElementById("pair-code-display").textContent = code;
+
+  const controlClient = supabase.createClient(CONTROL_URL, CONTROL_KEY);
+  await controlClient.from('pairing_codes').insert({
+    shop_id: sid,
+    code: code,
+    expires_at: new Date(Date.now() + 600000).toISOString(),
+    status: 'pending'
+  });
+
+  pairingSub = controlClient.channel('p').on('postgres_changes', { event:'UPDATE', schema:'public', table:'pairing_codes', filter:`code=eq.${code}` }, async (payload) => {
+    if (payload.new.status === 'used') {
+      document.getElementById("pair-status").textContent = "✅ Paired!";
+      const { data: s } = await controlClient.from("shops").select("*").eq("id", sid).single();
+      if (s) {
+        localStorage.setItem("iva_shop_id", sid);
+        localStorage.setItem("iva_auth_key", s.master_key);
+        localStorage.setItem("iva_supabase_url", s.shop_supabase_url || CONTROL_URL);
+        localStorage.setItem("iva_supabase_key", s.shop_supabase_key || CONTROL_KEY);
+        setTimeout(() => { hidePairingScreen(); initDataSource(); showApp(); }, 1000);
+      }
+    }
+  }).subscribe();
+}
+
+function hidePairingScreen() {
+  if (pairingSub) { supabaseClient.removeChannel(pairingSub); pairingSub = null; }
+  document.getElementById("pairing-screen").classList.add("hidden");
+  document.getElementById("login-screen").classList.remove("hidden");
 }
 
 document.getElementById("master-key-input").addEventListener("keydown", (e) => {

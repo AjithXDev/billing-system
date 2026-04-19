@@ -25,7 +25,6 @@
             font-family: 'Plus Jakarta Sans', sans-serif;
             background-color: var(--bg);
             color: #f8fafc;
-            overflow: hidden;
         }
 
         .glass-card {
@@ -55,21 +54,6 @@
             box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
         }
 
-        @keyframes slideIn {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-
-        .page-animate { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-
-        .custom-modal {
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
-        }
-
-        /* Toggle switch */
         .toggle-switch {
             width: 44px; height: 24px; border-radius: 12px;
             position: relative; cursor: pointer; transition: background 0.3s;
@@ -85,12 +69,11 @@
         .toggle-switch.on .toggle-knob { left: 23px; }
         .toggle-switch.off .toggle-knob { left: 3px; }
 
-        /* Pulse animation for warnings */
-        @keyframes pulse-warn {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
-        .pulse-warn { animation: pulse-warn 2s ease-in-out infinite; }
+        .animate-page { animation: slideIn 0.4s ease-out; }
     </style>
 </head>
 
@@ -100,99 +83,49 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // 🟢 CONFIGURATION
-        const SUPABASE_URL = 'https://baawqrqihlhsrghvjlpx.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
-
-        const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-
-        // Helper: Calculate remaining days
-        function getDaysLeft(validityEnd) {
-            if (!validityEnd) return null;
-            const now = new Date();
-            const end = new Date(validityEnd);
-            const diff = Math.ceil((end - now) / 86400000);
-            return Math.max(0, diff);
-        }
-
-        // Helper: Format date
-        function formatDate(d) {
-            if (!d) return 'N/A';
-            return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-        }
-
-        // Custom Modal Component
-        function Modal({ show, title, message, onConfirm, onCancel, confirmText = "Confirm", cancelText = "Cancel", isAlert = false }) {
-            if (!show) return null;
-            return (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
-                    <div className="custom-modal p-8 rounded-[32px] w-full max-w-sm text-center">
-                        <h3 className="text-xl font-bold text-white mb-4">{title}</h3>
-                        <p className="text-slate-400 text-sm mb-8 leading-relaxed whitespace-pre-wrap">{message}</p>
-                        <div className="flex gap-4">
-                            {!isAlert && (
-                                <button onClick={onCancel} className="flex-1 h-12 rounded-2xl bg-white/5 text-slate-300 font-bold hover:bg-white/10">{cancelText}</button>
-                            )}
-                            <button onClick={onConfirm} className={`flex-1 h-12 rounded-2xl font-bold text-white ${confirmText === 'Delete' || confirmText === 'Yes, Delete Everything' ? 'bg-red-500' : 'btn-grad'}`}>{confirmText}</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
+        // Configuration
+        const API_BASE = window.location.origin;
 
         function App() {
-            const [user, setUser] = useState(null);
-            const [view, setView] = useState('login');
-            const [loading, setLoading] = useState(true);
+            const [authState, setAuthState] = useState({ token: localStorage.getItem('iva_admin_token'), email: localStorage.getItem('iva_admin_email') });
+            const [view, setView] = useState(authState.token ? 'dash' : 'login');
 
-            useEffect(() => {
-                const session = localStorage.getItem('iva_admin_session');
-                if (session) {
-                    setUser(JSON.parse(session));
-                    setView('dash');
-                }
-                setLoading(false);
-            }, []);
-
-            if (!sb) return <div className="h-screen flex items-center justify-center text-red-400">Database Configuration Missing</div>;
-
-            const handleLogin = (adminUser) => {
-                setUser(adminUser);
-                localStorage.setItem('iva_admin_session', JSON.stringify(adminUser));
+            const handleLogin = (token, email) => {
+                localStorage.setItem('iva_admin_token', token);
+                localStorage.setItem('iva_admin_email', email);
+                setAuthState({ token, email });
                 setView('dash');
             };
 
             const handleLogout = () => {
-                localStorage.removeItem('iva_admin_session');
-                setUser(null);
+                localStorage.clear();
+                setAuthState({ token: null, email: null });
                 setView('login');
             };
 
-            if (loading) return <div className="h-screen flex items-center justify-center text-indigo-400 font-bold">Initializing Portal...</div>;
-
-            return view === 'login' ? <Login onLogin={handleLogin} /> : <Dashboard user={user} onLogout={handleLogout} />;
+            return view === 'login' ? <Login onLogin={handleLogin} /> : <Dashboard auth={authState} onLogout={handleLogout} />;
         }
 
         function Login({ onLogin }) {
-            const [email, setEmail] = useState('');
+            const [email, setEmail] = useState('admin@iva.com');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
-            const [status, setStatus] = useState('idle');
+            const [loading, setLoading] = useState(false);
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                setStatus('loading'); setError('');
+                setLoading(true); setError('');
                 try {
-                    const { data, error } = await sb.from('admins').select('*').eq('email', email).single();
-                    if (error || !data) {
-                        setError('Account authorization failed.');
-                    } else if (password === data.password_hash) {
-                        onLogin(data);
-                    } else {
-                        setError('Invalid administrative credentials.');
-                    }
-                } catch (err) { setError('System link failure.'); }
-                setStatus('idle');
+                    const res = await fetch(`${API_BASE}/api/admin/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    const data = await res.json();
+                    if (data.success) onLogin(data.token, data.email);
+                    else setError(data.error || 'Login failed');
+                } catch (err) { setError('Network Error'); }
+                setLoading(false);
             };
 
             return (
@@ -200,21 +133,21 @@
                     <div className="glass-card p-10 rounded-[40px] w-full max-w-md border border-indigo-500/20">
                         <div className="text-center mb-10">
                             <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl mx-auto flex items-center justify-center text-2xl font-black mb-6 shadow-xl shadow-indigo-500/20 text-white">iA</div>
-                            <h1 className="text-3xl font-bold tracking-tight text-white mb-2">INNOAIVATORS</h1>
-                            <p className="text-slate-400 font-medium">Master Admin Console</p>
+                            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">iVA Master Portal</h1>
+                            <p className="text-slate-400 font-medium">Control Plane Access</p>
                         </div>
-                        {error && <div className="bg-red-500/10 text-red-400 p-4 rounded-2xl mb-6 text-sm text-center font-semibold border border-red-500/20">{error}</div>}
+                        {error && <div className="bg-red-500/10 text-red-400 p-4 rounded-2xl mb-6 text-sm text-center border border-red-500/20">{error}</div>}
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2 block ml-1">Admin Email</label>
-                                <input type="email" placeholder="admin@innoaivators.com" className="w-full bg-[#0f172a] border border-white/10 rounded-2xl px-5 py-4 text-white outline-none input-glow transition-all" value={email} onChange={e => setEmail(e.target.value)} required />
+                                <input type="email" className="w-full bg-[#0f172a] border border-white/10 rounded-2xl px-5 py-4 text-white outline-none" value={email} onChange={e => setEmail(e.target.value)} required />
                             </div>
                             <div>
                                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2 block ml-1">Access Password</label>
-                                <input type="password" placeholder="••••••••" className="w-full bg-[#0f172a] border border-white/10 rounded-2xl px-5 py-4 text-white outline-none input-glow transition-all" value={password} onChange={e => setPassword(e.target.value)} required />
+                                <input type="password" placeholder="••••••••" className="w-full bg-[#0f172a] border border-white/10 rounded-2xl px-5 py-4 text-white outline-none" value={password} onChange={e => setPassword(e.target.value)} required />
                             </div>
-                            <button type="submit" className="w-full h-14 rounded-2xl btn-grad text-white font-bold text-lg mt-4 disabled:opacity-50" disabled={status === 'loading'}>
-                                {status === 'loading' ? 'Authorizing...' : 'Enter Console'}
+                            <button type="submit" disabled={loading} className="w-full h-14 rounded-2xl btn-grad text-white font-bold text-lg mt-4 disabled:opacity-50">
+                                {loading ? 'Authorizing...' : 'Enter Console'}
                             </button>
                         </form>
                     </div>
@@ -222,215 +155,131 @@
             );
         }
 
-        function Dashboard({ user, onLogout }) {
+        function Dashboard({ auth, onLogout }) {
             const [shops, setShops] = useState([]);
-            const [activeTab, setActiveTab] = useState('overview');
-            const [stats, setStats] = useState({ revenue: 0, shopsTotal: 0, activeShops: 0, subscriptionRev: 0 });
+            const [tab, setTab] = useState('overview');
             const [loading, setLoading] = useState(true);
-            const [modal, setModal] = useState({ show: false, title: '', message: '', confirmText: 'Confirm', onConfirm: null });
 
-            const loadData = async () => {
+            const loadShops = async () => {
                 setLoading(true);
                 try {
-                    const { data: list } = await sb.from('shops').select('*, shop_stats(stats_json)').order('created_at', { ascending: false });
-                    setShops(list || []);
-                    let rev = 0;
-                    let activeCount = 0;
-                    let paidCount = 0;
-                    list?.forEach(s => {
-                        rev += Number(s.shop_stats?.stats_json?.overallSales || 0);
-                        if (s.is_active) activeCount++;
-                        if (s.is_paid) paidCount++;
+                    const res = await fetch(`${API_BASE}/api/shops`, {
+                        headers: { 'Authorization': `Bearer ${auth.token}` }
                     });
-                    setStats({
-                        revenue: rev,
-                        shopsTotal: list?.length || 0,
-                        activeShops: activeCount,
-                        paidShops: paidCount,
-                        subscriptionRev: paidCount * 1500
-                    });
+                    const data = await res.json();
+                    if (Array.isArray(data)) setShops(data);
                 } catch (e) { }
                 setLoading(false);
             };
 
-            useEffect(() => { loadData(); }, []);
+            useEffect(() => { loadShops(); }, []);
 
-            const toggleShop = async (shopId, status) => {
-                const { error } = await sb.from('shops').update({ is_active: !status }).eq('id', shopId);
-                if (!error) loadData();
-            };
-
-            // Toggle payment status (is_paid) & renew validity
-            const togglePayment = async (shopId, currentPaid) => {
+            const toggleSoftware = async (id, current) => {
                 try {
-                    if (!currentPaid) {
-                        // Turning ON → Renew for 30 days
-                        const now = new Date();
-                        const end = new Date(now.getTime() + 30 * 86400000);
-                        const { error } = await sb.from('shops').update({
-                            is_paid: true,
-                            is_active: true,
-                            validity_start: now.toISOString(),
-                            validity_end: end.toISOString()
-                        }).eq('id', shopId);
-                        if (!error) {
-                            setModal({ show: true, isAlert: true, title: '✅ Renewed!', message: `Payment confirmed. Validity renewed for 30 days.\n\nNew expiry: ${formatDate(end)}`, confirmText: 'OK', onConfirm: () => setModal({ show: false }) });
-                            loadData();
-                        }
-                    } else {
-                        // Turning OFF → Mark as unpaid
-                        const { error } = await sb.from('shops').update({ is_paid: false }).eq('id', shopId);
-                        if (!error) loadData();
-                    }
-                } catch (e) {
-                    setModal({ show: true, isAlert: true, title: 'Error', message: e.message, confirmText: 'Close', onConfirm: () => setModal({ show: false }) });
-                }
+                    await fetch(`${API_BASE}/api/shops/${id}/toggle`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ is_active: !current })
+                    });
+                    loadShops();
+                } catch (e) { }
             };
 
-            const confirmDelete = (shopId, shopName) => {
-                const msg = `🛑 CRITICAL ACTION: PERMANENT DELETION\n\nShop Name: ${shopName.toUpperCase()}\nUnique ID: ${shopId}\n\nWARNING:\n1. This will PERMANENTLY ERASE all products, invoices, and analytics from the cloud database.\n2. ALL paired Mobile Apps for this shop will stop working immediately.\n3. This action CANNOT be undone.\n\nAre you absolutely sure you want to destroy this shop record?`;
-                setModal({
-                    show: true,
-                    title: 'System Deletion Warning',
-                    message: msg,
-                    confirmText: 'Yes, Delete Everything',
-                    onConfirm: () => handleDelete(shopId, shopName)
-                });
-            };
-
-            const handleDelete = async (shopId, shopName) => {
-                setModal(prev => ({ ...prev, show: false }));
+            const togglePaid = async (id, current) => {
                 try {
-                    const { error } = await sb.from('shops').delete().eq('id', shopId);
-                    if (error) throw error;
-                    loadData();
-                    setModal({ show: true, isAlert: true, title: 'Deleted', message: `Shop "${shopName}" removed successfully.`, confirmText: 'Close', onConfirm: () => setModal({ show: false }) });
-                } catch (e) {
-                    setModal({ show: true, isAlert: true, title: 'Error', message: e.message, confirmText: 'Close', onConfirm: () => setModal({ show: false }) });
-                }
+                    await fetch(`${API_BASE}/api/shops/${id}/toggle-payment`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ is_paid: !current })
+                    });
+                    loadShops();
+                } catch (e) { }
             };
 
-            const PageHeader = ({ title, subtitle }) => (
-                <div className="mb-10 page-animate">
-                    <h2 className="text-3xl font-black text-white">{title}</h2>
-                    <p className="text-slate-500 font-semibold tracking-wide uppercase text-[10px] mt-1">{subtitle}</p>
-                </div>
-            );
+            const deleteShop = async (id) => {
+                if (!confirm("🚨 PERMANENT DELETE: All cloud data for this shop will be erased. Continue?")) return;
+                try {
+                    await fetch(`${API_BASE}/api/shops/${id}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${auth.token}` }
+                    });
+                    loadShops();
+                } catch (e) { }
+            };
 
-            // SVG Chart
-            const reachData = shops.map(s => Number(s.shop_stats?.stats_json?.overallBills || 0)).slice(0, 10);
-            const maxReach = Math.max(...reachData, 1);
-            const chartPoints = reachData.map((v, i) => `${(i * 10)},${60 - (v / maxReach * 50)}`).join(' ');
+            const stats = {
+                total: shops.length,
+                paid: shops.filter(s => s.is_paid).length,
+                active: shops.filter(s => s.is_active).length,
+                expired: shops.filter(s => {
+                    if (!s.validity_end) return false;
+                    return new Date(s.validity_end) < new Date();
+                }).length
+            };
 
-            // Days left badge color
-            const getDaysBadge = (daysLeft) => {
-                if (daysLeft === null || daysLeft === undefined) return { bg: 'bg-slate-500/10', text: 'text-slate-400', label: 'N/A' };
-                if (daysLeft <= 0) return { bg: 'bg-red-500/10', text: 'text-red-500', label: 'EXPIRED' };
-                if (daysLeft <= 7) return { bg: 'bg-orange-500/10', text: 'text-orange-400', label: `${daysLeft}d left` };
-                return { bg: 'bg-emerald-500/10', text: 'text-emerald-400', label: `${daysLeft}d left` };
+            const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
+            const getDaysLeft = (end) => {
+                if (!end) return 0;
+                const diff = Math.ceil((new Date(end) - new Date()) / 86400000);
+                return Math.max(0, diff);
             };
 
             return (
-                <div className="flex h-screen bg-[#020617] overflow-hidden">
-                    <Modal {...modal} onCancel={() => setModal({ show: false })} />
-
-                    {/* SIDEBAR */}
-                    <aside className="w-72 bg-[#05050f] border-r border-white/5 flex flex-col p-8">
+                <div className="flex h-screen overflow-hidden">
+                    {/* Sidebar */}
+                    <aside className="w-72 glass-card flex flex-col p-8 border-r border-white/5">
                         <div className="flex items-center gap-4 mb-12">
-                            <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center font-black text-white text-lg">I</div>
+                            <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center font-black text-white">I</div>
                             <span className="text-xl font-bold tracking-tighter text-white">INNOAIVATORS</span>
                         </div>
-
                         <nav className="flex-1 space-y-2">
                             {[
                                 { id: 'overview', label: 'Overview', icon: 'M4 6h16M4 12h16M4 18h7' },
-                                { id: 'shops', label: 'Software Installed', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1' },
-                                { id: 'validity', label: 'Subscription & Validity', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-                                { id: 'owners', label: 'Owner Records', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' }
+                                { id: 'shops', label: 'Software Status', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16' },
+                                { id: 'validity', label: 'Subscription', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0' },
+                                { id: 'owners', label: 'Owner Records', icon: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2' }
                             ].map(item => (
-                                <div key={item.id} onClick={() => setActiveTab(item.id)} className={`sidebar-item flex items-center gap-4 px-6 py-4 rounded-2xl font-bold text-sm ${activeTab === item.id ? 'active' : 'text-slate-500 hover:text-slate-300'}`}>
+                                <div key={item.id} onClick={() => setTab(item.id)} className={`sidebar-item flex items-center gap-4 px-6 py-4 rounded-2xl font-bold text-sm ${tab === item.id ? 'active' : 'text-slate-500 hover:text-slate-300'}`}>
                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={item.icon} /></svg>
                                     {item.label}
                                 </div>
                             ))}
                         </nav>
-
-                        <div className="mt-auto pt-8 border-t border-white/5">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px] font-black">{user.email[0].toUpperCase()}</div>
-                                <span className="text-xs font-bold text-slate-400 truncate max-w-[120px]">{user.email}</span>
+                        <div className="pt-8 border-t border-white/5">
+                            <div className="mb-6 flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px] font-black">{auth.email[0].toUpperCase()}</div>
+                                <span className="text-xs font-bold text-slate-400 truncate">{auth.email}</span>
                             </div>
-                            <button onClick={onLogout} className="w-full py-3 bg-red-500/10 text-red-500 rounded-xl text-xs font-bold border border-red-500/20 hover:bg-red-500/20 transition">Log Out</button>
+                            <button onClick={onLogout} className="w-full py-3 bg-red-500/10 text-red-500 rounded-xl text-xs font-bold border border-red-500/20 hover:bg-red-500/20">Log Out</button>
                         </div>
                     </aside>
 
-                    {/* MAIN CONTENT */}
-                    <main className="flex-1 overflow-y-auto p-12 relative">
-                        {loading && <div className="absolute inset-0 bg-bg/50 backdrop-blur-md z-50 flex items-center justify-center text-indigo-400 font-bold">Updating Data...</div>}
+                    {/* Main */}
+                    <main className="flex-1 overflow-y-auto p-12 bg-[#020617] relative">
+                        {loading && <div className="absolute inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center text-indigo-400 font-bold">Synchronizing...</div>}
 
-                        {/* ═══ OVERVIEW TAB ═══ */}
-                        {activeTab === 'overview' && (
-                            <div className="page-animate">
-                                <PageHeader title="Business Intelligence" subtitle="System Performance Summary" />
-
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-                                    {[
-                                        { label: 'Total Reach', val: stats.shopsTotal, col: 'text-white' },
-                                        { label: 'Active Shops', val: stats.activeShops, col: 'text-emerald-400' },
-                                        { label: 'Global Sales', val: '₹' + stats.revenue.toLocaleString(), col: 'text-indigo-400' },
-                                        { label: 'Subscription Revenue', val: '₹' + (stats.subscriptionRev || 0).toLocaleString(), col: 'text-orange-400' }
-                                    ].map(s => (
-                                        <div key={s.label} className="glass-card p-6 rounded-[28px]">
-                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.label}</p>
-                                            <p className={`text-2xl font-black ${s.col}`}>{s.val}</p>
-                                        </div>
-                                    ))}
+                        {/* Top Stats */}
+                        <div className="grid grid-cols-4 gap-6 mb-12 animate-page">
+                            {[
+                                { label: 'Total Reach', val: stats.total, color: 'text-white' },
+                                { label: 'Paid & Active', val: stats.paid, color: 'text-emerald-400' },
+                                { label: 'Unpaid / Expired', val: stats.expired, color: 'text-red-400' },
+                                { label: 'Revenue (Est.)', val: '₹' + (stats.paid * 1500).toLocaleString(), color: 'text-indigo-400' }
+                            ].map(s => (
+                                <div key={s.label} className="glass-card p-6 rounded-[28px]">
+                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">{s.label}</p>
+                                    <p className={`text-2xl font-black ${s.color}`}>{s.val}</p>
                                 </div>
-
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                    <div className="glass-card p-8 rounded-[32px]">
-                                        <h3 className="text-sm font-bold text-white mb-6 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-indigo-500"></span> Product Reach Analysis
-                                        </h3>
-                                        <div className="h-48 flex items-end gap-2">
-                                            <svg viewBox="0 0 100 60" className="w-full h-full overflow-visible">
-                                                <polyline fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={chartPoints} />
-                                                {reachData.map((v, i) => (
-                                                    <circle key={i} cx={i * 10} cy={60 - (v / maxReach * 50)} r="2" fill="#020617" stroke="#6366f1" strokeWidth="1" />
-                                                ))}
-                                            </svg>
-                                        </div>
-                                        <p className="text-[10px] text-slate-500 mt-4 text-center">Trend of bill transactions across the top 10 shops.</p>
-                                    </div>
-                                    <div className="glass-card p-8 rounded-[32px]">
-                                        <h3 className="text-sm font-bold text-white mb-6 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Top Performing Shop
-                                        </h3>
-                                        {shops.slice(0, 1).map(s => (
-                                            <div key={s.id}>
-                                                <p className="text-3xl font-black text-white mb-2">{s.name}</p>
-                                                <p className="text-slate-400 text-sm mb-6 font-medium">{s.owner_name} &middot; {s.mobile_number}</p>
-                                                <div className="flex gap-4">
-                                                    <div className="bg-indigo-500/10 px-4 py-2 rounded-xl">
-                                                        <p className="text-[9px] font-bold text-indigo-400 uppercase">Lifetime Sales</p>
-                                                        <p className="text-lg font-black text-white">₹{Number(s.shop_stats?.stats_json?.overallSales || 0).toLocaleString()}</p>
-                                                    </div>
-                                                    <div className="bg-emerald-500/10 px-4 py-2 rounded-xl">
-                                                        <p className="text-[9px] font-bold text-emerald-400 uppercase">Total Bills</p>
-                                                        <p className="text-lg font-black text-white">{s.shop_stats?.stats_json?.overallBills || 0}</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                            ))}
+                        </div>
 
                         {/* ═══ SHOPS TAB ═══ */}
-                        {activeTab === 'shops' && (
-                            <div className="page-animate">
-                                <PageHeader title="Shop Ecosystem" subtitle="Software Installations & Activation Control" />
+                        {tab === 'shops' && (
+                            <div className="animate-page">
+                                <div className="mb-8">
+                                    <h2 className="text-3xl font-black text-white">Software Ecosystem</h2>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Global Installation & Activation Control</p>
+                                </div>
                                 <div className="glass-card rounded-[32px] overflow-hidden">
                                     <table className="w-full text-left">
                                         <thead className="bg-white/[0.02] text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5">
@@ -443,67 +292,44 @@
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/[0.03]">
-                                            {shops.map(shop => {
-                                                const daysLeft = getDaysLeft(shop.validity_end);
-                                                const badge = getDaysBadge(daysLeft);
-                                                return (
-                                                    <tr key={shop.id} className="hover:bg-white/[0.01] transition-colors">
-                                                        <td className="px-8 py-6 font-mono text-[10px] text-slate-500 uppercase tracking-tighter">{shop.id}</td>
-                                                        <td className="px-8 py-6">
-                                                            <p className="font-bold text-white text-sm">{shop.name}</p>
-                                                            <p className="text-[10px] text-slate-500 font-medium">Synced: {new Date(shop.updated_at).toLocaleDateString()}</p>
-                                                        </td>
-                                                        <td className="px-6 py-6">
-                                                            <div className="flex justify-center">
-                                                                <span className={`px-3 py-1 rounded-full text-[10px] font-black ${badge.bg} ${badge.text} ${daysLeft !== null && daysLeft <= 7 ? 'pulse-warn' : ''}`}>
-                                                                    {badge.label}
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-8 py-6">
-                                                            <div className="flex justify-center">
-                                                                <button onClick={() => toggleShop(shop.id, shop.is_active)} className={`flex items-center gap-2 px-5 py-2 rounded-full text-[10px] font-black transition-all ${shop.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                                                                    <span className={`w-1.5 h-1.5 rounded-full ${shop.is_active ? 'bg-emerald-400' : 'bg-red-500'}`}></span>
-                                                                    {shop.is_active ? 'ACTIVATED' : 'DEACTIVATED'}
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-8 py-6 text-right">
-                                                            <button onClick={() => confirmDelete(shop.id, shop.name)} className="w-9 h-9 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center ml-auto hover:bg-red-500 hover:text-white transition">
-                                                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            {shops.map(s => (
+                                                <tr key={s.id} className="hover:bg-white/[0.01]">
+                                                    <td className="px-8 py-6 font-mono text-[10px] text-slate-500">{s.id}</td>
+                                                    <td className="px-8 py-6 font-bold text-sm text-white">{s.store_name}</td>
+                                                    <td className="px-6 py-6 text-center">
+                                                        <span className={`px-3 py-1 rounded-full text-[10px] font-black ${getDaysLeft(s.validity_end) > 7 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-500'}`}>
+                                                            {getDaysLeft(s.validity_end)} Days
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-8 py-6 text-center">
+                                                        <div className="flex flex-col items-center gap-2">
+                                                            <button onClick={() => toggleSoftware(s.id, s.is_active)} className={`flex items-center gap-2 px-5 py-2 mx-auto rounded-full text-[10px] font-black border transition-all ${s.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:scale-105 active:scale-95'}`}>
+                                                                <span className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-emerald-400' : 'bg-red-500 animate-pulse'}`}></span>
+                                                                {s.is_active ? 'ACTIVATED' : (s.is_paid ? 'DEACTIVATED' : 'ACTIVATE')}
                                                             </button>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
+                                                            {!s.is_paid && !s.is_active && <span className="text-[8px] text-yellow-500 font-bold uppercase tracking-widest opacity-80">Payment Pending</span>}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-8 py-6 text-right">
+                                                        <button onClick={() => deleteShop(s.id)} className="w-9 h-9 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center ml-auto hover:bg-red-500 hover:text-white transition">
+                                                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
                                         </tbody>
                                     </table>
                                 </div>
                             </div>
                         )}
 
-                        {/* ═══ VALIDITY / SUBSCRIPTION TAB ═══ */}
-                        {activeTab === 'validity' && (
-                            <div className="page-animate">
-                                <PageHeader title="Subscription Management" subtitle="Validity Control & Payment Tracking" />
-
-                                {/* Summary Cards */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                                    <div className="glass-card p-6 rounded-[28px]">
-                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Shops</p>
-                                        <p className="text-3xl font-black text-white">{stats.shopsTotal}</p>
-                                    </div>
-                                    <div className="glass-card p-6 rounded-[28px]">
-                                        <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Paid & Active</p>
-                                        <p className="text-3xl font-black text-emerald-400">{shops.filter(s => s.is_paid).length}</p>
-                                    </div>
-                                    <div className="glass-card p-6 rounded-[28px]">
-                                        <p className="text-[9px] font-black text-red-400 uppercase tracking-widest mb-1">Unpaid / Expired</p>
-                                        <p className="text-3xl font-black text-red-400">{shops.filter(s => !s.is_paid || getDaysLeft(s.validity_end) <= 0).length}</p>
-                                    </div>
+                        {/* ═══ VALIDITY TAB ═══ */}
+                        {tab === 'validity' && (
+                            <div className="animate-page">
+                                <div className="mb-8">
+                                    <h2 className="text-3xl font-black text-white">Subscription Management</h2>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Validity Control & Payment Tracking</p>
                                 </div>
-
-                                {/* Validity Table */}
                                 <div className="glass-card rounded-[32px] overflow-hidden">
                                     <table className="w-full text-left">
                                         <thead className="bg-white/[0.02] text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5">
@@ -517,107 +343,97 @@
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/[0.03]">
-                                            {shops.map(shop => {
-                                                const daysLeft = getDaysLeft(shop.validity_end);
-                                                const badge = getDaysBadge(daysLeft);
-                                                const isPaid = !!shop.is_paid;
-                                                return (
-                                                    <tr key={shop.id} className="hover:bg-white/[0.01] transition-colors">
-                                                        <td className="px-6 py-5">
-                                                            <p className="font-bold text-white text-sm">{shop.name}</p>
-                                                            <p className="text-[10px] text-slate-500 font-mono">{shop.id}</p>
-                                                        </td>
-                                                        <td className="px-6 py-5 text-center">
-                                                            <span className="text-xs text-slate-400 font-medium">{formatDate(shop.validity_start)}</span>
-                                                        </td>
-                                                        <td className="px-6 py-5 text-center">
-                                                            <span className={`text-xs font-bold ${daysLeft !== null && daysLeft <= 7 ? 'text-orange-400' : 'text-slate-300'}`}>
-                                                                {formatDate(shop.validity_end)}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-5 text-center">
-                                                            <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-black ${badge.bg} ${badge.text} ${daysLeft !== null && daysLeft <= 7 ? 'pulse-warn' : ''}`}>
-                                                                {daysLeft !== null && daysLeft > 0 && (
-                                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                                )}
-                                                                {daysLeft !== null ? `${daysLeft} days` : 'Not set'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-5 text-center">
-                                                            <span className={`px-3 py-1 rounded-full text-[10px] font-black ${isPaid ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                                                                {isPaid ? '🟢 PAID' : '🔴 NOT PAID'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-5">
-                                                            <div className="flex justify-center">
-                                                                <button
-                                                                    onClick={() => togglePayment(shop.id, isPaid)}
-                                                                    className={`toggle-switch ${isPaid ? 'on' : 'off'}`}
-                                                                    title={isPaid ? 'Click to mark as unpaid' : 'Click to confirm payment & renew 30 days'}
-                                                                >
-                                                                    <div className="toggle-knob"></div>
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
+                                            {shops.map(s => (
+                                                <tr key={s.id} className="hover:bg-white/[0.01]">
+                                                    <td className="px-6 py-5">
+                                                        <p className="font-bold text-white text-sm">{s.store_name}</p>
+                                                        <p className="text-[10px] text-slate-500 font-mono uppercase">{s.id}</p>
+                                                    </td>
+                                                    <td className="px-6 py-5 text-center text-xs text-slate-400 font-medium">{formatDate(s.validity_start)}</td>
+                                                    <td className="px-6 py-5 text-center text-xs text-slate-300 font-bold">{formatDate(s.validity_end)}</td>
+                                                    <td className="px-6 py-5 text-center">
+                                                        <span className={`px-4 py-1.5 rounded-full text-xs font-black ${getDaysLeft(s.validity_end) > 7 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-500'}`}>
+                                                            {getDaysLeft(s.validity_end)} Days
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-5 text-center">
+                                                        <span className={`px-3 py-1 rounded-full text-[10px] font-black border ${s.is_paid ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
+                                                            {s.is_paid ? '🟢 PAID' : '🔴 UNPAID'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <button onClick={() => togglePaid(s.id, s.is_paid)} className={`toggle-switch mx-auto ${s.is_paid ? 'on' : 'off'}`}>
+                                                            <div className="toggle-knob"></div>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
                                         </tbody>
                                     </table>
-                                </div>
-
-                                {/* Info Note */}
-                                <div className="mt-8 glass-card p-6 rounded-[24px] border-l-4 border-indigo-500/30">
-                                    <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                                        <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                        How Validity Works
-                                    </h4>
-                                    <div className="text-xs text-slate-400 space-y-2 leading-relaxed">
-                                        <p>• Each shop gets <strong className="text-white">30 days</strong> of validity upon activation/payment.</p>
-                                        <p>• In the <strong className="text-orange-400">last 7 days</strong>, a warning is shown on both the desktop app and owner mobile app.</p>
-                                        <p>• After expiry, the desktop app <strong className="text-red-400">automatically locks</strong> with an "Activation Required" screen.</p>
-                                        <p>• Toggle the <strong className="text-emerald-400">Paid</strong> switch to ON to renew for another 30 days.</p>
-                                        <p>• <strong className="text-indigo-400">Online:</strong> Clicking "Deactivate" in the Shops tab immediately disables the shop.</p>
-                                        <p>• <strong className="text-indigo-400">Offline:</strong> The validity timer continues running locally — app auto-locks on expiry even without internet.</p>
-                                    </div>
                                 </div>
                             </div>
                         )}
 
                         {/* ═══ OWNERS TAB ═══ */}
-                        {activeTab === 'owners' && (
-                            <div className="page-animate">
-                                <PageHeader title="Owner Directory" subtitle="Managing Shop Owner Identities" />
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    {shops.map(shop => {
-                                        const daysLeft = getDaysLeft(shop.validity_end);
-                                        return (
-                                            <div key={shop.id} className="glass-card p-6 rounded-[32px] border-l-4 border-indigo-500/30">
-                                                <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-4">Master Account</p>
-                                                <p className="text-xl font-black text-white mb-1">{shop.owner_name || 'No Name Set'}</p>
-                                                <p className="text-slate-400 text-sm mb-4 font-medium">{shop.owner_email}</p>
-
-                                                <div className="space-y-3">
-                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                                                        {shop.mobile_number || 'N/A'}
-                                                    </div>
-                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1" /></svg>
-                                                        Works at: <span className="text-white font-bold ml-1">{shop.name}</span>
-                                                    </div>
-                                                    {daysLeft !== null && (
-                                                        <div className="flex items-center gap-3 text-xs">
-                                                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                            <span className={daysLeft <= 7 ? 'text-orange-400 font-bold' : 'text-slate-500'}>
-                                                                Validity: {daysLeft} days remaining
-                                                            </span>
-                                                        </div>
-                                                    )}
+                        {tab === 'owners' && (
+                            <div className="animate-page">
+                                <div className="mb-8">
+                                    <h2 className="text-3xl font-black text-white">Owner Directory</h2>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">System Master Records</p>
+                                </div>
+                                <div className="grid grid-cols-3 gap-6">
+                                    {shops.map(s => (
+                                        <div key={s.id} className="glass-card p-6 rounded-[32px] border-l-4 border-indigo-500/30">
+                                            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-4">Master Account</p>
+                                            <h3 className="text-xl font-black text-white mb-1">{s.owner_name}</h3>
+                                            <p className="text-slate-400 text-sm font-medium mb-6">{s.owner_email}</p>
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" strokeWidth="2" /></svg>
+                                                    {s.owner_phone}
+                                                </div>
+                                                <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5" strokeWidth="2" /></svg>
+                                                    Works at: <span className="text-indigo-400 font-bold">{s.store_name}</span>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* ═══ OVERVIEW TAB ═══ */}
+                        {tab === 'overview' && (
+                            <div className="animate-page">
+                                <div className="mb-8">
+                                    <h2 className="text-3xl font-black text-white">Business Intelligence</h2>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Global Ecosystem Snapshot</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-8">
+                                    <div className="glass-card p-8 rounded-[32px]">
+                                        <h3 className="text-sm font-bold text-white mb-6 flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-indigo-500"></span> Recent Installations
+                                        </h3>
+                                        <div className="space-y-4">
+                                            {shops.slice(0, 5).map(s => (
+                                                <div key={s.id} className="flex items-center justify-between p-4 bg-white/[0.02] rounded-2xl border border-white/5">
+                                                    <div>
+                                                        <p className="text-xs font-bold text-white">{s.store_name}</p>
+                                                        <p className="text-[9px] text-slate-500 font-mono uppercase">{s.id}</p>
+                                                    </div>
+                                                    <span className="text-[10px] font-black text-slate-500">{formatDate(s.created_at)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="glass-card p-8 rounded-[32px] flex flex-col items-center justify-center text-center">
+                                         <div className="w-24 h-24 rounded-full bg-indigo-500/10 flex items-center justify-center mb-6">
+                                            <svg className="w-12 h-12 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" strokeWidth="2" /></svg>
+                                         </div>
+                                         <h3 className="text-xl font-black text-white mb-2">System Status: Optimal</h3>
+                                         <p className="text-slate-400 text-sm max-w-xs">The SaaS Control Plane is monitoring {stats.total} installations across the network.</p>
+                                    </div>
                                 </div>
                             </div>
                         )}

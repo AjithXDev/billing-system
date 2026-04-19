@@ -72,6 +72,11 @@ export default function Settings() {
   // Validity
   const [validity, setValidity] = useState(null);
 
+  // Pairing
+  const [pairingCode, setPairingCode] = useState("");
+  const [pairingStatus, setPairingStatus] = useState("idle");
+  const [pairingMsg, setPairingMsg] = useState("");
+
   const loadSettingsData = () => {
     try {
       const raw = localStorage.getItem("smart_billing_settings");
@@ -228,6 +233,26 @@ export default function Settings() {
     setTimeout(() => setSyncStatus("idle"), 8000);
   };
 
+  const handleValidatePairing = async () => {
+    if (!pairingCode || pairingCode.length < 6) return;
+    setPairingStatus("validating");
+    setPairingMsg("");
+    try {
+      const res = await window.api.validatePairingCode(pairingCode);
+      if (res.success) {
+        setPairingStatus("success");
+        setPairingMsg("Successfully Linked Device: " + (res.deviceId || "Remote App"));
+        setPairingCode("");
+      } else {
+        setPairingStatus("error");
+        setPairingMsg(res.error || "Invalid pairing code.");
+      }
+    } catch (e) {
+      setPairingStatus("error");
+      setPairingMsg("Connection error: " + e.message);
+    }
+  };
+
   // Local DB handlers
   const handleBrowseFolder = async () => {
     const p = await window.api?.browseFolder?.();
@@ -307,156 +332,7 @@ export default function Settings() {
 
       <div style={{ flex: 1, overflowY: "auto", paddingRight: 10 }}>
         
-        {/* ── SUPABASE CONNECTION (Shop-Specific) ── */}
-        <SectionTitle icon="🔗" title="Supabase Connection (Shop Database)" />
-        
-        <div style={{ 
-          padding: "20px", background: "linear-gradient(135deg, rgba(99,102,241,0.05), rgba(139,92,246,0.05))", 
-          borderRadius: 12, border: "1px solid rgba(99,102,241,0.15)", marginBottom: 12, marginTop: 8 
-        }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
-            Connect this shop to its <strong>own Supabase project</strong>. Each shop should have a separate Supabase database.
-            After entering your credentials, click <strong>Save</strong> to connect and <strong>Sync</strong> to push/pull data.
-          </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", marginBottom: 4, display: "block" }}>Supabase URL</label>
-              <input 
-                style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12 }} 
-                value={shopUrl} 
-                onChange={e => setShopUrl(e.target.value)} 
-                placeholder="https://your-project.supabase.co" 
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", marginBottom: 4, display: "block" }}>Supabase Anon Key</label>
-              <input 
-                style={{ ...inputStyle, fontFamily: "monospace", fontSize: 11 }} 
-                value={shopKey} 
-                onChange={e => setShopKey(e.target.value)} 
-                placeholder="eyJhbGciOiJIUzI1NiIs..." 
-              />
-            </div>
-
-            {/* Connection Status */}
-            {shopConnMsg && (
-              <div style={{
-                padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
-                background: shopConnStatus === "connected" ? "rgba(16,185,129,0.1)" : shopConnStatus === "error" ? "rgba(239,68,68,0.1)" : "rgba(99,102,241,0.1)",
-                color: shopConnStatus === "connected" ? "#10b981" : shopConnStatus === "error" ? "#ef4444" : "#6366f1",
-                border: `1px solid ${shopConnStatus === "connected" ? "rgba(16,185,129,0.2)" : shopConnStatus === "error" ? "rgba(239,68,68,0.2)" : "rgba(99,102,241,0.2)"}`
-              }}>
-                {shopConnMsg}
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button 
-                onClick={handleSaveShopSupabase} 
-                disabled={shopConnStatus === "testing"}
-                style={actionBtnStyle("#6366f1", shopConnStatus === "connected")}
-              >
-                {shopConnStatus === "testing" ? "⏳ Testing..." : shopConnStatus === "connected" ? "✅ Connected" : "💾 Save & Connect"}
-              </button>
-
-              <button 
-                onClick={handleSyncShop} 
-                disabled={syncStatus === "syncing" || shopConnStatus !== "connected"}
-                style={actionBtnStyle("#0ea5e9", syncStatus === "done")}
-              >
-                {syncStatus === "syncing" ? "⏳ Syncing..." : "🔄 Sync Data"}
-              </button>
-
-              <button 
-                onClick={handleRestoreFromCloud} 
-                disabled={syncStatus === "syncing" || shopConnStatus !== "connected"}
-                style={actionBtnStyle("#f59e0b", false)}
-              >
-                📥 Restore from Cloud
-              </button>
-            </div>
-
-            {/* Sync Status */}
-            {syncMsg && (
-              <div style={{
-                padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
-                background: syncStatus === "done" ? "rgba(16,185,129,0.1)" : syncStatus === "error" ? "rgba(239,68,68,0.1)" : "rgba(14,165,233,0.1)",
-                color: syncStatus === "done" ? "#10b981" : syncStatus === "error" ? "#ef4444" : "#0ea5e9",
-              }}>
-                {syncMsg}
-              </div>
-            )}
-
-            {lastSynced && (
-              <div style={{ fontSize: 11, color: "var(--text-4)" }}>
-                Last synced: {lastSynced}
-              </div>
-            )}
-          </div>
-        </div>
-
-
-        {/* ── LOCAL DATABASE ── */}
-        <SectionTitle icon="💾" title="Local Database" />
-        
-        <div style={{ 
-          padding: "20px", background: "rgba(255,255,255,0.03)", 
-          borderRadius: 12, border: "1px solid var(--border)", marginBottom: 12, marginTop: 8 
-        }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
-            Store all billing data locally at a custom path. Data will be saved here first, and automatically synced to your online database when internet is available.
-          </div>
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <input 
-              style={{ ...inputStyle, flex: 1, fontFamily: "monospace", fontSize: 12 }} 
-              value={localDbPath} 
-              onChange={e => setLocalDbPath(e.target.value)} 
-              placeholder="D:\BillingData\MyShop" 
-            />
-            <button 
-              onClick={handleBrowseFolder}
-              style={{
-                height: 36, padding: "0 14px", borderRadius: 8,
-                border: "1px solid var(--border-2)", background: "var(--surface-2)",
-                color: "var(--text-1)", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                whiteSpace: "nowrap"
-              }}
-            >
-              📁 Browse
-            </button>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <button 
-              onClick={handleSaveLocalDb}
-              style={actionBtnStyle("#334155", localDbSaved)}
-            >
-              {localDbSaved ? "✅ Path Saved" : "💾 Save Path"}
-            </button>
-            
-            {localDbMsg && (
-              <span style={{ 
-                fontSize: 12, fontWeight: 600, 
-                color: localDbMsg.startsWith("✅") ? "#10b981" : "#ef4444" 
-              }}>
-                {localDbMsg}
-              </span>
-            )}
-          </div>
-
-          {localDbPath && (
-            <div style={{ 
-              marginTop: 12, padding: "10px 14px", borderRadius: 8,
-              background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.15)",
-              fontSize: 11, color: "#10b981", fontFamily: "monospace"
-            }}>
-              📂 Active Path: {localDbPath}
-            </div>
-          )}
-        </div>
 
 
         {/* ── VALIDITY STATUS ── */}
@@ -498,6 +374,86 @@ export default function Settings() {
         )}
 
 
+        {/* ── CLOUD INSTALLATION ── */}
+        <SectionTitle icon="☁️" title="Cloud Installation (Shop Database)" />
+        <div style={{ 
+          padding: "20px", background: "rgba(255,255,255,0.03)", 
+          borderRadius: 12, border: "1px solid var(--border)", marginBottom: 16, marginTop: 8 
+        }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
+            Enter your <strong>Supabase Shop Connection</strong> details provided during installation. This links your desktop terminal with your cloud database and allows the Mobile App to show your real-time data.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>SUPABASE URL</label>
+              <input 
+                style={inputStyle} 
+                value={shopUrl} 
+                onChange={e => setShopUrl(e.target.value)} 
+                placeholder="https://your-project.supabase.co"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>ANON PUBLIC KEY</label>
+              <input 
+                style={inputStyle} 
+                value={shopKey} 
+                onChange={e => setShopKey(e.target.value)} 
+                type="password"
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: shopConnStatus === 'connected' ? '#16a34a' : (shopConnStatus === 'error' ? '#ef4444' : 'var(--text-4)') }}>
+                {shopConnMsg || (shopConnStatus === 'connected' ? "Connected to Cloud" : "Not Linked")}
+              </div>
+              <button 
+                onClick={handleSaveShopSupabase}
+                style={actionBtnStyle(shopConnStatus === 'connected' ? "#16a34a" : "var(--primary)", shopConnStatus === 'testing')}
+              >
+                {shopConnStatus === 'testing' ? 'Testing...' : (shopConnStatus === 'connected' ? 'Update Credentials' : 'Link Connection')}
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        {/* ── LOCAL DATA STORAGE ── */}
+        <SectionTitle icon="📁" title="Local Data Storage" />
+        <div style={{ 
+          padding: "20px", background: "rgba(255,255,255,0.03)", 
+          borderRadius: 12, border: "1px solid var(--border)", marginBottom: 16, marginTop: 8 
+        }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
+            Choose where your billing data (SQLite) is saved on this computer. This ensures data is accessible even **offline** and allows you to manually back up your files.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <input 
+              style={{ ...inputStyle, flex: 1, background: "var(--surface-2)", cursor: "default" }} 
+              value={localDbPath} 
+              readOnly 
+              placeholder="Default System Location"
+            />
+            <button 
+              onClick={handleBrowseFolder}
+              style={{ ...actionBtnStyle("var(--text-2)", false), background: "white", color: "var(--text-1)", border: "1px solid var(--border)" }}
+            >
+              Browse Folder
+            </button>
+            <button 
+              onClick={handleSaveLocalDb}
+              style={actionBtnStyle("var(--primary)", localDbSaved)}
+            >
+              {localDbSaved ? "Saved" : "Save Path"}
+            </button>
+          </div>
+          {localDbMsg && (
+            <div style={{ fontSize: 11, color: localDbMsg.includes('✅') ? '#16a34a' : '#ef4444', marginTop: 10, fontWeight: 600 }}>
+              {localDbMsg}
+            </div>
+          )}
+        </div>
+
         {/* ── STORE INFO ── */}
         <SectionTitle icon="" title="Store Information" />
 
@@ -515,6 +471,12 @@ export default function Settings() {
 
         <SettingRow label="Store Address">
           <textarea style={{ ...inputStyle, height: 60, padding: "8px 12px", resize: "none" }} value={cfg.storeAddress} onChange={e => set("storeAddress", e.target.value)} placeholder="No.123, Main Street..." />
+        </SettingRow>
+
+        <SettingRow label="System Shop ID" hint="Unique identifier for this terminal. Used for mobile app pairing.">
+          <input style={{ ...inputStyle, background: "rgba(255,255,255,0.05)", cursor: "default", fontFamily: "monospace", color: "var(--text-3)", border: "1px dashed var(--border)" }} 
+            value={cfg.shopId || "ID NOT FOUND"} 
+            readOnly />
         </SettingRow>
 
         {/* ── BILLING SETTINGS ── */}
@@ -629,48 +591,10 @@ export default function Settings() {
           </button>
         </SettingRow>
 
-        <SectionTitle icon="" title="Terminal Security" />
-
-        <SettingRow label="Master Access Key" hint="This is the password used to link your Mobile App.">
-          <input style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: ".1em" }} 
-            value={cfg.masterKey} 
-            onChange={e => set("masterKey", e.target.value)} 
-            placeholder="Enter a secure key" />
-        </SettingRow>
-
-        <SettingRow label="System Shop ID" hint="Unique identifier for this terminal.">
-          <input style={{ ...inputStyle, background: "#f1f5f9", cursor: "default", fontFamily: "monospace", color: "#64748b" }} 
-            value={cfg.shopId || "ID NOT FOUND"} 
-            readOnly />
-        </SettingRow>
-
-
-        {/* ── BACKUP SETTINGS ── */}
-        <SectionTitle icon="🛡️" title="Backup & Protection" />
-        <div style={{ padding: "20px", background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid var(--border)", marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Database Backup</div>
-          <p style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 16 }}>
-            Safely export your entire business database to your computer. We recommend doing this once a week.
-          </p>
-          <button 
-            onClick={async () => {
-              const res = await window.api.createBackup();
-              if (res.success) alert(res.message);
-              else alert("Backup failed: " + res.error);
-            }}
-            style={{
-              background: "#334155", color: "white", border: "none", 
-              padding: "10px 16px", borderRadius: 8, fontSize: 12, 
-              fontWeight: 700, cursor: "pointer"
-            }}
-          >
-            Create Local Backup Now
-          </button>
-        </div>
-
 
         {/* ── ABOUT BRAND ── */}
         <SectionTitle icon="" title="About Software" />
+
 
         <div style={{
           background: "linear-gradient(135deg, #0f172a, #1e293b)",

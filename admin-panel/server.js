@@ -15,26 +15,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = 4000;
 const JWT_SECRET = 'iva_admin_super_secret_2026';
 
-// ── ADMIN DB SETUP ──
-const db = new sqlite3(path.join(__dirname, 'admin.db'));
-db.exec(`
-  CREATE TABLE IF NOT EXISTS admins (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    otp TEXT,
-    otp_expires_at DATETIME
-  );
-`);
-
-// Check if an admin exists, if not create default
-const adminCount = db.prepare('SELECT COUNT(*) as count FROM admins').get().count;
-if (adminCount === 0) {
-  const hash = bcrypt.hashSync('admin123', 10);
-  db.prepare('INSERT INTO admins (email, password) VALUES (?, ?)').run('admin@iva.com', hash);
-  console.log('✅ Default Admin created: admin@iva.com / admin123');
-}
-
 // ── SUPABASE CLIENT ──
 const getSupabase = () => {
     const url = process.env.SUPABASE_URL;
@@ -61,49 +41,29 @@ const requireAuth = (req, res, next) => {
 
 // ── ROUTES: AUTH ──
 
-// Login
-app.post('/api/admin/login', (req, res) => {
+// Login using SaaS Control Plane
+app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const admin = db.prepare('SELECT * FROM admins WHERE email = ?').get(email);
-    if (!admin || !bcrypt.compareSync(password, admin.password)) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+    const supabase = getSupabase();
+    // In our V3 schema, admins are in the public.admins table
+    const { data: admin, error } = await supabase
+      .from('admins')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (error || !admin || password !== admin.password_hash) {
+      return res.status(401).json({ error: 'Invalid administrative credentials' });
     }
+
     const token = jwt.sign({ adminId: admin.id }, JWT_SECRET, { expiresIn: '12h' });
-    res.json({ success: true, token });
+    res.json({ success: true, token, email: admin.email });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Forgot Password -> Generate OTP
-app.post('/api/admin/forgot-password', (req, res) => {
-  const { email } = req.body;
-  const admin = db.prepare('SELECT * FROM admins WHERE email = ?').get(email);
-  if (!admin) return res.status(400).json({ error: 'Email not found' });
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = new Date(Date.now() + 10 * 60000).toISOString(); // 10 mins
-  
-  db.prepare('UPDATE admins SET otp = ?, otp_expires_at = ? WHERE email = ?').run(otp, expiresAt, email);
-  
-  // In a real app, send this via Nodemailer. For now, log it.
-  console.log(`\n📧 [EMAIL SIMULATION] Sent to ${email}\n🔐 Your Admin Reset OTP is: ${otp}\n`);
-  
-  res.json({ success: true, message: 'OTP sent to email (check terminal for now)' });
-});
-
-// Reset Password
-app.post('/api/admin/reset-password', (req, res) => {
-  const { email, otp, newPassword } = req.body;
-  const admin = db.prepare('SELECT * FROM admins WHERE email = ?').get(email);
-  if (!admin || admin.otp !== otp || new Date() > new Date(admin.otp_expires_at)) {
-    return res.status(400).json({ error: 'Invalid or expired OTP' });
-  }
-  const hash = bcrypt.hashSync(newPassword, 10);
-  db.prepare('UPDATE admins SET password = ?, otp = NULL, otp_expires_at = NULL WHERE email = ?').run(hash, email);
-  res.json({ success: true, message: 'Password reset successfully' });
-});
 
 // ── ROUTES: SHOPS ──
 
@@ -129,9 +89,27 @@ app.post('/api/shops/:id/toggle', requireAuth, async (req, res) => {
     const { is_active } = req.body;
     const supabase = getSupabase();
     
+    // 🔥 If activating a shop that is NOT yet paid, automatically mark as paid + set validity
+    if (is_active) {
+       const { data: current } = await supabase.from('shops').select('is_paid').eq('id', id).single();
+       if (current && !current.is_paid) {
+          const now = new Date();
+          const end = new Date(now.getTime() + 30 * 86400000);
+          await supabase.from('shops').update({ 
+            is_active: true,
+            is_paid: true, 
+            validity_start: now.toISOString(),
+            validity_end: end.toISOString(),
+            payment_status: 'paid',
+            software_status: 'active'
+          }).eq('id', id);
+          return res.json({ success: true, note: "First-time activation: Payment toggled ON & 30 days renewed." });
+       }
+    }
+
     const { error } = await supabase
       .from('shops')
-      .update({ is_active })
+      .update({ is_active, software_status: is_active ? 'active' : 'deactivated' })
       .eq('id', id);
       
     if (error) throw error;

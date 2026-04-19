@@ -58,71 +58,77 @@ function in7days() { return new Date(Date.now() + 7 * 86400000).toISOString().sp
 function inNdays(n) { return new Date(Date.now() + n * 86400000).toISOString().split("T")[0]; }
 
 /* ── Reconnection Logic & Tunnel Management ── */
+let isStartingTunnel = false;
 async function startTunnel(mainWindow) {
+  if (isStartingTunnel) return;
+  isStartingTunnel = true;
+
   const settings = getSettings();
-  // Remove words that localtunnel blocks (like billing, bank, pay)
   const baseName = (settings.storeName || "mystore").toLowerCase().replace(/billing|invoice|pay/g, "app");
   const shopSlug = baseName.replace(/[^a-z0-9]/g, "-");
   
-  // Create a persistent, stable identifier so the QR code NEVER changes
-  const stableId = process.env.SHOP_ID || "store123";
+  const stableId = settings.shopId || process.env.SHOP_ID || "store123";
   const stableSuffix = stableId.replace(/[^a-zA-Z0-9]/g, "").slice(-6); 
   const subdomain = `${shopSlug}-manager-${stableSuffix}`.toLowerCase();
 
   try {
     const localtunnel = require("localtunnel");
     
-    // Close existing tunnel if any
     if (tunnelObj) {
       try { tunnelObj.close(); } catch(e) {}
     }
 
     tunnelObj = await localtunnel({ 
-      port: PORT, 
-      subdomain: subdomain 
-    });
+        port: PORT, 
+        subdomain: subdomain 
+      }).catch(err => {
+        throw new Error("Tunnel spawn failed");
+      });
 
-    tunnelURL = tunnelObj.url;
-    console.log("[Sync Engine] Public URL:", tunnelURL);
+    if (tunnelURL !== tunnelObj.url) {
+      tunnelURL = tunnelObj.url;
+      console.log("[Sync Engine] ✅ Public URL Active:", tunnelURL);
+    }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("tunnel-ready", { url: tunnelURL });
     }
 
     tunnelObj.on("close", () => {
-      // Quiet background reconnect
       tunnelURL = null;
-      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 45000);
+      isStartingTunnel = false;
+      // 2 Minute retry
+      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 120000);
     });
 
     tunnelObj.on("error", (err) => {
-      // Quiet background error handling
-      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 45000);
+      tunnelURL = null;
+      isStartingTunnel = false;
+      setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 120000);
     });
 
   } catch (e) {
-    console.warn("[Sync Engine] Offline mode. Waiting for internet...");
-    setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 60000); // Check every minute
+    isStartingTunnel = false;
+    // Exponential backoff or just long delay
+    setTimeout(() => { if (mainWindow) startTunnel(mainWindow); }, 180000);
   }
 }
 
 /* ── Sync Stats to Supabase Cloud ── */
 async function syncStatsToSupabase() {
   if (!supabase) return;
-  
-  // DRYNAMIC SHOP_ID: Prioritize local settings (Real-world ready)
   const settings = getSettings();
   const shopId = settings.shopId || process.env.SHOP_ID;
   if (!shopId) return;
 
   try {
-    const settings = getSettings();
     const lowThreshold = settings.lowStockThreshold || 10;
     const expiryDays = settings.expiryAlertDays || 3;
     const deadDays = settings.deadStockThresholdDays || 30;
     const today = todayStr();
     const inExp = inNdays(expiryDays);
 
+    // Prepare Summary Data
     const totalProducts = db.prepare("SELECT COUNT(*) as c FROM products").get().c;
     const totalCategories = db.prepare("SELECT COUNT(*) as c FROM categories").get().c;
     const todaySales = db.prepare("SELECT COALESCE(SUM(total_amount),0) as t FROM invoices WHERE date(created_at)=date('now','localtime')").get().t;
@@ -143,12 +149,11 @@ async function syncStatsToSupabase() {
 
     const topProducts = db.prepare("SELECT p.name, SUM(ii.quantity) as sold, SUM(ii.price*ii.quantity) as revenue FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.product_id ORDER BY sold DESC LIMIT 8").all();
     const dailySalesData = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
-    const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m',created_at,'localtime') as month, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-180 days') GROUP BY month ORDER BY month ASC").all();
+    const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m', inv.created_at, 'localtime') as month, COUNT(DISTINCT inv.id) as bills, COALESCE(SUM(inv.total_amount), 0) as total, COALESCE(SUM(ii.quantity * (ii.price - COALESCE(p.cost_price, ii.price * 0.7))), 0) as profit FROM invoices inv LEFT JOIN invoice_items ii ON inv.id = ii.invoice_id LEFT JOIN products p ON ii.product_id = p.id WHERE inv.created_at >= datetime('now', '-180 days') GROUP BY month ORDER BY month ASC").all();
     const yearlyBreakdown = db.prepare("SELECT strftime('%Y',created_at,'localtime') as year, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices GROUP BY year ORDER BY year DESC LIMIT 5").all();
     const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE strftime('%Y-%m',created_at,'localtime')=strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
     const peakHoursData = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
     const paymentBreakdownData = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
-
     const deadStockData = db.prepare("SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-" + deadDays + " days'))").all();
     const lowStockProducts = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=? ORDER BY quantity ASC LIMIT 30").all(lowThreshold);
     const outOfStockProducts = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
@@ -158,45 +163,163 @@ async function syncStatsToSupabase() {
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
     const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
 
-    // Register/update shop in Supabase FIRST (To prevent Foreign Key errors in stats)
-    await supabase.from("shops").upsert({
-      id: shopId, 
-      name: settings.storeName || 'My Shop',
-      owner_name: settings.ownerName || 'Shop Owner',
-      mobile_number: settings.ownerPhone || '',
-      owner_email: settings.ownerEmail || '',
-      master_key: process.env.MASTER_KEY || 'owner123',
-      updated_at: new Date().toISOString()
-    });
+    // 1. Control Plane Sync (Snapshot)
+    try {
+      // LOAD SETTINGS FOR SYNC
+      const configPath = path.join(os.homedir(), "AppData", "Roaming", "innoaivators-billing", "app_settings.json");
+      let settings = {};
+      if (fs.existsSync(configPath)) {
+        try { settings = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch(e) {}
+      }
 
-    const { error: statsErr } = await supabase.from("shop_stats").upsert({
-      shop_id: shopId,
-      stats_json: {
-        totalProducts, totalCategories, todaySales, todayBills, weeklySales, monthlySales,
-        overallSales, overallCost, overallBills, expiredCount, nearExpiryCount, lowStockCount, outOfStock: outOfStockVal,
-        todayProfit: todaySales - todayCost, weeklyProfit: weeklySales - weeklyCost,
-        monthlyProfit: monthlySales - monthlyCost, overallProfit: overallSales - overallCost,
-        todayCost, weeklyCost, monthlyCost,
-        topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })),
-        topProducts, dailySales: dailySalesData, monthlySalesBreakdown: monthlyBreakdown,
-        yearlyBreakdown, weeklyBreakdown, peakHours: peakHoursData, paymentBreakdown: paymentBreakdownData,
-        deadStock: deadStockData, lowStockProducts, outOfStockProducts, expiredProducts, expiringProducts,
-        recentInvoices, allProductsList, customerBehavior,
+      // FIRST: Ensure shop exists (prevents FK error in shop_stats)
+      const shopSyncConfig = db.prepare("SELECT * FROM shop_supabase_config WHERE is_connected = 1 ORDER BY id DESC LIMIT 1").get();
+      const shopEntry = { 
+        id: shopId, 
+        name: settings.storeName || 'My Shop', 
+        updated_at: new Date().toISOString(),
+        shop_supabase_url: shopSyncConfig ? shopSyncConfig.supabase_url : null,
+        shop_supabase_key: shopSyncConfig ? shopSyncConfig.supabase_key : null
+      };
+      await supabase.from("shops").upsert(shopEntry);
+
+      const statsJson = {
+        totalProducts, totalCategories, todaySales, todayBills, weeklySales, monthlySales, overallSales, overallCost, overallBills, 
+        expiredCount, nearExpiryCount, lowStockCount, outOfStock: outOfStockVal,
+        todayProfit: todaySales - todayCost, weeklyProfit: weeklySales - weeklyCost, monthlyProfit: monthlySales - monthlyCost, overallProfit: overallSales - overallCost,
+        todayCost, weeklyCost, monthlyCost, topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })), topProducts,
+        dailySales: dailySalesData, monthlySalesBreakdown: monthlyBreakdown, yearlyBreakdown, weeklyBreakdown,
+        peakHours: peakHoursData, paymentBreakdown: paymentBreakdownData, deadStock: deadStockData, lowStockProducts, 
+        outOfStockProducts, expiredProducts, expiringProducts, recentInvoices, allProductsList, customerBehavior,
         settings: {
-          storeName: settings.storeName || '', storeAddress: settings.storeAddress || '',
-          storeTagline: settings.storeTagline || '', gstNumber: settings.gstNumber || '',
-          whatsappNumber: settings.ownerPhone || '', expiryAlertDays: expiryDays,
-          lowStockThreshold: lowThreshold, deadStockThresholdDays: deadDays
+          storeName: settings.storeName || '', storeAddress: settings.storeAddress || '', gstNumber: settings.gstNumber || '',
+          whatsappNumber: settings.ownerPhone || '', expiryAlertDays: expiryDays, lowStockThreshold: lowThreshold, deadStockThresholdDays: deadDays
         }
-      },
-      updated_at: new Date().toISOString()
-    });
-    if (statsErr) { console.error("[Sync] Stats push error:", statsErr.message); return; }
+      };
+      const { error: statsErr } = await supabase.from("shop_stats").upsert({ shop_id: shopId, stats_json: statsJson, updated_at: new Date().toISOString() });
+      if (statsErr) console.error("[Sync] ❌ Stats error:", statsErr.message);
+      else console.log("[Sync] ✅ Snapshot pushed.");
+    } catch (e) { console.error("[Sync] Control Plane Error:", e.message); }
 
-    console.log("[Sync] \u2705 Stats synced to Supabase at", new Date().toLocaleTimeString());
-  } catch (e) {
-    console.error("[Sync] Error:", e.message);
-  }
+    // 2. Data Plane Sync (Individual Table Records)
+    try {
+      const config = db.prepare("SELECT * FROM shop_supabase_config WHERE is_connected = 1 ORDER BY id DESC LIMIT 1").get();
+      if (config && config.supabase_url && config.supabase_key) {
+        const { createClient } = require('@supabase/supabase-js');
+        const shopSupabase = createClient(config.supabase_url, config.supabase_key);
+        console.log(`[ShopSync] 🌐 Target URL: ${config.supabase_url}`);
+        console.log("[ShopSync] 🔄 Syncing data chunks...");
+
+        // ── CATEGORIES ──
+        console.log("[ShopSync] 📦 Syncing Categories...");
+        const cats = db.prepare("SELECT * FROM categories").all();
+        if (cats.length > 0) {
+          for (let i = 0; i < cats.length; i += 50) {
+            const chunk = cats.slice(i, i + 50).map(c => ({ id: c.id, name: c.name, gst: c.gst }));
+            const { error: catErr } = await shopSupabase.from('categories').upsert(chunk);
+            if (catErr) console.error("[ShopSync] 📦 Category Error:", catErr.message);
+          }
+        }
+
+        // ── PRODUCTS ──
+        console.log("[ShopSync] 🛒 Syncing Products...");
+        const products = db.prepare("SELECT * FROM products").all();
+        if (products.length > 0) {
+          for (let i = 0; i < products.length; i += 50) {
+            const chunk = products.slice(i, i + 50).map(p => {
+               const { id, is_synced, ...rest } = p;
+               return { ...rest, local_id: id, updated_at: new Date().toISOString() };
+            });
+            const { error: prodErr } = await shopSupabase.from('products').upsert(chunk, { onConflict: 'local_id' });
+            if (prodErr) console.error("[ShopSync] 🛒 Product Error:", prodErr.message);
+          }
+        }
+
+        // ── CUSTOMERS ──
+        console.log("[ShopSync] 👥 Syncing Customers...");
+        const customers = db.prepare("SELECT * FROM customers").all();
+        if (customers.length > 0) {
+          for (let i = 0; i < customers.length; i += 50) {
+            const chunk = customers.slice(i, i + 50).map(c => {
+               // Normalize Dates for Postgres
+               let isoDate = new Date().toISOString(); 
+               if (c.created_at) {
+                 try { isoDate = new Date(c.created_at.replace(' ', 'T')).toISOString(); } catch(e) {}
+               }
+
+               return { 
+                  name: c.name || "Customer",
+                  phone: c.phone || "WALK-IN",
+                  address: c.address || "",
+                  local_id: c.id,
+                  created_at: isoDate
+               };
+            });
+            const { error: custErr } = await shopSupabase.from('customers').upsert(chunk, { onConflict: 'local_id' });
+            if (custErr) console.error("[ShopSync] 👥 Customer Error:", custErr.message);
+          }
+        }
+
+        // ── INVOICES & ITEMS ──
+        console.log("[ShopSync] 🧾 Syncing Invoices...");
+        const localInvoices = db.prepare("SELECT * FROM invoices ORDER BY id DESC LIMIT 500").all();
+        if (localInvoices.length > 0) {
+          for (const inv of localInvoices) {
+            const { id: localInvId, is_synced, created_at, ...invData } = inv;
+            // Map ONLY the columns that exist in user's cloud schema
+            const invoicePayload = {
+               local_id: localInvId,
+               bill_no: Math.floor(invData.bill_no || 0),
+               bill_date: invData.bill_date,
+               customer_name: invData.customer_name,
+               customer_phone: invData.customer_phone,
+               customer_address: invData.customer_address,
+               customer_id: invData.customer_id,
+               payment_mode: invData.payment_mode,
+               total_amount: Number(invData.total_amount || 0),
+               created_at: created_at
+            };
+
+            const { data: remoteInv, error: invErr } = await shopSupabase
+              .from('invoices')
+              .upsert(invoicePayload, { onConflict: 'local_id' })
+              .select('id')
+              .single();
+            
+            if (invErr) {
+               console.error(`[ShopSync] 🧾 Invoice Error (ID: ${localInvId}):`, invErr.message);
+               continue;
+            }
+
+            if (remoteInv) {
+              const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(localInvId);
+              if (items.length > 0) {
+                const itemChunk = items.map(item => {
+                  const { id: localItemId, invoice_id, ...itemData } = item;
+                  return { 
+                    local_id: localItemId, 
+                    invoice_id: localInvId, 
+                    invoice_uuid: remoteInv.id,
+                    product_id: itemData.product_id,
+                    quantity: Number(itemData.quantity || 0),
+                    price: Number(itemData.price || 0),
+                    gst_rate: Number(itemData.gst_rate || 0),
+                    gst_amount: Number(itemData.gst_amount || 0),
+                    discount_percent: Number(itemData.discount_percent || 0),
+                    discount_amount: Number(itemData.discount_amount || 0)
+                  };
+                });
+                const { error: itemsErr } = await shopSupabase.from('invoice_items').upsert(itemChunk, { onConflict: 'local_id' });
+                if (itemsErr) console.error(`[ShopSync] 🧾 Item Error (InvID: ${localInvId}):`, itemsErr.message);
+              }
+            }
+          }
+        }
+        console.log("[ShopSync] ✅ ALL TABLES SYNCED SUCCESSFULLY!");
+      }
+    } catch (sErr) { console.error("[ShopSync] ❌ CRITICAL SYNC ERROR:", sErr.message); }
+
+  } catch (err) { console.error("[Sync] Critical Error:", err.message); }
 }
 
 /* ── Start API Server ────────────────────────────────── */

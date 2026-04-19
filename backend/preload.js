@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld("api", {
   deleteNotification:  (id)           => ipcRenderer.invoke("delete-notification", id),
   getSyncStatus:       ()             => ipcRenderer.invoke("get-sync-status"),
   getLicenseStatus:    ()             => ipcRenderer.invoke("get-license-status"),
+  requestActivation:   ()             => ipcRenderer.invoke("request-activation"),
 
   // 📧 Email Verification (OTP)
   checkEmailExists:    (email)        => ipcRenderer.invoke("check-email-exists", email),
@@ -91,4 +92,5 @@ contextBridge.exposeInMainWorld("api", {
   getValidity:         ()             => ipcRenderer.invoke("get-validity"),
   onValidityWarning:   (cb)           => ipcRenderer.on("validity-warning", (_e, data) => cb(data)),
   onValidityExpired:   (cb)           => ipcRenderer.on("validity-expired", (_e) => cb()),
+  onAppLock:           (cb)           => ipcRenderer.on("app-lock", (_e, data) => cb(data)),
 });

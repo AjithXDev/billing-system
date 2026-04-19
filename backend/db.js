@@ -1,256 +1,224 @@
+/**
+ * INNOAIVATORS Smart Billing — Database Layer
+ */
+
 const Database = require("better-sqlite3");
 const path = require("path");
+const fs = require("fs");
+const { app } = require("electron");
 
-// Safe Electron app reference — works even if loaded before app.whenReady()
-let app;
-try {
-  app = require("electron").app;
-} catch (e) {
-  app = null;
-}
+let db;
+let dbPath;
 
-const isDev = !app || !app.isPackaged;
-const dbPath = (isDev || !app)
-  ? path.join(__dirname, "billing.db")
-  : path.join(app.getPath("userData"), "billing.db");
+const getSettingsFilePaths = () => {
+    const paths = [];
+    try {
+        if (app) paths.push(path.join(app.getPath("userData"), "app_settings.json"));
+    } catch(e) {}
+    if (process.env.APPDATA) paths.push(path.join(process.env.APPDATA, "innoaivators-billing", "app_settings.json"));
+    paths.push(path.join(__dirname, "app_settings.json"));
+    paths.push(path.join(process.cwd(), "app_settings.json"));
+    return paths;
+};
 
-const db = new Database(dbPath);
+const getPersistedSettings = () => {
+    const paths = getSettingsFilePaths();
+    for (const p of paths) {
+        if (fs.existsSync(p)) {
+            try {
+                const data = JSON.parse(fs.readFileSync(p, "utf8"));
+                if (data && (data.localDbPath || data.shopId)) return data;
+            } catch (e) {}
+        }
+    }
+    return null;
+};
 
+const initDB = () => {
+    const settings = getPersistedSettings();
+    let folder = "";
 
+    try {
+        const docs = app.getPath("documents");
+        const baseDir = path.join(docs, "Innoaivators Billing");
 
-// 🟢 CATEGORIES TABLE (GST BASE)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS categories (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  gst INTEGER DEFAULT 0
-)
-`).run();
+        // ── Real-world safe: scan for ANY existing billing.db first ──
+        // If one already exists (even if storeName changed), use it.
+        // Only create a new folder on fresh install.
+        let foundExisting = false;
+        if (fs.existsSync(baseDir)) {
+            const subFolders = fs.readdirSync(baseDir, { withFileTypes: true })
+                .filter(d => d.isDirectory())
+                .map(d => d.name);
+            for (const sub of subFolders) {
+                const candidate = path.join(baseDir, sub, "billing.db");
+                if (fs.existsSync(candidate)) {
+                    folder = path.join(baseDir, sub);
+                    foundExisting = true;
+                    break;
+                }
+            }
+        }
 
-// Seed Categories if empty
-const catCount = db.prepare("SELECT COUNT(*) as count FROM categories").get();
-if (catCount.count === 0) {
-  const insertCat = db.prepare("INSERT INTO categories (name, gst) VALUES (?, ?)");
-  const defaultCats = [
-    { name: "Grocery", gst: 0 },
-    { name: "Snacks & Biscuits", gst: 18 },
-    { name: "Soft Drinks", gst: 28 },
-    { name: "Dairy Products", gst: 5 },
-    { name: "Cosmetics", gst: 18 },
-    { name: "General", gst: 0 }
-  ];
-  for (const cat of defaultCats) {
-    insertCat.run(cat.name, cat.gst);
-  }
-}
+        // Fresh install — create folder with storeName
+        if (!foundExisting) {
+            const storeFolderName = (settings && settings.storeName) 
+                ? settings.storeName.replace(/[<>:"/\\|?*]/g, '') // sanitize
+                : "My Store";
+            folder = path.join(baseDir, storeFolderName);
+        }
 
-// 🟢 MIGRATION: Rename existing categories from "GST labels" to "Proper Names"
-try {
-  db.prepare("UPDATE categories SET name = 'Grocery & General' WHERE name = 'General (0%)'").run();
-  db.prepare("UPDATE categories SET name = 'Essential Food' WHERE name = 'Essential (5%)'").run();
-  db.prepare("UPDATE categories SET name = 'Standard Items' WHERE name = 'Standard (12%)'").run();
-  db.prepare("UPDATE categories SET name = 'Premium Snacks' WHERE name = 'Premium (18%)'").run();
-  db.prepare("UPDATE categories SET name = 'Luxury & Drinks' WHERE name = 'Luxury (28%)'").run();
-} catch (e) { }
+    } catch (e) {
+        folder = path.join(__dirname, "shops");
+    }
 
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+    
+    dbPath = path.join(folder, "billing.db");
+    console.log(`[DB] 🎯 Targeted path for user: ${dbPath}`);
+    
+    db = new Database(dbPath);
+    db.pragma("journal_mode = WAL");
 
-// 🟢 PRODUCTS TABLE (GST FROM CATEGORY LINK + DIRECT GST)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS products (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  category_id INTEGER,
-  gst_rate REAL DEFAULT 0,
-  product_code TEXT UNIQUE,
-  price_type TEXT DEFAULT 'exclusive',
-  price REAL NOT NULL,
-  cost_price REAL DEFAULT 0,
-  quantity INTEGER DEFAULT 0,
-  unit TEXT,
-  barcode TEXT UNIQUE,
-  expiry_date TEXT DEFAULT NULL,
-  image TEXT DEFAULT NULL,
-  default_discount REAL DEFAULT 0,
-  flag_low_stock INTEGER DEFAULT 0,
-  flag_out_of_stock INTEGER DEFAULT 0,
-  flag_expiry INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
+    // 1. Full Schema Initialization
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            gst DECIMAL(5,2) DEFAULT 0
+        );
 
-// Safe migration: add columns if they are missing from older versions
-try { db.prepare("ALTER TABLE products ADD COLUMN expiry_date TEXT DEFAULT NULL").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN unit TEXT").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN barcode TEXT").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN product_code TEXT").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN price_type TEXT DEFAULT 'exclusive'").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN image TEXT DEFAULT NULL").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN default_discount REAL DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN flag_low_stock INTEGER DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN flag_out_of_stock INTEGER DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN flag_expiry INTEGER DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN flag_dead_stock INTEGER DEFAULT 0").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN weight TEXT").run(); } catch (e) { }
-try { db.prepare("ALTER TABLE products ADD COLUMN brand TEXT").run(); } catch (e) { }
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category_id INTEGER,
+            price DECIMAL(12,2) NOT NULL,
+            cost_price DECIMAL(12,2) DEFAULT 0,
+            quantity DECIMAL(12,2) DEFAULT 0,
+            unit TEXT DEFAULT 'pcs',
+            barcode TEXT,
+            product_code TEXT,
+            price_type TEXT DEFAULT 'exclusive',
+            default_discount DECIMAL(5,2) DEFAULT 0,
+            weight TEXT,
+            brand TEXT,
+            gst_rate DECIMAL(5,2) DEFAULT 0,
+            expiry_date TEXT,
+            image TEXT,
+            is_synced INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(category_id) REFERENCES categories(id)
+        );
 
-// Migration: If gst_rate is 0 and category_id exists, copy gst from categories
-try {
-  db.prepare(`
-    UPDATE products 
-    SET gst_rate = (SELECT gst FROM categories WHERE categories.id = products.category_id)
-    WHERE (gst_rate IS NULL OR gst_rate = 0) AND category_id IS NOT NULL
-  `).run();
-} catch (e) { console.error("Migration error:", e.message); }
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            phone TEXT UNIQUE,
+            address TEXT,
+            points INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
 
-// 🟢 HELD BILLS TABLE (Hold/Resume Feature)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS held_bills (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  label TEXT,
-  cart_json TEXT NOT NULL,
-  customer_json TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
+        CREATE TABLE IF NOT EXISTS invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_no TEXT,
+            bill_date TEXT,
+            customer_name TEXT,
+            customer_phone TEXT,
+            customer_address TEXT,
+            customer_id INTEGER,
+            payment_mode TEXT,
+            total_amount DECIMAL(12,2),
+            is_synced INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(customer_id) REFERENCES customers(id)
+        );
 
+        CREATE TABLE IF NOT EXISTS invoice_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id INTEGER,
+            product_id INTEGER,
+            quantity DECIMAL(12,2),
+            price DECIMAL(12,2),
+            gst_rate DECIMAL(5,2),
+            gst_amount DECIMAL(12,2),
+            hsn_code TEXT,
+            discount_percent DECIMAL(5,2) DEFAULT 0,
+            discount_amount DECIMAL(12,2) DEFAULT 0,
+            FOREIGN KEY(invoice_id) REFERENCES invoices(id),
+            FOREIGN KEY(product_id) REFERENCES products(id)
+        );
 
-// 🟢 CUSTOMERS TABLE
-db.prepare(`
-CREATE TABLE IF NOT EXISTS customers (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT,
-  phone TEXT UNIQUE,
-  address TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
+        CREATE TABLE IF NOT EXISTS offers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT,
+          type TEXT,
+          value DECIMAL(12,2),
+          min_amount DECIMAL(12,2),
+          buy_product_id INTEGER,
+          free_product_id INTEGER,
+          buy_qty INTEGER DEFAULT 0,
+          free_qty INTEGER DEFAULT 0,
+          start_date TEXT,
+          end_date TEXT,
+          is_active INTEGER DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
 
-// 🟢 INVOICES TABLE
-db.prepare(`
-CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  bill_no INTEGER,
-  bill_date TEXT,
-  customer_name TEXT,
-  customer_phone TEXT,
-  customer_address TEXT,
-  customer_id INTEGER,
-  payment_mode TEXT,
-  total_amount REAL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
+        CREATE TABLE IF NOT EXISTS held_bills (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_name TEXT,
+          data TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
 
-try { db.prepare("ALTER TABLE invoices ADD COLUMN bill_no INTEGER").run(); } catch(e){}
-try { db.prepare("ALTER TABLE invoices ADD COLUMN bill_date TEXT").run(); } catch(e){}
-try { db.prepare("ALTER TABLE invoices ADD COLUMN is_synced INTEGER DEFAULT 0").run(); } catch(e){}
+        CREATE TABLE IF NOT EXISTS shop_supabase_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supabase_url TEXT,
+            supabase_key TEXT,
+            is_connected INTEGER DEFAULT 0,
+            last_synced TIMESTAMP
+        );
 
-// Sync tracking for other tables
-try { db.prepare("ALTER TABLE products ADD COLUMN is_synced INTEGER DEFAULT 0").run(); } catch(e){}
-try { db.prepare("ALTER TABLE customers ADD COLUMN is_synced INTEGER DEFAULT 0").run(); } catch(e){}
+        CREATE TABLE IF NOT EXISTS notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT,
+          message TEXT,
+          type TEXT,
+          is_read INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
 
-try {
-  db.prepare("ALTER TABLE invoices ADD COLUMN customer_name TEXT").run();
-  db.prepare("ALTER TABLE invoices ADD COLUMN customer_phone TEXT").run();
-  db.prepare("ALTER TABLE invoices ADD COLUMN customer_address TEXT").run();
-  db.prepare("ALTER TABLE invoices ADD COLUMN customer_id INTEGER").run();
-  db.prepare("ALTER TABLE invoices ADD COLUMN payment_mode TEXT").run();
-} catch (e) {
-  // Ignore
-}
+    // Self-Healing Migrations
+    const migrate = (t, c, d) => {
+        try {
+            const info = db.prepare(`PRAGMA table_info(${t})`).all();
+            if (!info.some(x => x.name === c)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${d}`);
+        } catch (e) {}
+    };
 
-// 🟢 INVOICE ITEMS
-db.prepare(`
-CREATE TABLE IF NOT EXISTS invoice_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id INTEGER,
-  product_id INTEGER,
-  quantity INTEGER,
-  price REAL,
-  gst_rate INTEGER,
-  gst_amount REAL,
-  discount_percent REAL DEFAULT 0,
-  discount_amount REAL DEFAULT 0
-)
-`).run();
+    migrate('products', 'gst_rate', 'DECIMAL(5,2) DEFAULT 0');
+    migrate('products', 'product_code', 'TEXT');
+    migrate('products', 'price_type', "TEXT DEFAULT 'exclusive'");
+    migrate('products', 'default_discount', 'DECIMAL(5,2) DEFAULT 0');
+    migrate('products', 'weight', 'TEXT');
+    migrate('products', 'brand', 'TEXT');
+    migrate('invoice_items', 'discount_percent', 'DECIMAL(5,2) DEFAULT 0');
+    migrate('invoice_items', 'discount_amount', 'DECIMAL(12,2) DEFAULT 0');
 
-// Migration: add discount columns if missing
-try { db.prepare("ALTER TABLE invoice_items ADD COLUMN discount_percent REAL DEFAULT 0").run(); } catch(e){}
-try { db.prepare("ALTER TABLE invoice_items ADD COLUMN discount_amount REAL DEFAULT 0").run(); } catch(e){}
+    // AUTO-POPULATE CLOUD CONFIG FROM ENV (To jumpstart sync)
+    try {
+        const existingConf = db.prepare("SELECT COUNT(*) as count FROM shop_supabase_config").get();
+        if (existingConf.count === 0 && process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+            db.prepare("INSERT INTO shop_supabase_config (supabase_url, supabase_key, is_connected) VALUES (?, ?, 1)")
+              .run(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+            console.log("[DB] ⚡ Cloud Auto-Link Active!");
+        }
+    } catch (e) {}
 
+    return db;
+};
 
-// 🟢 NOTIFICATIONS TABLE (Owner Mobile Alerts)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS notifications (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL,
-  title TEXT,
-  message TEXT NOT NULL,
-  is_read INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
-
-// 🟢 OFFERS TABLE (Buy X Get Y Free)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS offers (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  status INTEGER DEFAULT 1, -- 1 for Active, 0 for Inactive
-  buy_product_id INTEGER NOT NULL,
-  buy_quantity INTEGER NOT NULL,
-  free_product_id INTEGER NOT NULL,
-  free_quantity INTEGER NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
-
-// 🟢 SHOP SUPABASE CONFIG (Separate DB per shop)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS shop_supabase_config (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  supabase_url TEXT NOT NULL,
-  supabase_key TEXT NOT NULL,
-  is_connected INTEGER DEFAULT 0,
-  last_synced DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
-
-// 🟢 LOCAL DATABASE CONFIG (Path for local storage)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS local_db_config (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  storage_path TEXT NOT NULL,
-  is_active INTEGER DEFAULT 1,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
-
-// 🟢 VALIDITY CACHE (Offline validity check)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS validity_cache (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  validity_start TEXT,
-  validity_end TEXT,
-  is_paid INTEGER DEFAULT 0,
-  last_checked DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
-
-// 🟢 SYNC QUEUE (Track pending sync items for local→cloud)
-db.prepare(`
-CREATE TABLE IF NOT EXISTS sync_queue (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  table_name TEXT NOT NULL,
-  record_id INTEGER NOT NULL,
-  action TEXT NOT NULL DEFAULT 'upsert',
-  synced INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`).run();
-
-module.exports = db;
+module.exports = initDB();
+module.exports.getDbPath = () => dbPath;
