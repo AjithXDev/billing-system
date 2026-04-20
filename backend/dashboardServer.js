@@ -335,6 +335,46 @@ async function syncStatsToSupabase() {
           }
         }
 
+        // ── OFFERS ──
+        console.log("[ShopSync] 🎁 Syncing Offers...");
+        const offers = db.prepare("SELECT id, name, status, buy_product_id, buy_quantity, free_product_id, free_quantity, created_at FROM offers WHERE is_synced = 0").all();
+        if (offers.length > 0) {
+          for (let i = 0; i < offers.length; i += 50) {
+            const chunk = offers.slice(i, i + 50).map(o => {
+              const { id, ...rest } = o;
+              return { ...rest, local_id: id };
+            });
+            const { error: offErr } = await shopSupabase.from('offers').upsert(chunk, { onConflict: 'local_id' });
+            if (offErr) {
+              console.error("[ShopSync] 🎁 Offer Error:", offErr.message);
+            } else {
+              const ids = chunk.map(c => c.local_id);
+              const placeholders = ids.map(() => '?').join(',');
+              db.prepare(`UPDATE offers SET is_synced = 1 WHERE id IN (${placeholders})`).run(...ids);
+            }
+          }
+        }
+
+        // ── NOTIFICATIONS ──
+        console.log("[ShopSync] 🔔 Syncing Notifications...");
+        const notifs = db.prepare("SELECT id, type, title, message, is_read, created_at FROM notifications WHERE is_synced = 0").all();
+        if (notifs.length > 0) {
+          for (let i = 0; i < notifs.length; i += 50) {
+            const chunk = notifs.slice(i, i + 50).map(n => {
+              const { id, is_read, ...rest } = n;
+              return { ...rest, is_read: !!is_read, local_id: id };
+            });
+            const { error: notifErr } = await shopSupabase.from('notifications').upsert(chunk, { onConflict: 'local_id' });
+            if (notifErr) {
+              console.error("[ShopSync] 🔔 Notification Error:", notifErr.message);
+            } else {
+              const ids = chunk.map(c => c.local_id);
+              const placeholders = ids.map(() => '?').join(',');
+              db.prepare(`UPDATE notifications SET is_synced = 1 WHERE id IN (${placeholders})`).run(...ids);
+            }
+          }
+        }
+
         console.log("[ShopSync] ✅ ALL TABLES SYNCED SUCCESSFULLY!");
       }
     } catch (sErr) { console.error("[ShopSync] ❌ CRITICAL SYNC ERROR:", sErr.message); }

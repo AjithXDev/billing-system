@@ -213,6 +213,16 @@ const initDB = () => {
     migrate('held_bills', 'cart_json', 'TEXT');
     migrate('held_bills', 'customer_json', 'TEXT');
     migrate('held_bills', 'is_synced', 'INTEGER DEFAULT 0');
+    
+    // offers — add new fields
+    migrate('offers', 'status', 'INTEGER DEFAULT 1');
+    migrate('offers', 'buy_quantity', 'INTEGER DEFAULT 0');
+    migrate('offers', 'free_quantity', 'INTEGER DEFAULT 0');
+    migrate('offers', 'is_synced', 'INTEGER DEFAULT 0');
+
+    // notifications — sync status
+    migrate('notifications', 'is_synced', 'INTEGER DEFAULT 0');
+
     // invoices — add bill_no as INTEGER (was TEXT in old schema)
     migrate('invoices', 'bill_no', 'INTEGER');
 
