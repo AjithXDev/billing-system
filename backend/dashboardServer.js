@@ -315,6 +315,26 @@ async function syncStatsToSupabase() {
             }
           }
         }
+        // ── HELD BILLS ──
+        console.log("[ShopSync] ⏳ Syncing Held Bills...");
+        const heldBills = db.prepare("SELECT id, label, cart_json, customer_json, created_at FROM held_bills WHERE is_synced = 0").all();
+        if (heldBills.length > 0) {
+          for (let i = 0; i < heldBills.length; i += 50) {
+            const chunk = heldBills.slice(i, i + 50).map(h => {
+              const { id, ...rest } = h;
+              return { ...rest, local_id: id };
+            });
+            const { error: heldErr } = await shopSupabase.from('held_bills').upsert(chunk, { onConflict: 'local_id' });
+            if (heldErr) {
+              console.error("[ShopSync] ⏳ Held Bill Error:", heldErr.message);
+            } else {
+              const ids = chunk.map(c => c.local_id);
+              const placeholders = ids.map(() => '?').join(',');
+              db.prepare(`UPDATE held_bills SET is_synced = 1 WHERE id IN (${placeholders})`).run(...ids);
+            }
+          }
+        }
+
         console.log("[ShopSync] ✅ ALL TABLES SYNCED SUCCESSFULLY!");
       }
     } catch (sErr) { console.error("[ShopSync] ❌ CRITICAL SYNC ERROR:", sErr.message); }

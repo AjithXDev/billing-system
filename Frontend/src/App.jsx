@@ -93,13 +93,37 @@ function App() {
     }, 200);
   }, [currentView]);
 
-  // 2. Load Settings Logic
-  const loadSettings = () => {
+  // 2. Load Settings Logic — always sync from file first (survives app restart)
+  const loadSettings = async () => {
     try {
+      // Priority 1: Read from app_settings.json via IPC (survives restarts)
+      if (window.api?.getAppSettings) {
+        const fileSettings = await window.api.getAppSettings();
+        if (fileSettings && Object.keys(fileSettings).length > 0) {
+          // Merge with any localStorage extras
+          const raw = localStorage.getItem("smart_billing_settings");
+          const localSettings = raw ? JSON.parse(raw) : {};
+          const merged = { ...localSettings, ...fileSettings };
+          // Push back to localStorage so POS/other components can read it
+          localStorage.setItem("smart_billing_settings", JSON.stringify(merged));
+          setAppSettings(merged);
+          // Sync window title
+          if (window.api?.setWindowTitle && merged.storeName) {
+            window.api.setWindowTitle(merged.storeName);
+          }
+          return;
+        }
+      }
+      // Priority 2: Fallback to localStorage only
       const raw = localStorage.getItem("smart_billing_settings");
       if (raw) setAppSettings(JSON.parse(raw));
     } catch (e) {
       console.error("Failed to load settings:", e);
+      // Last resort: localStorage
+      try {
+        const raw = localStorage.getItem("smart_billing_settings");
+        if (raw) setAppSettings(JSON.parse(raw));
+      } catch {}
     }
   };
 

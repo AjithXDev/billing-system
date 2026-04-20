@@ -378,6 +378,24 @@ async function renderItems(){
   }).join('') || '<p style="text-align:center;padding:40px;color:var(--text-s)">No Catalog</p>';
   document.getElementById('it-list').innerHTML = allHtml;
   try {
+    var dNow = new Date(); dNow.setHours(0,0,0,0);
+    var d30 = new Date(); d30.setDate(dNow.getDate() + 30);
+    var expiring = all.filter(function(p) {
+      if(!p.expiry_date) return false;
+      var ex = new Date(p.expiry_date);
+      return ex >= dNow && ex <= d30;
+    });
+    var expCountEl = document.getElementById('exp-count');
+    if(expCountEl) expCountEl.textContent = expiring.length;
+    
+    var expListEl = document.getElementById('exp-list');
+    if(expListEl) {
+      expListEl.innerHTML = expiring.length ? expiring.map(function(p){ 
+         var ed = new Date(p.expiry_date).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+         return '<div class="item"><div><div style="font-weight:800">'+p.name+'</div><div style="font-size:11px;color:var(--text-s)">Expires on: <span style="font-weight:bold;color:#f59e0b">'+ed+'</span></div></div><div style="font-size:12px;font-weight:800">Stock: '+p.quantity+'</div></div>';
+      }).join('') : '<p style="color:var(--text-s);text-align:center;padding:20px">None expiring soon</p>';
+    }
+
     var thirtyAgo = new Date(); thirtyAgo.setDate(thirtyAgo.getDate()-30); thirtyAgo.setHours(0,0,0,0);
     var recentInvs = await live('invoices?select=local_id&created_at=gte.'+thirtyAgo.toISOString());
     var activeIds = {}; recentInvs.forEach(function(i){ activeIds[i.local_id]=1; });
@@ -449,7 +467,15 @@ function hdrWithTog(tx){ return '<div class="hdr"><div class="tog" onclick="open
 
 function render(){
   var ov = '<div id="pg-overview" class="pg on">'+hdrWithTog("Overview")+'<div class="cont"><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:25px"><div class="card" style="margin:0;background:linear-gradient(135deg,#6366f1 0%,#4338ca 100%)"><div class="lbl">Revenue Today</div><div class="stat_v" id="stat-rev" style="font-size:22px">...</div></div><div class="card" style="margin:0;border-left:4px solid var(--green)"><div class="lbl">Profit Today</div><div class="stat_v" style="color:var(--green);font-size:22px" id="stat-pft">...</div></div></div><div class="card"><div class="lbl">Sales vs Profit &mdash; Monthly Trend</div><div style="height:220px"><canvas id="c-growth"></canvas></div></div><div class="card"><div class="lbl">Peak Hour Analysis &mdash; Bills Per Hour</div><div style="height:190px"><canvas id="c-peak"></canvas></div></div><div class="card"><div class="lbl">Last 7 Days &mdash; Daily Revenue Comparison</div><div style="height:190px"><canvas id="c-week"></canvas></div></div></div></div>';
-  var it = '<div id="pg-items" class="pg">'+hdrWithTog("Inventory")+'<div class="cont"><div style="display:flex;gap:10px;margin-bottom:20px"><div class="card" style="flex:1;margin:0;padding:15px;border-bottom:3px solid var(--red)"><div class="lbl">Low Stock</div><div style="font-size:20px;font-weight:900;color:var(--red)">'+(s.allProductsList?.filter(function(p){ return p.quantity<10; }).length||0)+'</div></div><div class="card" style="flex:1;margin:0;padding:15px;border-bottom:3px solid var(--orange)"><div class="lbl">Dead Stock</div><div style="font-size:20px;font-weight:900;color:var(--orange)" id="dead-count">...</div></div></div><div class="card"><div class="lbl">Dead Stock &mdash; No Sales in 30 Days</div><div id="dead-list"><div style="color:var(--text-s);text-align:center;padding:20px">Loading...</div></div></div><div class="lbl" style="margin:5px 0 10px">All Products</div><div id="it-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
+  var it = '<div id="pg-items" class="pg">'+hdrWithTog("Inventory")+'<div class="cont">' +
+    '<div style="display:flex;gap:8px;margin-bottom:20px">' +
+      '<div class="card" style="flex:1;margin:0;padding:12px;border-bottom:3px solid var(--red)"><div class="lbl">Low</div><div style="font-size:18px;font-weight:900;color:var(--red)">'+(s.allProductsList?.filter(function(p){ return p.quantity<10; }).length||0)+'</div></div>' +
+      '<div class="card" style="flex:1;margin:0;padding:12px;border-bottom:3px solid #f59e0b"><div class="lbl">Expiry</div><div style="font-size:18px;font-weight:900;color:#f59e0b" id="exp-count">...</div></div>' +
+      '<div class="card" style="flex:1;margin:0;padding:12px;border-bottom:3px solid var(--orange)"><div class="lbl">Dead</div><div style="font-size:18px;font-weight:900;color:var(--orange)" id="dead-count">...</div></div>' +
+    '</div>' +
+    '<div class="card"><div class="lbl" style="color:#f59e0b">Next 30 Days Expiry</div><div id="exp-list"><div style="color:var(--text-s);text-align:center;padding:20px">Loading...</div></div></div>' +
+    '<div class="card"><div class="lbl">Dead Stock &mdash; No Sales in 30 Days</div><div id="dead-list"><div style="color:var(--text-s);text-align:center;padding:20px">Loading...</div></div></div>' +
+    '<div class="lbl" style="margin:5px 0 10px">All Catalog</div><div id="it-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
   var bl = '<div id="pg-bills" class="pg">'+hdrWithTog("Invoices")+'<div class="cont"><div id="bl-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
   var cl = '<div id="pg-cust" class="pg">'+hdrWithTog("Clients")+'<div class="cont"><div class="card"><div class="lbl">Top Spenders</div><div id="cl-list"><div style="color:var(--text-s)">Loading...</div></div></div></div></div>';
   var ai = '<div id="pg-ai" class="pg">'+hdrWithTog("AI Consultant")+'<div class="cont"><div class="card" style="background:var(--card-h)"><div class="ai-box" id="ai-b"><div class="ai-msg ai-l">iVA Elite Protocol Engaged. All systems live.</div></div><div class="ai-in"><input id="ai-i" placeholder="Ask about sales, profit, inventory..."><button class="ai-btn" onclick="handleAi()">SEND</button></div></div></div></div>';

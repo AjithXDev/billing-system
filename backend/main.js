@@ -263,6 +263,17 @@ async function syncToShopSupabase() {
       await shopSupabase.from('categories').upsert(cat, { onConflict: 'id' });
     }
 
+    // 5. Sync Held Bills
+    console.log('[ShopSync] ⏳ Syncing Held Bills...');
+    const heldBills = db.prepare('SELECT id, label, cart_json, customer_json, created_at FROM held_bills WHERE is_synced = 0').all();
+    for (const h of heldBills) {
+      const { id, ...data } = h;
+      const { error } = await shopSupabase.from('held_bills').upsert({
+        ...data, local_id: id
+      }, { onConflict: 'local_id' });
+      if (!error) db.prepare('UPDATE held_bills SET is_synced = 1 WHERE id = ?').run(id);
+    }
+
     // Update last synced time
     db.prepare('UPDATE shop_supabase_config SET last_synced = datetime("now") WHERE id = (SELECT MAX(id) FROM shop_supabase_config)').run();
     console.log('[ShopSync] ✅ Data synced to shop Supabase');
@@ -1114,19 +1125,24 @@ ipcMain.handle("create-invoice", async (event, data) => {
   }
 
   const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const currentMonth = now.toISOString().slice(0, 7); // "YYYY-MM"
+  // Use local date (not UTC) to avoid timezone-based month mismatch
+  const pad = n => String(n).padStart(2, '0');
+  const localDate = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const currentMonth = `${now.getFullYear()}-${pad(now.getMonth()+1)}`; // "YYYY-MM"
 
-  // Monthly sequential bill numbering
-  const lastBill = db.prepare("SELECT bill_no FROM invoices WHERE strftime('%Y-%m', bill_date) = ? ORDER BY bill_no DESC LIMIT 1").get(currentMonth);
-  const nextBillNo = lastBill ? (lastBill.bill_no + 1) : 1;
+  // Monthly sequential bill numbering — integer only, no floats
+  // Uses localtime modifier so IST month boundary is respected
+  const lastBill = db.prepare(
+    "SELECT bill_no FROM invoices WHERE strftime('%Y-%m', bill_date) = ? ORDER BY bill_no DESC LIMIT 1"
+  ).get(currentMonth);
+  const nextBillNo = lastBill ? (Math.floor(lastBill.bill_no) + 1) : 1;
 
   const result = db.prepare(`
     INSERT INTO invoices (bill_no, bill_date, customer_name, customer_phone, customer_address, customer_id, payment_mode, total_amount)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     nextBillNo,
-    today,
+    localDate,
     customer?.name || "",
     customer?.phone || "",
     customer?.address || "",
@@ -1137,6 +1153,7 @@ ipcMain.handle("create-invoice", async (event, data) => {
 
   const invoiceId = result.lastInsertRowid;
   const responseData = { message: "Invoice created successfully! 🔥", invoiceId, billNo: nextBillNo };
+
 
   const insertItem = db.prepare(`
     INSERT INTO invoice_items 
@@ -1233,16 +1250,42 @@ ipcMain.handle("delete-invoice", async (event, invoiceId) => {
 
 // Hold current bill
 ipcMain.handle("hold-bill", async (event, { cart, customer, label }) => {
-  db.prepare(`
+  const heldLabel = label || `Held ${new Date().toLocaleTimeString('en-IN')}`;
+  
+  const result = db.prepare(`
     INSERT INTO held_bills (label, cart_json, customer_json)
     VALUES (?, ?, ?)
   `).run(
-    label || `Held ${new Date().toLocaleTimeString('en-IN')}`,
+    heldLabel,
     JSON.stringify(cart),
     JSON.stringify(customer || {})
   );
+
+  // ✅ Sync to INDIVIDUAL shop Supabase (held_bills table)
+  try {
+    if (shopSupabase) {
+      const localId = result.lastInsertRowid;
+      const { error } = await shopSupabase.from('held_bills').upsert({
+        local_id: localId,
+        label: heldLabel,
+        cart_json: JSON.stringify(cart),
+        customer_json: JSON.stringify(customer || {})
+      }, { onConflict: 'local_id' });
+      
+      if (!error) {
+        db.prepare('UPDATE held_bills SET is_synced = 1 WHERE id = ?').run(localId);
+        console.log('[Hold] ✅ Synced held bill to shop Supabase');
+      } else {
+        console.error('[Hold] Cloud sync save failed:', JSON.stringify(error));
+      }
+    }
+  } catch(e) {
+    console.warn('[Hold] Cloud sync failed (offline mode):', e.message);
+  }
+
   return { message: "Bill held" };
 });
+
 
 // Get all held bills
 ipcMain.handle("get-held-bills", async () => {

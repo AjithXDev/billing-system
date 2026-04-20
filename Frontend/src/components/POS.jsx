@@ -458,16 +458,44 @@ const POS = ({ showQR }) => {
 
   /* ── Resume held bill ── */
   const resumeBill = async (bill) => {
-    // Restore cart with fresh product data (to get latest prices/expiry)
-    const restoredCart = bill.cart.map(i => ({
-      ...i,
-      tempId: Date.now() + Math.random()
-    }));
-    setBillItems([...restoredCart, emptyRow()]);
-    setCustomer(bill.customer || { name: "", phone: "", address: "" });
-    // Remove from db
-    await window.api?.deleteHeldBill?.(bill.id);
-    refreshHeldCount();
+    try {
+      // Merge saved cart with fresh product data (latest price, stock, expiry)
+      const freshProducts = allProducts;
+      const restoredCart = bill.cart.map(i => {
+        const fresh = freshProducts.find(p => p.id === i.id);
+        const maxStock = fresh ? Number(fresh.quantity || 0) : Number(i.maxStock || 0);
+        return {
+          ...i,
+          tempId: Date.now() + Math.random(),
+          maxStock,
+          // Refresh expiry from fresh product
+          expiry_date: fresh?.expiry_date || i.expiry_date || null,
+          image: fresh?.image || i.image || null,
+        };
+      }).filter(i => i.id && i.qty > 0); // Remove invalid items
+
+      if (restoredCart.length === 0) {
+        alert("⚠️ This held bill has no valid items (products may have been deleted).");
+        await window.api?.deleteHeldBill?.(bill.id);
+        refreshHeldCount();
+        return;
+      }
+
+      setBillItems([...restoredCart, emptyRow()]);
+      setCustomer(bill.customer || { name: "", phone: "", address: "" });
+      // Remove from db
+      await window.api?.deleteHeldBill?.(bill.id);
+      refreshHeldCount();
+
+      // Switch to tally mode if not already active
+      if (!terminalActive) {
+        setBillingMode('tally');
+        setTerminalActive(true);
+      }
+    } catch (e) {
+      console.error("Resume error:", e);
+      alert("Failed to resume bill. Try again.");
+    }
   };
 
   /* ── Product search ── */

@@ -167,8 +167,10 @@ const initDB = () => {
 
         CREATE TABLE IF NOT EXISTS held_bills (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          customer_name TEXT,
-          data TEXT,
+          label TEXT,
+          cart_json TEXT,
+          customer_json TEXT,
+          is_synced INTEGER DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -206,6 +208,14 @@ const initDB = () => {
     migrate('products', 'brand', 'TEXT');
     migrate('invoice_items', 'discount_percent', 'DECIMAL(5,2) DEFAULT 0');
     migrate('invoice_items', 'discount_amount', 'DECIMAL(12,2) DEFAULT 0');
+    // 🔄 held_bills — upgrade old schema to new one
+    migrate('held_bills', 'label', 'TEXT');
+    migrate('held_bills', 'cart_json', 'TEXT');
+    migrate('held_bills', 'customer_json', 'TEXT');
+    migrate('held_bills', 'is_synced', 'INTEGER DEFAULT 0');
+    // invoices — add bill_no as INTEGER (was TEXT in old schema)
+    migrate('invoices', 'bill_no', 'INTEGER');
+
 
     // AUTO-POPULATE CLOUD CONFIG FROM ENV (To jumpstart sync)
     try {
