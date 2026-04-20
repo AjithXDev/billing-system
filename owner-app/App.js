@@ -85,7 +85,7 @@ export default function App() {
   useEffect(() => {
     if (screen === 'dashboard' && session.id) {
       fetchDashboardData();
-      const interval = setInterval(fetchDashboardData, 45000);
+      const interval = setInterval(fetchDashboardData, 120000);
       return () => clearInterval(interval);
     }
   }, [screen, session]);
@@ -224,26 +224,29 @@ async function live(path){
 function hdr(tx){ return '<div class="hdr"><div class="h_title">'+tx+'</div><div style="font-size:10px;color:var(--text-s)">'+new Date().toLocaleTimeString()+'</div></div>'; }
 function safeLogout(){ if(confirm("Terminate SaaS Session?")){ window.ReactNativeWebView ? window.ReactNativeWebView.postMessage("logout") : window.parent.postMessage("logout","*"); } }
 
-// ── OVERVIEW: Today Stats (Revenue from invoices, Profit from invoice_items x products) ──
+// ── OVERVIEW: Today Stats + Overall Stats ──
 async function renderOverviewStats(){
   try {
     var today = new Date(); today.setHours(0,0,0,0);
 
-    // Revenue = SUM of total_amount in today's invoices
-    var invRows = await live('invoices?select=local_id,total_amount&created_at=gte.'+today.toISOString());
-    var rev = 0;
-    invRows.forEach(function(i){ rev += parseFloat(i.total_amount || 0); });
+    // All invoices for overall calculation
+    var allInvs = await live('invoices?select=local_id,total_amount,created_at&limit=5000');
+    var rev = 0; var overallRev = 0;
+    allInvs.forEach(function(i){
+      var amt = parseFloat(i.total_amount || 0);
+      overallRev += amt;
+      if(new Date(i.created_at) >= today) rev += amt;
+    });
 
     // Build products cost map: local_id -> cost_price
     var prods = await live('products?select=local_id,price,cost_price&limit=1000');
     var costMap = {};
     prods.forEach(function(p){ costMap[p.local_id] = { cost: parseFloat(p.cost_price || 0), sell: parseFloat(p.price || 0) }; });
 
-    // Fetch ALL invoice_items (no date filter — filter by invoice local_id instead)
-    var todayLocalIds = invRows.map(function(i){ return i.local_id; }).filter(Boolean);
+    // Today's invoice items for today profit
+    var todayLocalIds = allInvs.filter(function(i){ return new Date(i.created_at) >= today; }).map(function(i){ return i.local_id; }).filter(Boolean);
     var pft = 0;
     if(todayLocalIds.length > 0){
-      // Supabase: invoice_id=in.(1,2,3)
       var items = await live('invoice_items?select=product_id,quantity,price&invoice_id=in.('+todayLocalIds.join(',')+')');
       items.forEach(function(item){
         var ci = costMap[item.product_id];
@@ -253,10 +256,24 @@ async function renderOverviewStats(){
       });
     }
 
+    // Overall profit from ALL invoice items
+    var allItems = await live('invoice_items?select=product_id,quantity,price&limit=10000');
+    var overallPft = 0;
+    allItems.forEach(function(item){
+      var ci = costMap[item.product_id];
+      var sellP = parseFloat(item.price || (ci ? ci.sell : 0));
+      var costP = ci ? ci.cost : 0;
+      overallPft += (sellP - costP) * parseFloat(item.quantity || 1);
+    });
+
     var el1 = document.getElementById('stat-rev');
     var el2 = document.getElementById('stat-pft');
+    var el3 = document.getElementById('stat-orev');
+    var el4 = document.getElementById('stat-opft');
     if(el1) el1.textContent = '\u20b9' + rev.toFixed(0);
     if(el2) el2.textContent = '\u20b9' + pft.toFixed(0);
+    if(el3) el3.textContent = '\u20b9' + overallRev.toFixed(0);
+    if(el4) el4.textContent = '\u20b9' + overallPft.toFixed(0);
   } catch(e) { console.log('stats err', e); }
 }
 
@@ -370,41 +387,89 @@ async function renderOverviewCharts(){
   } catch(e) { console.log('c3 err', e); }
 }
 
+// Store items data globally for filter toggling
+var _allProducts = [];
+var _lowStockList = [];
+var _expiryList = [];
+var _deadList = [];
+var _activeFilter = 'all'; // 'all' | 'low' | 'expiry' | 'dead'
+
+function showFilteredItems(filter) {
+  if(_activeFilter === filter) { _activeFilter = 'all'; } else { _activeFilter = filter; }
+  // Update card active styles
+  var cards = document.querySelectorAll('.inv-filter-card');
+  cards.forEach(function(c){ c.style.boxShadow = 'none'; c.style.opacity = '0.6'; });
+  if(_activeFilter !== 'all') {
+    var activeCard = document.getElementById('fc-'+_activeFilter);
+    if(activeCard) { activeCard.style.boxShadow = '0 0 15px rgba(99,102,241,0.4)'; activeCard.style.opacity = '1'; }
+  } else {
+    cards.forEach(function(c){ c.style.opacity = '1'; });
+  }
+
+  var listEl = document.getElementById('it-list');
+  var titleEl = document.getElementById('it-title');
+  if(!listEl) return;
+
+  var items = [];
+  if(_activeFilter === 'low') { items = _lowStockList; titleEl.textContent = 'Low Stock Items'; }
+  else if(_activeFilter === 'expiry') { items = _expiryList; titleEl.textContent = 'Expiring Soon'; }
+  else if(_activeFilter === 'dead') { items = _deadList; titleEl.textContent = 'Dead Stock'; }
+  else { items = _allProducts; titleEl.textContent = 'Registered Products'; }
+
+  if(items.length === 0) {
+    listEl.innerHTML = '<p style="color:var(--text-s);text-align:center;padding:30px">No items found</p>';
+    return;
+  }
+
+  listEl.innerHTML = items.map(function(p){
+    var badge = '';
+    if(_activeFilter === 'low' || (_activeFilter === 'all' && p.quantity < 10)) badge = '<span style="font-size:9px;background:rgba(239,68,68,0.15);color:var(--red);padding:2px 8px;border-radius:20px;margin-left:8px">LOW</span>';
+    var extra = '';
+    if(_activeFilter === 'expiry' && p.expiry_date) {
+      var ed = new Date(p.expiry_date).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      extra = '<div style="font-size:11px;color:var(--text-s)">Expires: <span style="font-weight:bold;color:#f59e0b">'+ed+'</span></div>';
+    } else if(_activeFilter === 'dead') {
+      extra = '<div style="font-size:11px;color:var(--text-s)">Stock: '+p.quantity+' &middot; No sales 30d</div>';
+    } else {
+      extra = '<div style="font-size:11px;color:var(--text-s)">'+(p.category_name||'')+(p.quantity!==undefined?' &middot; Stock: '+p.quantity:'')+' </div>';
+    }
+    var priceColor = _activeFilter === 'dead' ? 'var(--orange)' : 'var(--green)';
+    return '<div class="item"><div><div style="font-weight:800">'+p.name+badge+'</div>'+extra+'</div><div style="color:'+priceColor+';font-weight:800">Rs '+p.price+'</div></div>';
+  }).join('');
+}
+
 async function renderItems(){
   var all = await live('products?limit=500');
-  var allHtml = all.map(function(p){
-    var badge = p.quantity < 10 ? '<span style="font-size:9px;background:rgba(239,68,68,0.15);color:var(--red);padding:2px 8px;border-radius:20px;margin-left:8px">LOW</span>' : '';
-    return '<div class="item"><div><div style="font-weight:800">'+p.name+badge+'</div><div style="font-size:11px;color:var(--text-s)">'+(p.category_name||'')+(p.quantity!==undefined?' &middot; Stock: '+p.quantity:'')+' </div></div><div style="color:var(--green);font-weight:800">Rs '+p.price+'</div></div>';
-  }).join('') || '<p style="text-align:center;padding:40px;color:var(--text-s)">No Catalog</p>';
-  document.getElementById('it-list').innerHTML = allHtml;
-  try {
-    var dNow = new Date(); dNow.setHours(0,0,0,0);
-    var d30 = new Date(); d30.setDate(dNow.getDate() + 30);
-    var expiring = all.filter(function(p) {
-      if(!p.expiry_date) return false;
-      var ex = new Date(p.expiry_date);
-      return ex >= dNow && ex <= d30;
-    });
-    var expCountEl = document.getElementById('exp-count');
-    if(expCountEl) expCountEl.textContent = expiring.length;
-    
-    var expListEl = document.getElementById('exp-list');
-    if(expListEl) {
-      expListEl.innerHTML = expiring.length ? expiring.map(function(p){ 
-         var ed = new Date(p.expiry_date).toLocaleDateString('en-US',{month:'short',day:'numeric'});
-         return '<div class="item"><div><div style="font-weight:800">'+p.name+'</div><div style="font-size:11px;color:var(--text-s)">Expires on: <span style="font-weight:bold;color:#f59e0b">'+ed+'</span></div></div><div style="font-size:12px;font-weight:800">Stock: '+p.quantity+'</div></div>';
-      }).join('') : '<p style="color:var(--text-s);text-align:center;padding:20px">None expiring soon</p>';
-    }
+  _allProducts = all;
+  _lowStockList = all.filter(function(p){ return p.quantity > 0 && p.quantity < 10; });
 
+  // Expiry: next 30 days
+  var dNow = new Date(); dNow.setHours(0,0,0,0);
+  var d30 = new Date(); d30.setDate(dNow.getDate() + 30);
+  _expiryList = all.filter(function(p) {
+    if(!p.expiry_date) return false;
+    var ex = new Date(p.expiry_date);
+    return ex >= dNow && ex <= d30;
+  });
+
+  // Update count badges
+  var ac = document.getElementById('all-count'); if(ac) ac.textContent = all.length;
+  var lc = document.getElementById('low-count'); if(lc) lc.textContent = _lowStockList.length;
+  var ec = document.getElementById('exp-count'); if(ec) ec.textContent = _expiryList.length;
+
+  // Dead stock
+  try {
     var thirtyAgo = new Date(); thirtyAgo.setDate(thirtyAgo.getDate()-30); thirtyAgo.setHours(0,0,0,0);
     var recentInvs = await live('invoices?select=local_id&created_at=gte.'+thirtyAgo.toISOString());
     var activeIds = {}; recentInvs.forEach(function(i){ activeIds[i.local_id]=1; });
     var recentItems = await live('invoice_items?select=product_id,invoice_id&limit=5000');
     var soldPids = {}; recentItems.forEach(function(i){ if(activeIds[i.invoice_id]) soldPids[i.product_id]=1; });
-    var dead = all.filter(function(p){ return p.quantity > 0 && !soldPids[p.local_id]; });
-    document.getElementById('dead-count').textContent = dead.length;
-    document.getElementById('dead-list').innerHTML = dead.length ? dead.map(function(p){ return '<div class="item"><div><div style="font-weight:800">'+p.name+'</div><div style="font-size:11px;color:var(--text-s)">Stock: '+p.quantity+' &middot; No sales in 30d</div></div><div style="color:var(--orange);font-weight:800">Rs '+p.price+'</div></div>'; }).join('') : '<p style="color:var(--text-s);text-align:center;padding:20px">None</p>';
-  } catch(ex){ document.getElementById('dead-list').innerHTML='<p style="color:var(--text-s)">-</p>'; }
+    _deadList = all.filter(function(p){ return p.quantity > 0 && !soldPids[p.local_id]; });
+    var dc = document.getElementById('dead-count'); if(dc) dc.textContent = _deadList.length;
+  } catch(ex){ _deadList = []; }
+
+  // Show based on current filter
+  showFilteredItems(_activeFilter);
 }
 
 async function renderBills(){
@@ -465,17 +530,30 @@ function closeSb(){document.getElementById('sb').classList.remove('open');docume
 
 function hdrWithTog(tx){ return '<div class="hdr"><div class="tog" onclick="openSb()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></div><div class="h_title">'+tx+'</div><div style="width:38px"></div></div>'; }
 
+var _currentTab = 'overview';
+
 function render(){
-  var ov = '<div id="pg-overview" class="pg on">'+hdrWithTog("Overview")+'<div class="cont"><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:25px"><div class="card" style="margin:0;background:linear-gradient(135deg,#6366f1 0%,#4338ca 100%)"><div class="lbl">Revenue Today</div><div class="stat_v" id="stat-rev" style="font-size:22px">...</div></div><div class="card" style="margin:0;border-left:4px solid var(--green)"><div class="lbl">Profit Today</div><div class="stat_v" style="color:var(--green);font-size:22px" id="stat-pft">...</div></div></div><div class="card"><div class="lbl">Sales vs Profit &mdash; Monthly Trend</div><div style="height:220px"><canvas id="c-growth"></canvas></div></div><div class="card"><div class="lbl">Peak Hour Analysis &mdash; Bills Per Hour</div><div style="height:190px"><canvas id="c-peak"></canvas></div></div><div class="card"><div class="lbl">Last 7 Days &mdash; Daily Revenue Comparison</div><div style="height:190px"><canvas id="c-week"></canvas></div></div></div></div>';
-  var it = '<div id="pg-items" class="pg">'+hdrWithTog("Inventory")+'<div class="cont">' +
-    '<div style="display:flex;gap:8px;margin-bottom:20px">' +
-      '<div class="card" style="flex:1;margin:0;padding:12px;border-bottom:3px solid var(--red)"><div class="lbl">Low</div><div style="font-size:18px;font-weight:900;color:var(--red)">'+(s.allProductsList?.filter(function(p){ return p.quantity<10; }).length||0)+'</div></div>' +
-      '<div class="card" style="flex:1;margin:0;padding:12px;border-bottom:3px solid #f59e0b"><div class="lbl">Expiry</div><div style="font-size:18px;font-weight:900;color:#f59e0b" id="exp-count">...</div></div>' +
-      '<div class="card" style="flex:1;margin:0;padding:12px;border-bottom:3px solid var(--orange)"><div class="lbl">Dead</div><div style="font-size:18px;font-weight:900;color:var(--orange)" id="dead-count">...</div></div>' +
+  var ov = '<div id="pg-overview" class="pg on">'+hdrWithTog("Overview")+'<div class="cont">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">' +
+      '<div class="card" style="margin:0;background:linear-gradient(135deg,#6366f1 0%,#4338ca 100%)"><div class="lbl">Revenue Today</div><div class="stat_v" id="stat-rev" style="font-size:22px">...</div></div>' +
+      '<div class="card" style="margin:0;border-left:4px solid var(--green)"><div class="lbl">Profit Today</div><div class="stat_v" style="color:var(--green);font-size:22px" id="stat-pft">...</div></div>' +
     '</div>' +
-    '<div class="card"><div class="lbl" style="color:#f59e0b">Next 30 Days Expiry</div><div id="exp-list"><div style="color:var(--text-s);text-align:center;padding:20px">Loading...</div></div></div>' +
-    '<div class="card"><div class="lbl">Dead Stock &mdash; No Sales in 30 Days</div><div id="dead-list"><div style="color:var(--text-s);text-align:center;padding:20px">Loading...</div></div></div>' +
-    '<div class="lbl" style="margin:5px 0 10px">All Catalog</div><div id="it-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:25px">' +
+      '<div class="card" style="margin:0;border-left:4px solid var(--indigo)"><div class="lbl">Overall Sales</div><div class="stat_v" style="font-size:18px;color:var(--indigo)" id="stat-orev">...</div></div>' +
+      '<div class="card" style="margin:0;border-left:4px solid #10b981"><div class="lbl">Overall Profit</div><div class="stat_v" style="font-size:18px;color:#10b981" id="stat-opft">...</div></div>' +
+    '</div>' +
+    '<div class="card"><div class="lbl">Sales vs Profit &mdash; Monthly Trend</div><div style="height:220px"><canvas id="c-growth"></canvas></div></div>' +
+    '<div class="card"><div class="lbl">Peak Hour Analysis &mdash; Bills Per Hour</div><div style="height:190px"><canvas id="c-peak"></canvas></div></div>' +
+    '<div class="card"><div class="lbl">Last 7 Days &mdash; Daily Revenue Comparison</div><div style="height:190px"><canvas id="c-week"></canvas></div></div>' +
+    '</div></div>';
+  var it = '<div id="pg-items" class="pg">'+hdrWithTog("Inventory")+'<div class="cont">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px">' +
+      '<div class="card inv-filter-card" id="fc-all" data-filter="all" style="margin:0;padding:12px;border-bottom:3px solid var(--indigo);cursor:pointer"><div class="lbl">Products</div><div style="font-size:18px;font-weight:900;color:var(--indigo)" id="all-count">...</div></div>' +
+      '<div class="card inv-filter-card" id="fc-low" data-filter="low" style="margin:0;padding:12px;border-bottom:3px solid var(--red);cursor:pointer"><div class="lbl">Low Stock</div><div style="font-size:18px;font-weight:900;color:var(--red)" id="low-count">...</div></div>' +
+      '<div class="card inv-filter-card" id="fc-expiry" data-filter="expiry" style="margin:0;padding:12px;border-bottom:3px solid #f59e0b;cursor:pointer"><div class="lbl">Near Expiry</div><div style="font-size:18px;font-weight:900;color:#f59e0b" id="exp-count">...</div></div>' +
+      '<div class="card inv-filter-card" id="fc-dead" data-filter="dead" style="margin:0;padding:12px;border-bottom:3px solid var(--orange);cursor:pointer"><div class="lbl">Dead Stock</div><div style="font-size:18px;font-weight:900;color:var(--orange)" id="dead-count">...</div></div>' +
+    '</div>' +
+    '<div class="lbl" style="margin:5px 0 10px" id="it-title">All Products</div><div id="it-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
   var bl = '<div id="pg-bills" class="pg">'+hdrWithTog("Invoices")+'<div class="cont"><div id="bl-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
   var cl = '<div id="pg-cust" class="pg">'+hdrWithTog("Clients")+'<div class="cont"><div class="card"><div class="lbl">Top Spenders</div><div id="cl-list"><div style="color:var(--text-s)">Loading...</div></div></div></div></div>';
   var ai = '<div id="pg-ai" class="pg">'+hdrWithTog("AI Consultant")+'<div class="cont"><div class="card" style="background:var(--card-h)"><div class="ai-box" id="ai-b"><div class="ai-msg ai-l">iVA Elite Protocol Engaged. All systems live.</div></div><div class="ai-in"><input id="ai-i" placeholder="Ask about sales, profit, inventory..."><button class="ai-btn" onclick="handleAi()">SEND</button></div></div></div></div>';
@@ -483,15 +561,31 @@ function render(){
 
   document.getElementById('app').innerHTML = ov + it + bl + cl + ai + pf;
 
+  // Restore active tab after re-render
+  document.querySelectorAll('.pg').forEach(function(p){ p.classList.remove('on'); });
+  document.querySelectorAll('.sb_i').forEach(function(s){ s.classList.remove('on'); });
+  var targetPg = document.getElementById('pg-'+_currentTab);
+  if(targetPg) targetPg.classList.add('on');
+  var targetSb = document.querySelector('.sb_i[data-tab="'+_currentTab+'"]');
+  if(targetSb) targetSb.classList.add('on');
+
   document.body.addEventListener('click', function(e){
+    // Sidebar tab switching
     var sbi = e.target.closest('.sb_i');
     if(sbi){
       var tab = sbi.getAttribute('data-tab');
+      _currentTab = tab;
       document.querySelectorAll('.pg').forEach(function(p){ p.classList.remove('on'); });
       document.querySelectorAll('.sb_i').forEach(function(s){ s.classList.remove('on'); });
       document.getElementById('pg-'+tab).classList.add('on');
       sbi.classList.add('on');
       closeSb();
+    }
+    // Inventory filter card toggling
+    var fc = e.target.closest('.inv-filter-card');
+    if(fc){
+      var f = fc.getAttribute('data-filter');
+      if(f) showFilteredItems(f);
     }
   });
 
