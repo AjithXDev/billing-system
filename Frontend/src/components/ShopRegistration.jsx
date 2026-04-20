@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import logoUrl from "../assets/logo.png";
 
 /**
@@ -16,6 +16,13 @@ export default function ShopRegistration({ onRegistered }) {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
 
+  // Registration success state
+  const [registrationStatus, setRegistrationStatus] = useState(null); // null | 'pending'
+  const [registeredShopId, setRegisteredShopId]     = useState("");
+  const [registeredSystemId, setRegisteredSystemId] = useState("");
+  const [checkingActivation, setCheckingActivation] = useState(false);
+  const [checkMsg, setCheckMsg]                     = useState("");
+
   // Email verification state
   const [emailVerified, setEmailVerified] = useState(false);
   const [otpSent, setOtpSent]       = useState(false);
@@ -24,6 +31,47 @@ export default function ShopRegistration({ onRegistered }) {
   const [otpMsg, setOtpMsg]         = useState("");
   const [otpError, setOtpError]     = useState("");
   const [emailError, setEmailError] = useState("");
+
+  // ── Auto-poll for activation every 10 seconds ──
+  useEffect(() => {
+    if (registrationStatus !== 'pending') return;
+    const interval = setInterval(async () => {
+      try {
+        const validity = await window.api.getValidity?.();
+        if (validity?.isActive) {
+          clearInterval(interval);
+          onRegistered(registeredShopId);
+        }
+      } catch (e) { }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [registrationStatus, registeredShopId]);
+
+  // ── Manual Check Button ──
+  const handleManualCheck = async () => {
+    setCheckingActivation(true);
+    setCheckMsg("");
+    try {
+      const validity = await window.api.getValidity?.();
+      if (validity?.isActive) {
+        setCheckMsg("✅ Activated! Launching...");
+        setTimeout(() => onRegistered(registeredShopId), 1000);
+      } else {
+        setCheckMsg("⏳ Not yet activated. Please contact admin.");
+        setTimeout(() => setCheckMsg(""), 3000);
+      }
+    } catch (e) {
+      setCheckMsg("❌ Network error. Try again.");
+      setTimeout(() => setCheckMsg(""), 3000);
+    } finally {
+      setCheckingActivation(false);
+    }
+  };
+
+  // ── Copy to clipboard ──
+  const copyToClipboard = (text) => {
+    navigator.clipboard?.writeText(text).catch(() => {});
+  };
 
   // ── Send OTP ──
   const handleSendOtp = async () => {
@@ -113,6 +161,11 @@ export default function ShopRegistration({ onRegistered }) {
       });
 
       if (result.success) {
+        // Show pending activation screen with Shop ID + System ID
+        setRegisteredShopId(result.shopId);
+        setRegisteredSystemId(result.systemId || 'N/A');
+        setRegistrationStatus('pending');
+        // Also save settings locally
         await completeAuthAndLaunch(result.shopId, shopName, ownerName, mobile, email, email, "owner123");
       } else {
         setError(result.error || "Cloud gateway timeout. Check connection.");
@@ -141,9 +194,124 @@ export default function ShopRegistration({ onRegistered }) {
       localStorage.setItem("smart_billing_settings", JSON.stringify(newSettings));
       if (window.api.setWindowTitle && name) window.api.setWindowTitle(name);
       window.dispatchEvent(new CustomEvent('settings_updated'));
-      onRegistered(id);
+      // Do NOT call onRegistered here — wait for admin activation
     } catch (err) { console.error("Sync error:", err); }
   };
+
+  // ── Pending Activation Screen ──
+  if (registrationStatus === 'pending') {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 999999,
+        background: 'linear-gradient(135deg, #020617, #0f172a, #020617)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', color: 'white', textAlign: 'center',
+        fontFamily: "'Inter', system-ui, sans-serif", padding: 40,
+        animation: 'fadeIn 0.6s ease-out'
+      }}>
+        {/* Success Icon */}
+        <div style={{
+          width: 120, height: 120, borderRadius: 36,
+          background: 'rgba(99,102,241,0.08)',
+          border: '1px solid rgba(99,102,241,0.3)',
+          boxShadow: '0 20px 60px rgba(99,102,241,0.2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 32, animation: 'pulse 2s infinite ease-in-out'
+        }}>
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+
+        <div style={{ fontSize: 11, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: 12 }}>
+          Registration Complete
+        </div>
+        <h1 style={{ fontSize: 36, fontWeight: 800, marginBottom: 12, letterSpacing: '-0.03em',
+          background: 'linear-gradient(to bottom, #fff, #94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          Pending Admin Activation
+        </h1>
+        <p style={{ fontSize: 16, color: '#64748b', maxWidth: 500, lineHeight: 1.7, marginBottom: 40 }}>
+          Your terminal has been registered successfully. Share the details below with your Innoaivators admin to activate your software license.
+        </p>
+
+        {/* Info Cards with Copy buttons */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 40, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ padding: '24px 32px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 20, minWidth: 240, position: 'relative' }}>
+            <div style={{ fontSize: 11, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 8 }}>Shop ID</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#f8fafc', fontFamily: "'Courier New', monospace", letterSpacing: 2 }}>{registeredShopId}</div>
+            <button onClick={() => copyToClipboard(registeredShopId)} style={{ marginTop: 10, fontSize: 11, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontWeight: 700 }}>📋 Copy</button>
+          </div>
+          <div style={{ padding: '24px 32px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 20, minWidth: 240 }}>
+            <div style={{ fontSize: 11, color: '#a855f7', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 8 }}>System ID (Hardware)</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', fontFamily: "'Courier New', monospace", wordBreak: 'break-all' }}>{registeredSystemId}</div>
+            <button onClick={() => copyToClipboard(registeredSystemId)} style={{ marginTop: 10, fontSize: 11, background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)', color: '#d8b4fe', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontWeight: 700 }}>📋 Copy</button>
+          </div>
+        </div>
+
+        {/* Support */}
+        <div style={{ padding: '24px 40px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 24, backdropFilter: 'blur(20px)', marginBottom: 28 }}>
+          <div style={{ fontSize: 11, color: '#6366f1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: 8 }}>Contact Admin to Activate</div>
+          <div style={{ fontSize: 26, fontWeight: 900, color: '#fff' }}>+91 90877 86231</div>
+          <div style={{ fontSize: 12, color: '#475569', fontWeight: 600, marginTop: 6 }}>Available 24/7 for Enterprise Support</div>
+        </div>
+
+        {/* Manual Check Button */}
+        <button
+          onClick={handleManualCheck}
+          disabled={checkingActivation}
+          style={{
+            marginBottom: 20,
+            padding: '14px 36px',
+            background: checkingActivation ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg, #6366f1, #a855f7)',
+            color: '#fff', border: 'none', borderRadius: 16,
+            fontSize: 15, fontWeight: 800, cursor: checkingActivation ? 'wait' : 'pointer',
+            boxShadow: '0 8px 24px rgba(99,102,241,0.25)',
+            transition: 'all 0.3s', display: 'flex', alignItems: 'center', gap: 10
+          }}
+        >
+          {checkingActivation ? (
+            <>
+              <svg style={{ animation: 'spin 1s linear infinite' }} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              </svg>
+              Checking...
+            </>
+          ) : (
+            <>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-.08-4.63"/>
+              </svg>
+              Check Activation Now
+            </>
+          )}
+        </button>
+
+        {/* Status message */}
+        {checkMsg && (
+          <div style={{ marginBottom: 16, padding: '10px 24px', borderRadius: 12, background: checkMsg.includes('✅') ? 'rgba(34,197,94,0.1)' : checkMsg.includes('❌') ? 'rgba(239,68,68,0.1)' : 'rgba(99,102,241,0.1)', border: `1px solid ${checkMsg.includes('✅') ? 'rgba(34,197,94,0.3)' : checkMsg.includes('❌') ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.2)'}`, color: checkMsg.includes('✅') ? '#22c55e' : checkMsg.includes('❌') ? '#ef4444' : '#a5b4fc', fontSize: 13, fontWeight: 700 }}>
+            {checkMsg}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#475569', fontSize: 12, fontWeight: 600 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6366f1', animation: 'pulse 1.5s infinite', boxShadow: '0 0 8px #6366f1' }}/>
+          Auto-checking every 10 seconds...
+        </div>
+
+        <div style={{ position: 'absolute', bottom: 32, color: '#334155', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          System: Innoaivators Smart Billing v4.0 Pro
+        </div>
+
+        <style>{`
+          @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); opacity: 0.8; } }
+          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="setup-container">

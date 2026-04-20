@@ -82,14 +82,14 @@ app.get('/api/shops', requireAuth, async (req, res) => {
   }
 });
 
-// Toggle Shop Status
+// Toggle Shop Status (Activate / Deactivate)
 app.post('/api/shops/:id/toggle', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { is_active } = req.body;
     const supabase = getSupabase();
     
-    // 🔥 If activating a shop that is NOT yet paid, automatically mark as paid + set validity
+    // 🔥 If activating a shop — auto-renew if unpaid, and mark ever_activated
     if (is_active) {
        const { data: current } = await supabase.from('shops').select('is_paid').eq('id', id).single();
        if (current && !current.is_paid) {
@@ -98,18 +98,34 @@ app.post('/api/shops/:id/toggle', requireAuth, async (req, res) => {
           await supabase.from('shops').update({ 
             is_active: true,
             is_paid: true, 
+            ever_activated: true,
+            activation_requested: false,
             validity_start: now.toISOString(),
             validity_end: end.toISOString(),
             payment_status: 'paid',
             software_status: 'active'
           }).eq('id', id);
           return res.json({ success: true, note: "First-time activation: Payment toggled ON & 30 days renewed." });
+       } else {
+          // Already paid — just activate and mark ever_activated
+          const { error } = await supabase
+            .from('shops')
+            .update({ 
+              is_active: true, 
+              ever_activated: true,
+              activation_requested: false,
+              software_status: 'active' 
+            })
+            .eq('id', id);
+          if (error) throw error;
+          return res.json({ success: true });
        }
     }
 
+    // Deactivate
     const { error } = await supabase
       .from('shops')
-      .update({ is_active, software_status: is_active ? 'active' : 'deactivated' })
+      .update({ is_active: false, software_status: 'deactivated' })
       .eq('id', id);
       
     if (error) throw error;
@@ -118,6 +134,7 @@ app.post('/api/shops/:id/toggle', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // Toggle Payment Status & Renew Validity
 app.post('/api/shops/:id/toggle-payment', requireAuth, async (req, res) => {

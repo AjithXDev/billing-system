@@ -93,4 +93,5 @@ contextBridge.exposeInMainWorld("api", {
   onValidityWarning:   (cb)           => ipcRenderer.on("validity-warning", (_e, data) => cb(data)),
   onValidityExpired:   (cb)           => ipcRenderer.on("validity-expired", (_e) => cb()),
   onAppLock:           (cb)           => ipcRenderer.on("app-lock", (_e, data) => cb(data)),
+  onAppUnlock:         (cb)           => ipcRenderer.on("app-unlock", (_e) => cb()),
 });

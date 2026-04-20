@@ -13,14 +13,16 @@ const nodemailer = require('nodemailer');
 // ── EMAIL OTP SYSTEM ──
 const otpStore = new Map(); // email -> { code, expiresAt }
 
-// Gmail SMTP transporter (reads from .env)
+// Gmail SMTP transporter — reads from .env, falls back to hardcoded for packaged app
 function getEmailTransporter() {
-  const gmailUser = process.env.GMAIL_USER || 'innoaivators@gmail.com';
-  const gmailPass = process.env.GMAIL_APP_PASS;
+  // Fallback credentials for packaged app (when .env is not bundled)
+  const gmailUser = process.env.GMAIL_USER || 'innoaivatorsbilling@gmail.com';
+  const gmailPass = process.env.GMAIL_APP_PASS || 'jswxmaxfeiypvbgb';
   if (!gmailPass) {
-    console.error('[EMAIL] ❌ GMAIL_APP_PASS not set in .env file!');
+    console.error('[EMAIL] ❌ GMAIL_APP_PASS not configured!');
     return null;
   }
+  console.log('[EMAIL] 📧 Using Gmail:', gmailUser);
   return nodemailer.createTransport({
     service: 'gmail',
     auth: { user: gmailUser, pass: gmailPass }
@@ -423,8 +425,16 @@ async function restoreFromShopSupabase() {
 
 // ── VALIDITY / SUBSCRIPTION SYSTEM ──
 async function checkValidity(shopId) {
+  // Auto-init Supabase with hardcoded fallback if not ready
+  if (!supabase) {
+    const SUPA_URL = process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const SUPA_KEY = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+    try { supabase = createClient(SUPA_URL, SUPA_KEY); } catch(e) {}
+    console.log('[Validity] 🔌 Auto-initialized Supabase');
+  }
+
   if (!supabase || !shopId) {
-    // Offline Check
+    // Offline Check — only used if truly no internet/supabase
     const cached = db.prepare('SELECT * FROM validity_cache ORDER BY id DESC LIMIT 1').get();
     if (cached) {
       const now = new Date();
@@ -441,16 +451,18 @@ async function checkValidity(shopId) {
         validityEnd: cached.validity_end,
         isPaid: !!cached.is_paid,
         isActive: !!cached.is_active,
+        isPending: !cached.is_active && !cached.ever_activated,
         isOffline: true
       };
     }
-    return { valid: true, daysLeft: 30, isOffline: true };
+    // New registration with no cache: allow app to show (pending activation)
+    return { valid: true, isActive: false, daysLeft: 30, isOffline: true, isPending: true };
   }
 
   try {
     const { data: shop, error } = await supabase
       .from('shops')
-      .select('is_active, is_paid, validity_end, shop_supabase_url, shop_supabase_key')
+      .select('is_active, is_paid, validity_end, shop_supabase_url, shop_supabase_key, activation_requested, ever_activated')
       .eq('id', shopId)
       .single();
 
@@ -462,13 +474,18 @@ async function checkValidity(shopId) {
     const isValid = now < cutoff && shop.is_active;
     const daysLeft = Math.ceil((cutoff - now) / 86400000);
 
+    // Newly registered but never activated — show pending screen, not lockdown
+    const isPending = !shop.is_active && !shop.ever_activated;
+
     // Cache locally
     db.prepare('DELETE FROM validity_cache').run();
-    db.prepare('INSERT INTO validity_cache (validity_end, is_paid, is_active) VALUES (?, ?, ?)').run(
-      end.toISOString(),
-      shop.is_paid ? 1 : 0,
-      shop.is_active ? 1 : 0
-    );
+    try {
+      db.prepare('INSERT INTO validity_cache (validity_end, is_paid, is_active) VALUES (?, ?, ?)').run(
+        end.toISOString(),
+        shop.is_paid ? 1 : 0,
+        shop.is_active ? 1 : 0
+      );
+    } catch(e) {}
 
     // Initialise Shop-Specific Supabase if provided
     if (shop.shop_supabase_url && shop.shop_supabase_key) {
@@ -481,6 +498,7 @@ async function checkValidity(shopId) {
       validityEnd: end.toISOString(),
       isActive: !!shop.is_active,
       isPaid: !!shop.is_paid,
+      isPending,
       isOffline: false
     };
   } catch (e) {
@@ -1604,8 +1622,9 @@ ipcMain.handle("register-shop", async (event, data) => {
   try {
     // Generate a local Shop ID (shop-xxxxxxxx format)
     const newShopId = `shop-${uuidv4().slice(0, 8)}`;
+    const systemHwid = getMachineId();
 
-    // Create shop in Supabase (status default is disabled in DB)
+    // Create shop in Supabase (status default is disabled — pending admin activation)
     const now = new Date();
     const end = new Date(now.getTime() + 30 * 86400000);
     const { error } = await supabase
@@ -1620,6 +1639,10 @@ ipcMain.handle("register-shop", async (event, data) => {
         master_key: settings.masterKey || "owner123",
         is_active: false,
         is_paid: true,
+        ever_activated: false,
+        activation_requested: true,
+        hardware_id: systemHwid,
+        registered_at: now.toISOString(),
         validity_start: now.toISOString(),
         validity_end: end.toISOString()
       });
@@ -1639,10 +1662,15 @@ ipcMain.handle("register-shop", async (event, data) => {
     settings.ownerEmail = email; 
     settings.shopEmail = shopEmail || email;
     settings.ownerMobile = mobileNumber;
+    settings.hardwareId = systemHwid;
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
 
-    console.log("[Register] Shop registered and pending activation:", newShopId);
-    return { success: true, shopId: newShopId };
+    // Start realtime listener immediately for this new shop
+    setupLicenseRealtime(newShopId);
+    startControlListener(newShopId);
+
+    console.log("[Register] ✅ Shop registered and pending activation:", newShopId, "HWID:", systemHwid);
+    return { success: true, shopId: newShopId, systemId: systemHwid };
   } catch (e) {
     console.error("[Register] Critical error:", e.message);
     return { success: false, error: "System error: " + e.message };
@@ -2043,7 +2071,12 @@ ipcMain.handle("get-validity", async () => {
     const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
     if (url && key) initSupabase(url, key);
 
-    return await checkValidity(shopId);
+    if (!shopId) return { valid: false, isActive: false, isPending: false, daysLeft: 0 };
+
+    console.log(`[Validity] 🔍 Checking shopId: ${shopId}, supabase ready: ${!!supabase}`);
+    const result = await checkValidity(shopId);
+    console.log(`[Validity] 📊 Result:`, JSON.stringify(result));
+    return result;
   } catch (e) {
     return { valid: true, daysLeft: 30, note: 'Error: ' + e.message };
   }

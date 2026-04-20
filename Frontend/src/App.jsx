@@ -124,10 +124,12 @@ function App() {
         if (validity.warningPhase && !warningDismissed) {
           setValidityWarning({ daysLeft: validity.daysLeft, validityEnd: validity.validityEnd });
         }
-        if (!validity.valid) {
+        // Only lock if NOT pending (pending = newly registered, awaiting admin activation)
+        if (!validity.valid && !validity.isPending) {
           setLockData({ 
             reason: !validity.isActive ? 'Account Deactivated' : 'Subscription Expired', 
-            expiry: validity.validityEnd 
+            expiry: validity.validityEnd,
+            isPending: false
           });
         }
       }
@@ -197,8 +199,11 @@ function App() {
     );
   }
 
-  // 🔒 GATE 2: Lock Screen (Deactivation or Expiry - ONLY for registered shops)
-  if (lockData || (license && license.is_active === false && !license.needsRegistration)) {
+  // 🔒 GATE 2: Lock Screen (Deactivation or Expiry - ONLY for registered, previously-active shops)
+  // isPending means newly registered but never activated — do NOT lock them, they wait via ShopRegistration pending screen
+  const isDeactivatedLock = lockData && !lockData.isPending;
+  const isLicenseLock = license && license.is_active === false && !license.needsRegistration && !license.isPending;
+  if (isDeactivatedLock || isLicenseLock) {
     const reason = lockData?.reason || (license.note?.includes("deactivated") ? "Account Deactivated" : "Subscription Expired");
     const expiry = lockData?.expiry || "";
     return <LockScreen reason={reason} expiry={expiry} />;
