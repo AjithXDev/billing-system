@@ -43,3 +43,5 @@ supabase_validity_migration.sql
 supabase_v4_registration_fix.sql
 
 supabase_v3_saas_schemas.sql
+
+*.sql

@@ -373,7 +373,7 @@ const POS = ({ showQR }) => {
     }
     const label = customer.name
       ? `${customer.name} (${customer.phone || "no phone"})`
-      : `Bill held at ${new Date().toLocaleTimeString("en-IN")}`;
+      : `Draft Bill #${heldCount + 1}`;
     await window.api?.holdBill?.({ cart: validItems, customer, label });
     // Reset for next customer
     setBillItems([emptyRow()]);
@@ -401,9 +401,8 @@ const POS = ({ showQR }) => {
       return;
     }
 
-    const hasGst = settings.gstNumber && settings.gstNumber.trim().length > 0;
     const priceType = product.price_type || 'exclusive';
-    const catGst = hasGst ? Number(product.gst_rate || product.category_gst || 0) : 0;
+    const catGst = Number(product.gst_rate || product.category_gst || 0);
     const price = Number(product.price || 0);
 
     const existingIdx = billItems.findIndex(i => i.id === product.id);
@@ -546,8 +545,7 @@ const POS = ({ showQR }) => {
     }
 
     const updated = [...billItems];
-    const hasGst = settings.gstNumber && settings.gstNumber.trim().length > 0;
-    const catGst = hasGst ? Number(product.gst_rate || product.category_gst || 0) : 0;
+    const catGst = Number(product.gst_rate || product.category_gst || 0);
     const price = Number(product.price || 0);
     const quantity = 1;
     const priceType = product.price_type || 'exclusive';
@@ -648,8 +646,7 @@ const POS = ({ showQR }) => {
     if (newQty < 0) newQty = 0;
 
     const priceType = item.price_type || 'exclusive';
-    const hasGst = settings.gstNumber && settings.gstNumber.trim().length > 0;
-    const rate = hasGst ? Number(item.gstRate || 0) : 0;
+    const rate = Number(item.gstRate || 0);
     const price = Number(item.price || 0);
 
     const dp = item.discountPercent || 0;
@@ -1127,7 +1124,7 @@ const POS = ({ showQR }) => {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "2px solid #333", paddingBottom: "20px", marginBottom: "30px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {settings.billLogo && (
-                    <img src={settings.billLogo} alt="Logo" style={{ width: 80, height: 80, objectFit: "contain", filter: "grayscale(100%)", marginBottom: 5 }} />
+                    <img src={settings.billLogo} alt="Logo" style={{ width: 120, maxHeight: 60, objectFit: "contain", filter: "grayscale(100%)", marginBottom: 5 }} />
                   )}
                   <div>
                     <h1 style={{ margin: "0 0 5px 0", fontSize: "2.2rem", fontFamily: "Inter, sans-serif" }}>
@@ -1171,7 +1168,12 @@ const POS = ({ showQR }) => {
                       <td style={{ padding: "12px", borderRight: "1px solid #333" }}>
                         {item.name}
                         <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>
-                          {item.isFree ? `Offer: ${item.offerName}` : `+ ${item.gstRate}% GST (₹${item.gstAmt.toFixed(2)})`}
+                          {item.isFree ? `Offer: ${item.offerName}` : (
+                            <>
+                              CGST {item.cgstRate || 0}% (₹{(item.cgstAmt || 0).toFixed(2)}) + 
+                              SGST {item.sgstRate || 0}% (₹{(item.sgstAmt || 0).toFixed(2)})
+                            </>
+                          )}
                         </div>
                       </td>
                       <td style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>{item.qty}</td>
@@ -1185,6 +1187,45 @@ const POS = ({ showQR }) => {
                   ))}
                 </tbody>
               </table>
+
+              {/* GST Tax Summary Table */}
+              {taxTotal > 0 && (
+                <div style={{ marginBottom: "20px" }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", marginBottom: "8px", textTransform: "uppercase", borderBottom: "1px solid #333", display: "inline-block" }}>Tax Summary</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", border: "1px solid #eee" }}>
+                    <thead>
+                      <tr style={{ background: "#f9fafb", textAlign: "left" }}>
+                        <th style={{ padding: "6px", border: "1px solid #eee" }}>GST %</th>
+                        <th style={{ padding: "6px", border: "1px solid #eee" }}>Taxable Amt</th>
+                        <th style={{ padding: "6px", border: "1px solid #eee" }}>CGST Amt</th>
+                        <th style={{ padding: "6px", border: "1px solid #eee" }}>SGST Amt</th>
+                        <th style={{ padding: "6px", border: "1px solid #eee" }}>Total Tax</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Group items by GST rate */}
+                      {Object.entries(
+                        billItems.filter(i => i.id && i.gstRate > 0).reduce((acc, item) => {
+                          const rate = item.gstRate;
+                          if (!acc[rate]) acc[rate] = { taxable: 0, cgst: 0, sgst: 0 };
+                          acc[rate].taxable += (item.total - (item.discountAmt || 0));
+                          acc[rate].cgst += (item.cgstAmt || 0);
+                          acc[rate].sgst += (item.sgstAmt || 0);
+                          return acc;
+                        }, {})
+                      ).map(([rate, vals]) => (
+                        <tr key={rate}>
+                          <td style={{ padding: "6px", border: "1px solid #eee" }}>{rate}%</td>
+                          <td style={{ padding: "6px", border: "1px solid #eee" }}>₹{vals.taxable.toFixed(2)}</td>
+                          <td style={{ padding: "6px", border: "1px solid #eee" }}>₹{vals.cgst.toFixed(2)}</td>
+                          <td style={{ padding: "6px", border: "1px solid #eee" }}>₹{vals.sgst.toFixed(2)}</td>
+                          <td style={{ padding: "6px", border: "1px solid #eee" }}>₹{(vals.cgst + vals.sgst).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "40px" }}>
 

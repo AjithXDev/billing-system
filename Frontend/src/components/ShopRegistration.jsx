@@ -31,6 +31,8 @@ export default function ShopRegistration({ onRegistered }) {
   const [otpMsg, setOtpMsg]         = useState("");
   const [otpError, setOtpError]     = useState("");
   const [emailError, setEmailError] = useState("");
+  const [mobileVerified, setMobileVerified] = useState(true);
+  const [mobileError, setMobileError] = useState("");
 
   // ── Auto-poll for activation every 10 seconds ──
   useEffect(() => {
@@ -132,6 +134,8 @@ export default function ShopRegistration({ onRegistered }) {
       setOtpLoading(false);
     }
   };
+
+
 
   // ── Register ──
   const handleRegister = async () => {
@@ -381,7 +385,6 @@ export default function ShopRegistration({ onRegistered }) {
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
-                    // Reset verification if email changes
                     if (emailVerified) {
                       setEmailVerified(false);
                       setOtpSent(false);
@@ -394,7 +397,6 @@ export default function ShopRegistration({ onRegistered }) {
                   disabled={emailVerified}
                   style={emailVerified ? { borderColor: "#22c55e", background: "rgba(34,197,94,0.05)" } : {}}
                 />
-                {/* Verify / Verified badge */}
                 {!emailVerified && !otpSent && (
                   <button
                     onClick={handleSendOtp}
@@ -409,12 +411,8 @@ export default function ShopRegistration({ onRegistered }) {
                 )}
               </div>
 
-              {/* Email error (duplicate) */}
-              {emailError && (
-                <div className="field-error">{emailError}</div>
-              )}
+              {emailError && <div className="field-error">{emailError}</div>}
 
-              {/* OTP Input Row (appears after code is sent) */}
               {otpSent && !emailVerified && (
                 <div className="otp-section">
                   <div style={{ fontSize: 12, color: "#10b981", fontWeight: 600, marginBottom: 8 }}>
@@ -426,10 +424,9 @@ export default function ShopRegistration({ onRegistered }) {
                       value={otpCode}
                       onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                       onKeyDown={(e) => e.key === "Enter" && otpCode.length === 6 && handleVerifyOtp()}
-                      placeholder="Enter 6-digit code"
+                      placeholder="6-digit code"
                       maxLength={6}
                       className="otp-input"
-                      autoFocus
                     />
                     <button
                       onClick={handleVerifyOtp}
@@ -440,19 +437,9 @@ export default function ShopRegistration({ onRegistered }) {
                     </button>
                   </div>
                   {otpError && <div className="field-error">{otpError}</div>}
-                  <button
-                    onClick={handleSendOtp}
-                    disabled={otpLoading}
-                    style={{
-                      background: "none", border: "none", color: "#6366f1",
-                      fontSize: 12, fontWeight: 700, cursor: "pointer",
-                      padding: "6px 0", marginTop: 4
-                    }}
-                  >
-                    Resend Code
-                  </button>
                 </div>
               )}
+
             </div>
 
             {/* 4. Mobile Number */}
@@ -461,11 +448,11 @@ export default function ShopRegistration({ onRegistered }) {
               <input
                 type="tel"
                 value={mobile}
-                onChange={(e) => setMobile(e.target.value.replace(/[^0-9+]/g, ""))}
+                onChange={(e) => { setMobile(e.target.value.replace(/[^0-9+]/g, "")); }}
                 placeholder="+91 XXXX XXXX XX"
                 maxLength={15}
-                onKeyDown={(e) => e.key === "Enter" && emailVerified && handleRegister()}
               />
+              {mobileError && <div className="field-error">{mobileError}</div>}
             </div>
 
             {error && <div className="setup-error">⚠️ {error}</div>}

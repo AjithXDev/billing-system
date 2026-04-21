@@ -31,6 +31,7 @@ let client = null;
 let isReady = false;
 let qrWindow = null;        // Electron BrowserWindow for QR display
 let pendingMessages = [];   // queue while client is initialising
+let currentQR = null;
 
 // ─── Initialise ──────────────────────────────────────────────
 function initWhatsApp(mainWindow) {
@@ -51,6 +52,7 @@ function initWhatsApp(mainWindow) {
 
   // ── QR code: notify renderer so it can display it ──────────
   client.on("qr", (qr) => {
+    currentQR = qr;
     console.log("[WhatsApp] Scan this QR code to link your phone:");
     qrcode.generate(qr, { small: true });
 
@@ -62,6 +64,7 @@ function initWhatsApp(mainWindow) {
 
   // ── Authentication confirmed ────────────────────────────────
   client.on("authenticated", () => {
+    currentQR = null; // Clear QR once authenticated
     console.log("[WhatsApp] Authenticated ✅");
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("whatsapp-status", "authenticated");
@@ -131,7 +134,7 @@ async function sendMessage(phone, message) {
 
 // ─── Public: status ──────────────────────────────────────────
 function getStatus() {
-  return { ready: isReady };
+  return { ready: isReady, qr: currentQR };
 }
 
 module.exports = { initWhatsApp, sendMessage, getStatus };

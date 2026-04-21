@@ -113,8 +113,21 @@ export default function App() {
         headers: { 'apikey': GLOBAL_KEY, 'Authorization': `Bearer ${GLOBAL_KEY}` }
       });
       const users = await res.json();
-      if (users && users.length > 0) { setShopIdInput(users[0].id); setScreen('shopId'); }
-      else setError('Invalid Master Key or Email');
+      if (users && users.length > 0) { 
+        const shop = users[0];
+        if (shop.shop_supabase_url && shop.shop_supabase_key) {
+          await Store.set('iva_shop_id', shop.id);
+          await Store.set('iva_shop_url', shop.shop_supabase_url);
+          await Store.set('iva_shop_key', shop.shop_supabase_key);
+          await Store.set('iva_paired', 'true');
+          setSession({ id: shop.id, url: shop.shop_supabase_url, key: shop.shop_supabase_key });
+          setScreen('dashboard');
+        } else {
+          Alert.alert('Terminal Syncing', 'Desktop Terminal is still initializing your database. Please wait.');
+        }
+      } else {
+        setError('Invalid Master Key or Email');
+      }
     } catch (e) { setError(e.message); }
     setLoading(false);
   };

@@ -110,7 +110,7 @@ export default function History() {
           onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
           onMouseLeave={e => e.currentTarget.style.background = ''}>
             {/* Invoice ID */}
-            <div style={{ width: 70, fontWeight: 700, color: 'var(--primary)', fontSize: 14 }}>#{inv.displayId}</div>
+            <div style={{ width: 70, fontWeight: 700, color: 'var(--primary)', fontSize: 14 }}>#{inv.bill_no || inv.id}</div>
             {/* Date */}
             <div style={{ width: 150, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)' }}>
               <Calendar size={14} color="var(--text-3)" />
@@ -210,7 +210,7 @@ export default function History() {
         <div className="modal-overlay" onClick={() => setViewInvoice(null)}>
           <div className="modal-content" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ margin: 0 }}>Invoice #{viewInvoice.displayId}</h2>
+              <h2 style={{ margin: 0 }}>Invoice #{viewInvoice.bill_no || viewInvoice.id}</h2>
               <button onClick={() => setViewInvoice(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><X size={24} /></button>
             </div>
 
