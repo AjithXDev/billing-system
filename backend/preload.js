@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("api", {
   deleteInvoice:       (id)           => ipcRenderer.invoke("delete-invoice", id),
   bulkUpdateProducts:  (data)         => ipcRenderer.invoke("bulkUpdateProducts", data),
   getCategories:       ()             => ipcRenderer.invoke("get-categories"),
+  addCategory:         (data)         => ipcRenderer.invoke("add-category", data),
   searchCustomer:      (phone)        => ipcRenderer.invoke("search-customer", phone),
   editProduct:         (data)         => ipcRenderer.invoke("edit-product", data),
   deleteProduct:       (id)           => ipcRenderer.invoke("delete-product", id),

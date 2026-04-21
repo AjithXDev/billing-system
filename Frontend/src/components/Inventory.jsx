@@ -26,6 +26,9 @@ const Inventory = () => {
   const [scanStatus, setScanStatus] = useState("Waiting for scanner...");
   const scanErrorCount = useRef(0);
 
+  const [newCategory, setNewCategory] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
+
   const loadCategories = async () => {
     if (window.api && window.api.getCategories) {
       const cats = await window.api.getCategories();
@@ -298,9 +301,27 @@ const Inventory = () => {
                  </div>
                   <div className="form-group">
                     <label className="form-label">Category</label>
-                    <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange}>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange} style={{ flex: 1, height: '42px' }}>
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                      <button type="button" onClick={() => setAddingCategory(!addingCategory)} style={{ width: '42px', height: '42px', borderRadius: '8px', border: 'none', background: 'rgba(99,102,241,0.1)', color: '#6366f1', fontSize: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        +
+                      </button>
+                    </div>
+                    {addingCategory && (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', padding: '10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <input className="form-input" placeholder="New Category Name" value={newCategory} onChange={e => setNewCategory(e.target.value)} style={{ flex: 1, padding: '8px 12px', height: '36px' }} />
+                        <button type="button" onClick={async () => {
+                          if (newCategory.trim() && window.api.addCategory) {
+                             await window.api.addCategory({ name: newCategory.trim() });
+                             await loadCategories();
+                             setNewCategory("");
+                             setAddingCategory(false);
+                          }
+                        }} style={{ padding: '0 16px', borderRadius: '6px', border: 'none', background: '#10b981', color: 'white', fontWeight: 'bold', cursor: 'pointer', height: '36px' }}>Save</button>
+                      </div>
+                    )}
                   </div>
                   <div className="form-group">
                     <label className="form-label">Brand</label>

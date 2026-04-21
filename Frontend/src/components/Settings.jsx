@@ -77,6 +77,19 @@ export default function Settings() {
   const [pairingStatus, setPairingStatus] = useState("idle");
   const [pairingMsg, setPairingMsg] = useState("");
 
+  // Lock for Cloud Section
+  const [isCloudLocked, setIsCloudLocked] = useState(true);
+  const [cloudPwd, setCloudPwd] = useState("");
+
+  const handleUnlockCloud = () => {
+    if (cloudPwd === (cfg.masterKey || "owner123")) {
+      setIsCloudLocked(false);
+      setCloudPwd("");
+    } else {
+      alert("Incorrect Master Key.");
+    }
+  };
+
   const loadSettingsData = () => {
     try {
       const raw = localStorage.getItem("smart_billing_settings");
@@ -375,84 +388,83 @@ export default function Settings() {
 
 
         {/* ── CLOUD INSTALLATION ── */}
-        <SectionTitle icon="☁️" title="Cloud Installation (Shop Database)" />
-        <div style={{ 
-          padding: "20px", background: "rgba(255,255,255,0.03)", 
-          borderRadius: 12, border: "1px solid var(--border)", marginBottom: 16, marginTop: 8 
-        }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
-            Enter your <strong>Supabase Shop Connection</strong> details provided during installation. This links your desktop terminal with your cloud database and allows the Mobile App to show your real-time data.
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>SUPABASE URL</label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <SectionTitle icon="☁️" title="Cloud Installation (Shop Database)" />
+          {isCloudLocked ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 20 }}>
               <input 
-                style={inputStyle} 
-                value={shopUrl} 
-                onChange={e => setShopUrl(e.target.value)} 
-                placeholder="https://your-project.supabase.co"
+                type="password" 
+                value={cloudPwd}
+                onChange={(e) => setCloudPwd(e.target.value)}
+                placeholder="Master Key" 
+                style={{ ...inputStyle, width: 120, height: 28 }}
               />
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>ANON PUBLIC KEY</label>
-              <input 
-                style={inputStyle} 
-                value={shopKey} 
-                onChange={e => setShopKey(e.target.value)} 
-                type="password"
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: shopConnStatus === 'connected' ? '#16a34a' : (shopConnStatus === 'error' ? '#ef4444' : 'var(--text-4)') }}>
-                {shopConnMsg || (shopConnStatus === 'connected' ? "Connected to Cloud" : "Not Linked")}
-              </div>
               <button 
-                onClick={handleSaveShopSupabase}
-                style={actionBtnStyle(shopConnStatus === 'connected' ? "#16a34a" : "var(--primary)", shopConnStatus === 'testing')}
+                onClick={handleUnlockCloud}
+                style={{ ...actionBtnStyle("var(--primary)", false), padding: "0 12px", height: 28, fontSize: 11 }}
               >
-                {shopConnStatus === 'testing' ? 'Testing...' : (shopConnStatus === 'connected' ? 'Update Credentials' : 'Link Connection')}
+                🔒 Unlock
               </button>
             </div>
-          </div>
-
-        </div>
-
-        {/* ── LOCAL DATA STORAGE ── */}
-        <SectionTitle icon="📁" title="Local Data Storage" />
-        <div style={{ 
-          padding: "20px", background: "rgba(255,255,255,0.03)", 
-          borderRadius: 12, border: "1px solid var(--border)", marginBottom: 16, marginTop: 8 
-        }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
-            Choose where your billing data (SQLite) is saved on this computer. This ensures data is accessible even **offline** and allows you to manually back up your files.
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <input 
-              style={{ ...inputStyle, flex: 1, background: "var(--surface-2)", cursor: "default" }} 
-              value={localDbPath} 
-              readOnly 
-              placeholder="Default System Location"
-            />
+          ) : (
             <button 
-              onClick={handleBrowseFolder}
-              style={{ ...actionBtnStyle("var(--text-2)", false), background: "white", color: "var(--text-1)", border: "1px solid var(--border)" }}
+              onClick={() => setIsCloudLocked(true)}
+              style={{ ...actionBtnStyle("var(--text-3)", false), padding: "0 12px", height: 28, fontSize: 11, background: "transparent", border: "1px solid var(--border)", color: "var(--text-2)", marginTop: 20 }}
             >
-              Browse Folder
+              Lock
             </button>
-            <button 
-              onClick={handleSaveLocalDb}
-              style={actionBtnStyle("var(--primary)", localDbSaved)}
-            >
-              {localDbSaved ? "Saved" : "Save Path"}
-            </button>
-          </div>
-          {localDbMsg && (
-            <div style={{ fontSize: 11, color: localDbMsg.includes('✅') ? '#16a34a' : '#ef4444', marginTop: 10, fontWeight: 600 }}>
-              {localDbMsg}
-            </div>
           )}
         </div>
+        
+        {isCloudLocked ? (
+          <div style={{ padding: "20px", background: "rgba(255,255,255,0.02)", borderRadius: 12, border: "1px dashed var(--border)", marginBottom: 16, textAlign: "center" }}>
+            <span style={{ fontSize: 24, display: "block", marginBottom: 8 }}>🔒</span>
+            <div style={{ fontSize: 13, color: "var(--text-3)", fontWeight: 600 }}>This section is locked for installation use only.</div>
+          </div>
+        ) : (
+          <div style={{ 
+            padding: "20px", background: "rgba(255,255,255,0.03)", 
+            borderRadius: 12, border: "1px solid var(--border)", marginBottom: 16, marginTop: 8 
+          }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16, lineHeight: 1.6 }}>
+              Enter your <strong>Supabase Shop Connection</strong> details provided during installation. This links your desktop terminal with your cloud database and allows the Mobile App to show your real-time data.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>SUPABASE URL</label>
+                <input 
+                  style={inputStyle} 
+                  value={shopUrl} 
+                  onChange={e => setShopUrl(e.target.value)} 
+                  placeholder="https://your-project.supabase.co"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>ANON PUBLIC KEY</label>
+                <input 
+                  style={inputStyle} 
+                  value={shopKey} 
+                  onChange={e => setShopKey(e.target.value)} 
+                  type="password"
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: shopConnStatus === 'connected' ? '#16a34a' : (shopConnStatus === 'error' ? '#ef4444' : 'var(--text-4)') }}>
+                  {shopConnMsg || (shopConnStatus === 'connected' ? "Connected to Cloud" : "Not Linked")}
+                </div>
+                <button 
+                  onClick={handleSaveShopSupabase}
+                  style={actionBtnStyle(shopConnStatus === 'connected' ? "#16a34a" : "var(--primary)", shopConnStatus === 'testing')}
+                >
+                  {shopConnStatus === 'testing' ? 'Testing...' : (shopConnStatus === 'connected' ? 'Update Credentials' : 'Link Connection')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+
 
         {/* ── STORE INFO ── */}
         <SectionTitle icon="" title="Store Information" />

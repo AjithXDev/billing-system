@@ -227,15 +227,12 @@ const initDB = () => {
     migrate('invoices', 'bill_no', 'INTEGER');
 
 
-    // AUTO-POPULATE CLOUD CONFIG FROM ENV (To jumpstart sync)
-    try {
-        const existingConf = db.prepare("SELECT COUNT(*) as count FROM shop_supabase_config").get();
-        if (existingConf.count === 0 && process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
-            db.prepare("INSERT INTO shop_supabase_config (supabase_url, supabase_key, is_connected) VALUES (?, ?, 1)")
-              .run(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-            console.log("[DB] ⚡ Cloud Auto-Link Active!");
-        }
-    } catch (e) {}
+    // NOTE: shop_supabase_config is ONLY populated when admin explicitly sets
+    // an individual shop Supabase URL via the Settings → Cloud Sync screen.
+    // DO NOT auto-populate from SUPABASE_URL (that is the GLOBAL control plane,
+    // NOT an individual shop DB). Auto-populating caused ALL shops' billing data
+    // to mix in the shared global database.
+    console.log("[DB] ✅ Schema ready. Shop cloud config must be set via Settings.");
 
     return db;
 };

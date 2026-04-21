@@ -507,8 +507,8 @@
     <p class="login-sub">Enter your credentials to link your terminal</p>
     
     <div style="text-align: left; margin-bottom: 24px;">
-      <label style="font-size: 11px; text-transform: uppercase; color: var(--text-4); font-weight: 800; display: block; margin-bottom: 8px; margin-left: 4px;">Shop Identifier</label>
-      <input id="shop-id-input" type="text" class="login-input" placeholder="e.g. shop-XXXXXXXX" style="letter-spacing: normal; font-size: 16px; margin-bottom: 16px;" />
+      <label style="font-size: 11px; text-transform: uppercase; color: var(--text-4); font-weight: 800; display: block; margin-bottom: 8px; margin-left: 4px;">Registered Owner Email</label>
+      <input id="shop-id-input" type="email" class="login-input" placeholder="owner@example.com" style="letter-spacing: normal; font-size: 16px; margin-bottom: 16px;" />
       
       <label style="font-size: 11px; text-transform: uppercase; color: var(--text-4); font-weight: 800; display: block; margin-bottom: 8px; margin-left: 4px;">Master Access Key</label>
       <input id="master-key-input" type="password" class="login-input" placeholder="Access Key" />
@@ -909,21 +909,28 @@ const CONTROL_URL = "https://baawqrqihlhsrghvjlpx.supabase.co";
 const CONTROL_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0";
 
 async function attemptLogin() {
-  const sid = document.getElementById("shop-id-input").value.trim();
+  const emailInput = document.getElementById("shop-id-input").value.trim().toLowerCase();
   const key = document.getElementById("master-key-input").value.trim();
-  if (!sid || !key) return;
+  if (!emailInput || !key) return;
 
   const errorEl = document.getElementById("login-error");
   
   try {
     const controlClient = supabase.createClient(CONTROL_URL, CONTROL_KEY);
-    const { data: shop, error } = await controlClient.from("shops").select("*").eq("id", sid).single();
+    // Find shop by owner_email
+    const { data: shops, error } = await controlClient
+      .from("shops")
+      .select("*")
+      .eq("owner_email", emailInput)
+      .limit(1);
 
-    if (error || !shop) {
-      errorEl.textContent = "❌ Shop not found. Check Shop ID.";
+    if (error || !shops || shops.length === 0) {
+      errorEl.textContent = "❌ Account not found. Check Owner Email.";
       errorEl.style.display = "block";
       return;
     }
+
+    const shop = shops[0];
 
     if (shop.master_key !== key) {
       errorEl.textContent = "❌ Invalid Master Key.";
@@ -948,8 +955,8 @@ async function attemptLogin() {
 
 let pairingSub = null;
 async function showPairingScreen() {
-  const sid = document.getElementById("shop-id-input").value.trim();
-  if (!sid) { alert("Enter Shop ID first"); return; }
+  const emailInput = document.getElementById("shop-id-input").value.trim().toLowerCase();
+  if (!emailInput) { alert("Enter Owner Email first"); return; }
   
   document.getElementById("login-screen").classList.add("hidden");
   document.getElementById("pairing-screen").classList.remove("hidden");
@@ -968,9 +975,10 @@ async function showPairingScreen() {
   pairingSub = controlClient.channel('p').on('postgres_changes', { event:'UPDATE', schema:'public', table:'pairing_codes', filter:`code=eq.${code}` }, async (payload) => {
     if (payload.new.status === 'used') {
       document.getElementById("pair-status").textContent = "✅ Paired!";
-      const { data: s } = await controlClient.from("shops").select("*").eq("id", sid).single();
-      if (s) {
-        localStorage.setItem("iva_shop_id", sid);
+      const { data: shops } = await controlClient.from("shops").select("*").eq("owner_email", emailInput).limit(1);
+      if (shops && shops.length > 0) {
+        const s = shops[0];
+        localStorage.setItem("iva_shop_id", s.id);
         localStorage.setItem("iva_auth_key", s.master_key);
         localStorage.setItem("iva_supabase_url", s.shop_supabase_url || CONTROL_URL);
         localStorage.setItem("iva_supabase_key", s.shop_supabase_key || CONTROL_KEY);

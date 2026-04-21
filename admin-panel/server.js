@@ -242,8 +242,27 @@ app.delete('/api/shops/:id', async (req, res) => {
         console.warn(`⚠️ Could not delete auth user ${ownerEmail}:`, authErr.message);
       }
     }
+    // 4. Wipe individual shop Supabase DB (Data Plane)
+    if (shop.shop_supabase_url && shop.shop_supabase_key) {
+      try {
+        const shopClient = createClient(shop.shop_supabase_url, shop.shop_supabase_key);
+        await Promise.all([
+          shopClient.from('invoice_items').delete().neq('id', 0),
+          shopClient.from('invoices').delete().neq('id', 0),
+          shopClient.from('products').delete().neq('id', 0),
+          shopClient.from('categories').delete().neq('id', 0),
+          shopClient.from('customers').delete().neq('id', 0),
+          shopClient.from('held_bills').delete().neq('id', 0),
+          shopClient.from('offers').delete().neq('id', 0),
+          shopClient.from('shop_settings').delete().neq('id', 0)
+        ]);
+        console.log(`🧹 Wiped individual Shop Database for ${shop.name}`);
+      } catch (shopDbErr) {
+        console.warn(`⚠️ Could not wipe individual database for ${shop.name}:`, shopDbErr.message);
+      }
+    }
     
-    console.log(`🗑️ Shop ${shop.name} (${id}) deleted completely`);
+    console.log(`🗑️ Shop ${shop.name} (${id}) deleted completely from Control Plane and Data Plane`);
     res.json({ 
       success: true, 
       message: `Shop "${shop.name}" and all data deleted`,

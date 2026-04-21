@@ -201,10 +201,19 @@ async function syncStatsToSupabase() {
       else console.log("[Sync] ✅ Snapshot pushed.");
     } catch (e) { console.error("[Sync] Control Plane Error:", e.message); }
 
-    // 2. Data Plane Sync (Individual Table Records)
+    // 2. Data Plane Sync (Individual Table Records → Shop's OWN Supabase only)
     try {
       const config = db.prepare("SELECT * FROM shop_supabase_config WHERE is_connected = 1 ORDER BY id DESC LIMIT 1").get();
       if (config && config.supabase_url && config.supabase_key) {
+        // ⚠️ SAFETY GUARD: Never sync billing data to the GLOBAL control plane
+        // The global DB (baawqrqihlhsrghvjlpx) has NO billing tables by design.
+        // Each shop MUST have its own separate Supabase project for billing data.
+        const GLOBAL_CONTROL_URL = process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+        if (config.supabase_url.includes('baawqrqihlhsrghvjlpx') || config.supabase_url === GLOBAL_CONTROL_URL) {
+          console.warn('[ShopSync] ⚠️ BLOCKED: shop_supabase_url is the GLOBAL control plane!');
+          console.warn('[ShopSync] ⚠️ To sync billing data, set a SEPARATE individual shop Supabase URL in Settings → Cloud Sync.');
+          // Still continue to push stats snapshot to global — that is correct
+        } else {
         const { createClient } = require('@supabase/supabase-js');
         const shopSupabase = createClient(config.supabase_url, config.supabase_key);
         console.log(`[ShopSync] 🌐 Target URL: ${config.supabase_url}`);
@@ -376,6 +385,7 @@ async function syncStatsToSupabase() {
         }
 
         console.log("[ShopSync] ✅ ALL TABLES SYNCED SUCCESSFULLY!");
+        } // end else (individual shop URL guard)
       }
     } catch (sErr) { console.error("[ShopSync] ❌ CRITICAL SYNC ERROR:", sErr.message); }
 

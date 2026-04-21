@@ -148,6 +148,14 @@ let shopSupabaseKey = '';
 
 function initShopSupabase(url, key) {
   if (url && key && url.startsWith('http')) {
+    // ⚠️ SAFETY: Never use the global control-plane as the individual shop DB
+    // The global DB has no billing tables — syncing there mixes ALL shops' data
+    const globalUrl = process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    if (url === globalUrl || url.includes('baawqrqihlhsrghvjlpx')) {
+      console.warn('[ShopDB] ⚠️ BLOCKED: Cannot use global control plane as individual shop DB!');
+      console.warn('[ShopDB] ⚠️ Create a SEPARATE Supabase project for this shop and enter its URL in Settings → Cloud Sync.');
+      return false;
+    }
     try {
       shopSupabase = createClient(url, key);
       shopSupabaseUrl = url;
@@ -171,6 +179,13 @@ function loadShopSupabaseConfig() {
   try {
     const config = db.prepare('SELECT * FROM shop_supabase_config ORDER BY id DESC LIMIT 1').get();
     if (config && config.supabase_url && config.supabase_key) {
+      // Clean up bad config: if it points to global control plane, delete it
+      const globalUrl = process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+      if (config.supabase_url === globalUrl || config.supabase_url.includes('baawqrqihlhsrghvjlpx')) {
+        console.warn('[ShopDB] 🧹 Cleaning up bad shop_supabase_config — was pointing to global DB!');
+        db.prepare('DELETE FROM shop_supabase_config WHERE supabase_url LIKE ?').run('%baawqrqihlhsrghvjlpx%');
+        return; // Don't init with global URL
+      }
       initShopSupabase(config.supabase_url, config.supabase_key);
     }
   } catch (e) { }
@@ -477,7 +492,10 @@ async function checkValidity(shopId) {
       .eq('id', shopId)
       .single();
 
-    if (error || !shop) return { valid: true, daysLeft: 30 };
+    if (error || !shop) {
+      console.error("[Validity] ❌ Shop Record Not Found or Error:", error);
+      return { valid: false, isActive: false, isPending: true, daysLeft: 0, note: "Shop record not found in cloud." };
+    }
 
     const now = new Date();
     const end = new Date(shop.validity_end || (now.getTime() + 30 * 86400000));
@@ -579,6 +597,11 @@ async function pushStatsSnapshot(shopId) {
       stats_json: stats,
       updated_at: new Date().toISOString()
     });
+
+    // 🔥 Ping the shops table so Admin knows they are online
+    await supabase.from('shops').update({
+       last_ping_at: new Date().toISOString()
+    }).eq('id', shopId);
   } catch (e) { }
 }
 
@@ -610,19 +633,25 @@ async function syncToShopCloud() {
 async function registerShop(shopId) {
   if (!supabase) return;
   try {
-    const s = settings || {}; // Use current active settings
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let s = {};
+    if (fs.existsSync(configPath)) {
+      try { s = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (e) { }
+    }
+    
     await supabase.from("shops").upsert({
       id: shopId,
-      name: s.storeName || "My Shop",
+      name: s.storeName || "My Venture",
       owner_name: s.ownerName || "Owner",
-      owner_phone: s.ownerPhone || "",
+      owner_phone: s.ownerPhone || s.ownerMobile || "",
       owner_email: s.ownerEmail || "",
-      master_key: process.env.MASTER_KEY || "owner123",
+      master_key: s.masterKey || "owner123",
       shop_supabase_url: shopSupabaseUrl,
-      shop_supabase_key: shopSupabaseKey
+      shop_supabase_key: shopSupabaseKey,
+      activation_requested: true
     });
   } catch (e) {
-    console.error("[Register] Error:", e.message);
+    console.error("[Register] Internal Sync Error:", e.message);
   }
 }
 
@@ -836,6 +865,13 @@ ipcMain.handle("get-categories", async () => {
   return db.prepare("SELECT * FROM categories").all();
 });
 
+// 🟢 ADD CATEGORY
+ipcMain.handle("add-category", async (event, category) => {
+  const { name, gst } = category;
+  const result = db.prepare("INSERT INTO categories (name, gst) VALUES (?, ?)").run(name, gst || 0);
+  return { id: result.lastInsertRowid, message: "Category added" };
+});
+
 // 🟢 ADD PRODUCT (with expiry_date and weight)
 ipcMain.handle("add-product", async (event, product) => {
   const {
@@ -885,19 +921,28 @@ ipcMain.handle("add-product", async (event, product) => {
 ipcMain.handle("edit-product", async (event, product) => {
   const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand } = product;
 
-  // Fetch current to optionally reset flags if restocked
-  const oldP = db.prepare("SELECT quantity, expiry_date FROM products WHERE id=?").get(id);
-  let resetStock = quantity > 10 && oldP && oldP.quantity <= 10; // Simple restocking reset rule 
-  let resetExpiry = oldP && (oldP.expiry_date !== expiry_date);
-
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?, weight=?, brand=?,
-        flag_low_stock = CASE WHEN ? THEN 0 ELSE flag_low_stock END,
-        flag_out_of_stock = CASE WHEN ? THEN 0 ELSE flag_out_of_stock END,
-        flag_expiry = CASE WHEN ? THEN 0 ELSE flag_expiry END
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?, weight=?, brand=?, is_synced=0
     WHERE id=?
-  `).run(name, category_id || null, gst_rate || 0, product_code || null, price_type || 'exclusive', price, cost_price || 0, quantity, unit, barcode ? String(barcode) : null, expiry_date || null, image || null, default_discount || 0, weight || null, brand || null, resetStock ? 1 : 0, resetStock ? 1 : 0, resetExpiry ? 1 : 0, id);
+  `).run(
+    name, 
+    category_id || null, 
+    gst_rate || 0, 
+    product_code || null, 
+    price_type || 'exclusive', 
+    price, 
+    cost_price || 0, 
+    quantity, 
+    unit, 
+    barcode ? String(barcode) : null, 
+    expiry_date || null, 
+    image || null, 
+    default_discount || 0, 
+    weight || null, 
+    brand || null, 
+    id
+  );
   return { message: "Product updated" };
 });
 
@@ -1075,7 +1120,8 @@ ipcMain.handle("bulkUpdateProducts", async (event, updates) => {
   const stmt = db.prepare(`
     UPDATE products 
     SET 
-      quantity = quantity + ?
+      quantity = quantity + ?,
+      is_synced = 0
     WHERE id = ?
   `);
 
@@ -1163,7 +1209,8 @@ ipcMain.handle("create-invoice", async (event, data) => {
 
   const updateStock = db.prepare(`
     UPDATE products
-    SET quantity = quantity - ?
+    SET quantity = quantity - ?,
+        is_synced = 0
     WHERE id = ?
   `);
 
@@ -1681,7 +1728,7 @@ ipcMain.handle("register-shop", async (event, data) => {
         shop_email: shopEmail || email,
         master_key: settings.masterKey || "owner123",
         is_active: false,
-        is_paid: true,
+        is_paid: false, // Default to Free/Unpaid for admin review
         ever_activated: false,
         activation_requested: true,
         hardware_id: systemHwid,
@@ -1955,6 +2002,15 @@ ipcMain.handle("get-pairing-status", async (event, code) => {
 // Save shop Supabase credentials
 ipcMain.handle("save-shop-supabase", async (event, { url, key }) => {
   try {
+    // ⚠️ VALIDATION: Reject global control-plane URL as individual shop DB
+    const globalUrl = process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    if (url === globalUrl || url.includes('baawqrqihlhsrghvjlpx')) {
+      return { 
+        success: false, 
+        error: 'This is the Global Control Plane URL — it cannot be used as a Shop Supabase. Please create a SEPARATE Supabase project for this shop.' 
+      };
+    }
+
     // Clear existing config
     db.prepare('DELETE FROM shop_supabase_config').run();
     // Insert new config
@@ -2109,19 +2165,19 @@ ipcMain.handle("get-validity", async () => {
     }
     const shopId = settings.shopId || process.env.SHOP_ID;
     
-    // Initialize admin supabase if needed
     const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
     const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
-    if (url && key) initSupabase(url, key);
+    
+    // Force re-init if not matching or missing
+    if (url && key) {
+       supabase = createClient(url, key);
+    }
 
     if (!shopId) return { valid: false, isActive: false, isPending: false, daysLeft: 0 };
 
-    console.log(`[Validity] 🔍 Checking shopId: ${shopId}, supabase ready: ${!!supabase}`);
-    const result = await checkValidity(shopId);
-    console.log(`[Validity] 📊 Result:`, JSON.stringify(result));
-    return result;
+    return await checkValidity(shopId);
   } catch (e) {
-    return { valid: true, daysLeft: 30, note: 'Error: ' + e.message };
+    return { valid: true, daysLeft: 0, isActive: false, note: 'Error: ' + e.message };
   }
 });
 
