@@ -979,20 +979,18 @@ function createWindow() {
     } catch (e) { }
   }
 
-  // Handle Fullscreen Toggles
-  const { globalShortcut } = require("electron");
-
-  // Esc to exit kiosk/fullscreen
-  globalShortcut.register("Escape", () => {
-    if (mainWindow) {
-      mainWindow.setKiosk(false);
-      mainWindow.setFullScreen(false);
+  // Handle Fullscreen Toggles — use webContents event instead of globalShortcut
+  // to avoid stealing keystrokes from textboxes
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Escape to exit kiosk/fullscreen (only on key down, not repeat)
+    if (input.key === 'Escape' && input.type === 'keyDown' && !input.isAutoRepeat) {
+      if (mainWindow.isKiosk() || mainWindow.isFullScreen()) {
+        mainWindow.setKiosk(false);
+        mainWindow.setFullScreen(false);
+      }
     }
-  });
-
-  // F11 to enter kiosk/fullscreen
-  globalShortcut.register("F11", () => {
-    if (mainWindow) {
+    // F11 to enter kiosk/fullscreen
+    if (input.key === 'F11' && input.type === 'keyDown' && !input.isAutoRepeat) {
       mainWindow.setKiosk(true);
       mainWindow.setFullScreen(true);
     }

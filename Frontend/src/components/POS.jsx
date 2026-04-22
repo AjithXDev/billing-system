@@ -147,6 +147,16 @@ const POS = ({ showQR }) => {
       // Don't listen when modals are open
       if (showInvoice || showHeldBills || showQR || isScannerOpen) return;
 
+      // CRITICAL FIX: Don't intercept keystrokes when user is typing in any input field
+      const activeEl = document.activeElement;
+      const isTypingInField = activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.tagName === 'SELECT' ||
+        activeEl.isContentEditable
+      );
+      if (isTypingInField) return;
+
       if (e.key === "Enter") {
         const now = Date.now();
         const scanned = barcodeBuffer.current.trim();
