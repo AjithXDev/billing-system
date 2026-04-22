@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS public.shops (
     owner_name TEXT,
     owner_phone TEXT, -- For WhatsApp reminders
     owner_email TEXT,
+    shop_email TEXT,
+    mobile_number TEXT,
+    gst_number TEXT,
     master_key TEXT DEFAULT 'owner123',
     
     -- SaaS Controls

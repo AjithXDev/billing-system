@@ -33,7 +33,7 @@ async function sendOtpEmail(toEmail, otpCode) {
   const transporter = getEmailTransporter();
   if (!transporter) throw new Error('Email not configured. Set GMAIL_APP_PASS in .env');
 
-  const gmailUser = process.env.GMAIL_USER || 'innoaivators@gmail.com';
+  const gmailUser = process.env.GMAIL_USER || 'innoaivatorsbilling@gmail.com';
   return transporter.sendMail({
     from: `"Innoaivators" <${gmailUser}>`,
     to: toEmail,
@@ -97,7 +97,7 @@ async function setupLicenseRealtime(shopId) {
   if (!supabase || !shopId) return;
   if (licenseSubscription) licenseSubscription.unsubscribe();
 
-  console.log(`[Realtime] 🛰️ Listening for license changes for: ${shopId}`);
+  console.log(`[Realtime] \ud83d\udef0\ufe0f Listening for license changes for: ${shopId}`);
   licenseSubscription = supabase
     .channel('license-updates')
     .on('postgres_changes', { 
@@ -106,24 +106,49 @@ async function setupLicenseRealtime(shopId) {
       table: 'shops', 
       filter: `id=eq.${shopId}` 
     }, (payload) => {
-      const { is_active, validity_end, software_status } = payload.new;
-      console.log(`[Realtime] 🔔 License change detected: is_active=${is_active}`);
-      if (is_active === true) {
+      const newData = payload.new;
+      console.log(`[Realtime] \ud83d\udd14 Shop change: is_active=${newData.is_active}, name=${newData.name}, validity_end=${newData.validity_end}`);
+      
+      // Handle activation/deactivation
+      if (newData.is_active === true) {
         if (mainWindow) {
-          mainWindow.webContents.send("onAppUnlock");
-          // Update local info
-          updateSettingsFromCloud(shopId);
+          mainWindow.webContents.send('app-unlock');
         }
-      } else {
+      } else if (newData.is_active === false) {
         if (mainWindow) {
-          mainWindow.webContents.send("onAppLock", {
-            reason: software_status === 'deactivated' ? 'Account Deactivated' : 'Subscription Expired',
-            expiry: validity_end
+          mainWindow.webContents.send('app-lock', {
+            reason: 'Account Deactivated',
+            expiry: newData.validity_end
           });
         }
       }
+      
+      // Always sync latest shop data (name, validity, etc.) to local settings
+      updateSettingsFromCloud(shopId);
     })
-    .subscribe();
+    .on('postgres_changes', {
+      event: 'DELETE',
+      schema: 'public',
+      table: 'shops',
+      filter: `id=eq.${shopId}`
+    }, () => {
+      console.log(`[Realtime] \ud83d\uddd1\ufe0f Shop ${shopId} was DELETED by admin!`);
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      if (fs.existsSync(configPath)) {
+        try {
+          let settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          delete settings.shopId;
+          fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+          process.env.SHOP_ID = '';
+        } catch (e) {}
+      }
+      if (mainWindow) {
+        mainWindow.webContents.send('app-lock', { reason: 'Shop Deleted', expiry: '', deleted: true });
+      }
+    })
+    .subscribe((status) => {
+        console.log(`[Control] \ud83d\udd0c Realtime Subscription Status: ${status}`);
+    });
 }
 
 async function updateSettingsFromCloud(shopId) {
@@ -135,10 +160,32 @@ async function updateSettingsFromCloud(shopId) {
       if (fs.existsSync(configPath)) {
         try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
       }
-      settings.storeName = shop.store_name;
+      // Use correct field names (column is 'name', not 'store_name')
+      if (shop.name) settings.storeName = shop.name;
+      if (shop.owner_name) settings.ownerName = shop.owner_name;
+      if (shop.mobile_number) settings.ownerMobile = shop.mobile_number;
+      if (shop.owner_email) settings.ownerEmail = shop.owner_email;
       fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+      
+      // Update window title if name changed
+      if (shop.name && mainWindow) {
+        mainWindow.setTitle(`${shop.name} - Innoaivators`);
+      }
+      
+      // Push updated settings to renderer localStorage
+      if (mainWindow) {
+        mainWindow.webContents.executeJavaScript(`
+          try {
+            const raw = localStorage.getItem('smart_billing_settings');
+            const s = raw ? JSON.parse(raw) : {};
+            s.storeName = ${JSON.stringify(shop.name || '')};
+            localStorage.setItem('smart_billing_settings', JSON.stringify(s));
+            window.dispatchEvent(new Event('settings_updated'));
+          } catch(e) {}
+        `).catch(() => {});
+      }
     }
-  } catch (e) {}
+  } catch (e) { console.error('[UpdateSettings] Error:', e.message); }
 }
 
 // Shop-specific Supabase (separate DB per shop — for billing data)
@@ -146,23 +193,28 @@ let shopSupabase = null;
 let shopSupabaseUrl = '';
 let shopSupabaseKey = '';
 
+let dashboardServerRunning = false;
+
 function initShopSupabase(url, key) {
   if (url && key && url.startsWith('http')) {
     // ⚠️ SAFETY: Never use the global control-plane as the individual shop DB
-    // The global DB has no billing tables — syncing there mixes ALL shops' data
     const globalUrl = process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
     if (url === globalUrl || url.includes('baawqrqihlhsrghvjlpx')) {
       console.warn('[ShopDB] ⚠️ BLOCKED: Cannot use global control plane as individual shop DB!');
-      console.warn('[ShopDB] ⚠️ Create a SEPARATE Supabase project for this shop and enter its URL in Settings → Cloud Sync.');
       return false;
+    }
+    // Skip if already connected to this URL
+    if (shopSupabase && shopSupabaseUrl === url) {
+      return true;
     }
     try {
       shopSupabase = createClient(url, key);
       shopSupabaseUrl = url;
       shopSupabaseKey = key;
       console.log('[ShopDB] ✅ Connected to shop Supabase:', url);
-      // Restart the dashboard server to use the new connection
-      if (mainWindow) {
+      // Start dashboard server ONLY ONCE
+      if (mainWindow && !dashboardServerRunning) {
+        dashboardServerRunning = true;
         startDashboardServer(mainWindow); 
       }
       return true;
@@ -492,29 +544,57 @@ async function checkValidity(shopId) {
       .eq('id', shopId)
       .single();
 
+    console.log(`[Validity] 🔍 Shop ${shopId} query result:`, shop ? `is_active=${shop.is_active}, ever_activated=${shop.ever_activated}` : 'NOT FOUND', error ? `Error: ${error.message}` : '');
+
     if (error || !shop) {
-      console.error("[Validity] ❌ Shop Record Not Found or Error:", error);
-      return { valid: false, isActive: false, isPending: true, daysLeft: 0, note: "Shop record not found in cloud." };
+      // CRITICAL: Distinguish "not found" (PGRST116) from network errors
+      const isNotFound = error && (error.code === 'PGRST116' || error.message?.includes('not found') || error.details?.includes('0 rows'));
+      if (isNotFound) {
+        console.error("[Validity] \u274c Shop CONFIRMED DELETED:", error);
+        // Shop was deleted by admin — clear local settings so app shows registration
+        const cfgPath = path.join(app.getPath("userData"), "app_settings.json");
+        if (fs.existsSync(cfgPath)) {
+          try {
+            let s2 = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+            if (s2.shopId === shopId) {
+              delete s2.shopId;
+              fs.writeFileSync(cfgPath, JSON.stringify(s2, null, 2));
+              process.env.SHOP_ID = '';
+              console.log(`[Validity] \ud83e\uddf9 Cleared local shopId for deleted shop: ${shopId}`);
+            }
+          } catch (e) {}
+        }
+        return { valid: false, isActive: false, isPending: false, needsRegistration: true, daysLeft: 0, note: "Shop deleted by admin. Please register again." };
+      }
+      // Network error — do NOT wipe local data, use cached validity or assume pending
+      console.warn("[Validity] \u26a0\ufe0f Network error checking shop, preserving local state:", error?.message);
+      return { valid: true, isActive: false, daysLeft: 30, isOffline: true, isPending: true, note: "Could not reach cloud. Using cached state." };
     }
 
     const now = new Date();
     const end = new Date(shop.validity_end || (now.getTime() + 30 * 86400000));
-    const cutoff = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1, 0, 0, 0);
-    const isValid = now < cutoff && shop.is_active;
-    const daysLeft = Math.ceil((cutoff - now) / 86400000);
+    
+    // Use same calculation as admin panel: simple diff, ceil
+    const diffMs = end - now;
+    const daysLeft = Math.max(0, Math.ceil(diffMs / 86400000));
+    const isValid = daysLeft > 0 && shop.is_active;
 
     // Newly registered but never activated — show pending screen, not lockdown
     const isPending = !shop.is_active && !shop.ever_activated;
+    
+    // Warning phase: last 7 days AND not paid — show payment reminder
+    const warningPhase = daysLeft <= 7 && daysLeft > 0 && !shop.is_paid;
 
-    // Cache locally
+    // Cache locally for offline fallback
     db.prepare('DELETE FROM validity_cache').run();
     try {
-      db.prepare('INSERT INTO validity_cache (validity_end, is_paid, is_active) VALUES (?, ?, ?)').run(
+      db.prepare('INSERT INTO validity_cache (validity_end, is_paid, is_active, ever_activated) VALUES (?, ?, ?, ?)').run(
         end.toISOString(),
         shop.is_paid ? 1 : 0,
-        shop.is_active ? 1 : 0
+        shop.is_active ? 1 : 0,
+        shop.ever_activated ? 1 : 0
       );
-    } catch(e) {}
+    } catch(e) { console.warn('[Validity] Cache write error:', e.message); }
 
     // Initialise Shop-Specific Supabase if provided
     if (shop.shop_supabase_url && shop.shop_supabase_key) {
@@ -523,14 +603,33 @@ async function checkValidity(shopId) {
 
     return {
       valid: isValid,
-      daysLeft: Math.floor(daysLeft),
+      daysLeft,
       validityEnd: end.toISOString(),
       isActive: !!shop.is_active,
       isPaid: !!shop.is_paid,
       isPending,
+      warningPhase,
       isOffline: false
     };
   } catch (e) {
+    console.error('[Validity] Query error:', e.message);
+    // Fallback to cache on error
+    try {
+      const cached = db.prepare('SELECT * FROM validity_cache ORDER BY id DESC LIMIT 1').get();
+      if (cached) {
+        const now2 = new Date();
+        const end2 = new Date(cached.validity_end);
+        const cutoff2 = new Date(end2.getFullYear(), end2.getMonth(), end2.getDate() + 1, 0, 0, 0);
+        return {
+          valid: now2 < cutoff2 && !!cached.is_active,
+          daysLeft: Math.max(0, Math.ceil((cutoff2 - now2) / 86400000)),
+          validityEnd: cached.validity_end,
+          isPaid: !!cached.is_paid,
+          isActive: !!cached.is_active,
+          isOffline: true
+        };
+      }
+    } catch(e2) {}
     return { valid: true, daysLeft: 30, isOffline: true };
   }
 }
@@ -553,11 +652,37 @@ function startControlListener(shopId) {
   controlSubscription = supabase
     .channel(`lockdown_${shopId}`)
     .on('postgres_changes', { 
-      event: 'UPDATE', 
+      event: '*', 
       schema: 'public', 
       table: 'shops', 
       filter: `id=eq.${shopId}` 
     }, (payload) => {
+
+      if (payload.eventType === 'DELETE') {
+        console.log(`[Control] 🗑️ REMOTE DELETE DETECTED. Wiping local data.`);
+        const configPath = path.join(app.getPath("userData"), "app_settings.json");
+        if (fs.existsSync(configPath)) {
+          try {
+            let settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            if (settings.shopId === shopId) {
+              delete settings.shopId;
+              fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+              process.env.SHOP_ID = '';
+            }
+          } catch(e) {}
+        }
+        if (mainWindow) {
+           mainWindow.webContents.send('app-lock', { 
+             reason: 'Shop Deleted', 
+             expiry: '',
+             deleted: true
+           });
+        }
+        return;
+      }
+
+      if (payload.eventType !== 'UPDATE') return;
+
       const updated = payload.new;
       console.log('[Control] 🚨 REMOTE UPDATE DETECTED:', updated.is_active ? 'ACTIVE' : 'DEACTIVATED');
       
@@ -582,6 +707,31 @@ function startControlListener(shopId) {
         }
       }
     })
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'pairing_codes',
+      filter: `shop_id=eq.${shopId}`
+    }, async (payload) => {
+      const inserted = payload.new;
+      if (inserted.status === 'reset') {
+         console.log('[Control] 📧 Password reset requested, sending email...');
+         const configPath = path.join(app.getPath("userData"), "app_settings.json");
+         let settings = {};
+         try { settings = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+         const targetEmail = settings.shopEmail || settings.ownerEmail;
+         if (targetEmail) {
+            try {
+              await sendOtpEmail(targetEmail, inserted.code);
+              console.log(`[Control] ✅ Reset OTP sent to ${targetEmail}`);
+            } catch (err) {
+              console.error(`[Control] ❌ Failed to send OTP email: ${err.message}`);
+            }
+         } else {
+            console.error('[Control] ❌ No owner email found in settings to send reset code.');
+         }
+      }
+    })
     .subscribe((status) => {
         console.log(`[Control] 🔌 Realtime Subscription Status: ${status}`);
     });
@@ -591,7 +741,7 @@ function startControlListener(shopId) {
 async function pushStatsSnapshot(shopId) {
   if (!supabase || !shopId) return;
   try {
-    const stats = generateStatsJSON(); // Extracted logic
+    const stats = await generateStatsJSON(); // Extracted logic
     await supabase.from('shop_stats').upsert({
       shop_id: shopId,
       stats_json: stats,
@@ -633,31 +783,69 @@ async function syncToShopCloud() {
 async function registerShop(shopId) {
   if (!supabase) return;
   try {
+    // 🔒 SAFETY: Check if shop still exists before updating
+    // If admin deleted it, do NOT re-create via upsert
+    const { data: existing, error: checkErr } = await supabase
+      .from('shops').select('id').eq('id', shopId).single();
+    
+    // CRITICAL: Only treat PGRST116 (not found) as deletion, NOT network errors
+    const isNotFound = checkErr && (checkErr.code === 'PGRST116' || checkErr.message?.includes('not found') || checkErr.details?.includes('0 rows'));
+    if (isNotFound) {
+      console.log(`[Register] 🗑️ Shop ${shopId} CONFIRMED deleted by admin. Clearing local data.`);
+      const configPath = path.join(app.getPath("userData"), "app_settings.json");
+      if (fs.existsSync(configPath)) {
+        try {
+          let settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          if (settings.shopId === shopId) {
+            delete settings.shopId;
+            fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+            process.env.SHOP_ID = '';
+            console.log(`[Register] 🧹 Local shopId cleared for deleted shop.`);
+          }
+        } catch (e) {}
+      }
+      return;
+    }
+    if (checkErr) {
+      console.warn(`[Register] ⚠️ Network error checking shop. Skipping sync.`);
+      return;
+    }
+
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     let s = {};
     if (fs.existsSync(configPath)) {
       try { s = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (e) { }
     }
     
-    await supabase.from("shops").upsert({
-      id: shopId,
+    // Use UPDATE instead of UPSERT to never recreate a deleted shop
+    // IMPORTANT: Do NOT sync master_key here — it should only be set during
+    // registration or password reset to avoid overwriting the owner's password
+    const updateData = {
       name: s.storeName || "My Venture",
       owner_name: s.ownerName || "Owner",
-      owner_phone: s.ownerPhone || s.ownerMobile || "",
+      mobile_number: s.ownerMobile || s.storePhone || s.ownerPhone || "",
+      shop_email: s.shopEmail || s.ownerEmail || "",
+      gst_number: s.gstNumber || "",
       owner_email: s.ownerEmail || "",
-      master_key: s.masterKey || "owner123",
-      shop_supabase_url: shopSupabaseUrl,
-      shop_supabase_key: shopSupabaseKey,
-      activation_requested: true
-    });
+      shop_supabase_url: shopSupabaseUrl || undefined,
+      shop_supabase_key: shopSupabaseKey || undefined
+    };
+    
+    await supabase.from("shops").update(updateData).eq('id', shopId);
   } catch (e) {
     console.error("[Register] Internal Sync Error:", e.message);
   }
 }
 
 // ── GENERATE STATS JSON ──
-function generateStatsJSON() {
-  const s = settings || {};
+async function generateStatsJSON() {
+  let s = {};
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      s = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+  } catch(e) {}
   const lowThreshold = s.lowStockThreshold || 10;
   const expiryDays = s.expiryAlertDays || 3;
   const deadThresholdDays = s.deadStockThresholdDays || 30;
@@ -694,6 +882,32 @@ function generateStatsJSON() {
   
   const recentInvoices = db.prepare("SELECT bill_no, bill_date, customer_name, total_amount FROM invoices ORDER BY created_at DESC LIMIT 50").all();
 
+  // Get subscription info for mobile app
+  let subscriptionInfo = {};
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let settings2 = {};
+    if (fs.existsSync(configPath)) {
+      try { settings2 = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+    }
+    const sid = settings2.shopId || process.env.SHOP_ID;
+    if (supabase && sid) {
+      const { data: shopData } = await supabase.from('shops').select('is_paid, validity_end, is_active').eq('id', sid).single();
+      if (shopData) {
+        const now2 = new Date();
+        const end2 = new Date(shopData.validity_end);
+        const dl = Math.max(0, Math.ceil((end2 - now2) / 86400000));
+        subscriptionInfo = {
+          isPaid: !!shopData.is_paid,
+          daysLeft: dl,
+          validityEnd: shopData.validity_end,
+          warningPhase: dl <= 7 && dl > 0 && !shopData.is_paid,
+          isActive: !!shopData.is_active
+        };
+      }
+    }
+  } catch (e) {}
+
   return {
     totalProducts, totalCategories,
     todaySales, todayBills, weeklySales, monthlySales, overallSales,
@@ -704,6 +918,7 @@ function generateStatsJSON() {
     dailySales, monthlySalesBreakdown: monthlyBreakdown,
     peakHours, paymentBreakdown, deadStock,
     recentInvoices,
+    subscription: subscriptionInfo,
     settingsSnapshot: {
       storeName: s.storeName,
       storeAddress: s.storeAddress,
@@ -720,7 +935,7 @@ async function syncToControlPlane(shopId) {
     await registerShop(shopId);
     
     // Generate full stats JSON for mobile dashboard snapshot
-    const stats = generateStatsJSON();
+    const stats = await generateStatsJSON();
     
     await supabase.from('shop_stats').upsert({
       shop_id: shopId,
@@ -806,6 +1021,7 @@ function createWindow() {
   });
 
   // Start the background API & Mobile Dashboard server
+  dashboardServerRunning = true;
   startDashboardServer(mainWindow);
 
 
@@ -816,7 +1032,42 @@ function createWindow() {
     try { currentSettings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) { }
   }
   const currentShopId = currentSettings.shopId || process.env.SHOP_ID;
-  if (currentShopId) startControlListener(currentShopId);
+  
+  // 🔒 IMMEDIATE STARTUP CHECK: Verify shop still exists BEFORE any sync
+  if (currentShopId) {
+    const url = currentSettings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
+    const key = currentSettings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
+    initSupabase(url, key);
+    
+    if (supabase) {
+      // Check immediately if shop was deleted while we were offline
+      supabase.from('shops').select('id').eq('id', currentShopId).single()
+        .then(({ data, error }) => {
+          // CRITICAL: Only treat PGRST116 (row not found) as deletion, NOT network errors
+          const isNotFound = error && (error.code === 'PGRST116' || error.message?.includes('not found') || error.details?.includes('0 rows'));
+          if (isNotFound) {
+            console.log(`[Startup] 🗑️ Shop ${currentShopId} was CONFIRMED deleted by admin. Clearing local data.`);
+            try {
+              let s = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+              delete s.shopId;
+              fs.writeFileSync(configPath, JSON.stringify(s, null, 2));
+              process.env.SHOP_ID = '';
+            } catch (e) {}
+            // Force renderer to reload and show registration
+            if (mainWindow) {
+              mainWindow.webContents.send('app-lock', { reason: 'Shop Deleted', expiry: '', deleted: true });
+            }
+          } else if (error) {
+            console.warn(`[Startup] ⚠️ Network error checking shop ${currentShopId}. Preserving local data.`);
+          } else {
+            console.log(`[Startup] ✅ Shop ${currentShopId} verified in cloud.`);
+          }
+        })
+        .catch(() => { console.warn('[Startup] ⚠️ Cloud check failed (offline?). Preserving local data.'); });
+    }
+    
+    startControlListener(currentShopId);
+  }
 
   // 🟢 Background Sync & SaaS Worker (Runs every 10 minutes)
   setInterval(async () => {
@@ -827,6 +1078,35 @@ function createWindow() {
       }
       const shopId = intervalSettings.shopId || process.env.SHOP_ID;
       if (!shopId) return;
+
+      // 🔒 PRE-CHECK: Verify shop still exists before syncing
+      // This prevents re-creating a shop that was deleted by admin
+      if (supabase) {
+        const { data: shopExists, error: existErr } = await supabase
+          .from('shops').select('id').eq('id', shopId).single();
+        // CRITICAL: Only treat PGRST116 (row not found) as deletion, NOT network errors
+        const isNotFound = existErr && (existErr.code === 'PGRST116' || existErr.message?.includes('not found') || existErr.details?.includes('0 rows'));
+        if (isNotFound) {
+          console.log(`[SaaS Worker] 🗑️ Shop ${shopId} CONFIRMED deleted. Clearing local data.`);
+          if (intervalSettings.shopId === shopId) {
+            delete intervalSettings.shopId;
+            fs.writeFileSync(configPath, JSON.stringify(intervalSettings, null, 2));
+            process.env.SHOP_ID = '';
+          }
+          // Notify renderer to show registration screen
+          if (mainWindow) {
+            mainWindow.webContents.send('app-lock', { 
+              reason: 'Shop Deleted', 
+              expiry: '',
+              deleted: true
+            });
+          }
+          return;
+        } else if (existErr) {
+          console.warn(`[SaaS Worker] ⚠️ Network error checking shop. Skipping this sync cycle.`);
+          return;
+        }
+      }
 
       // 1. Sync High-Level Stats to Control Plane (Main Supabase)
       await syncToControlPlane(shopId);
@@ -848,10 +1128,90 @@ function createWindow() {
         });
       }
 
-      // WhatsApp reminders for last 4 days
-      if (validity.valid && validity.daysLeft <= 4 && settings.ownerPhone) {
+      // WhatsApp reminders for last 4 days of subscription
+      if (validity.valid && validity.daysLeft <= 4 && intervalSettings.ownerPhone) {
         const message = `⚠️ *iVA Smart Billing Reminder*\n\nYour shop subscription expires in *${validity.daysLeft} days* (${new Date(validity.validityEnd).toLocaleDateString()}). Please renew today to avoid service interruption.`;
-        await sendMessage(settings.ownerPhone, message);
+        await sendMessage(intervalSettings.ownerPhone, message);
+      }
+
+      // 📦 DAILY INVENTORY ALERTS via WhatsApp
+      // Sends once per day. Stops automatically when owner fixes the issues.
+      const ownerPhone = intervalSettings.ownerPhone || intervalSettings.ownerMobile;
+      if (ownerPhone && validity.valid) {
+        const todayDate = new Date().toISOString().split('T')[0];
+        const lastAlertDate = intervalSettings._lastInventoryAlertDate || '';
+        
+        if (lastAlertDate !== todayDate) {
+          try {
+            const lowThreshold = intervalSettings.lowStockThreshold || 10;
+            const expiryDays = intervalSettings.expiryAlertDays || 3;
+            const deadDays = intervalSettings.deadStockThresholdDays || 30;
+            const todayStr = new Date().toISOString().split('T')[0];
+            const nearExpiryDate = new Date(Date.now() + expiryDays * 86400000).toISOString().split('T')[0];
+
+            // 1. Low Stock items (quantity > 0 but below threshold)
+            const lowStock = db.prepare(
+              "SELECT name, quantity FROM products WHERE quantity > 0 AND quantity <= ? ORDER BY quantity ASC LIMIT 15"
+            ).all(lowThreshold);
+
+            // 2. Expired items
+            const expired = db.prepare(
+              "SELECT name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date < ? ORDER BY expiry_date ASC LIMIT 10"
+            ).all(todayStr);
+
+            // 3. Near Expiry items (expiring within N days)
+            const nearExpiry = db.prepare(
+              "SELECT name, expiry_date FROM products WHERE expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ? ORDER BY expiry_date ASC LIMIT 10"
+            ).all(todayStr, nearExpiryDate);
+
+            // 4. Dead Stock (in inventory but not sold in last N days)
+            const deadStock = db.prepare(
+              `SELECT name, quantity FROM products WHERE quantity > 0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadDays} days')) LIMIT 10`
+            ).all();
+
+            // Build message only if there are issues
+            let alertParts = [];
+
+            if (expired.length > 0) {
+              alertParts.push(`🔴 *EXPIRED PRODUCTS (${expired.length}):*\n` + 
+                expired.map(p => `  ❌ ${p.name} (${p.expiry_date})`).join('\n'));
+            }
+
+            if (nearExpiry.length > 0) {
+              alertParts.push(`🟡 *EXPIRING SOON (${nearExpiry.length}):*\n` + 
+                nearExpiry.map(p => `  ⚠️ ${p.name} (${p.expiry_date})`).join('\n'));
+            }
+
+            if (lowStock.length > 0) {
+              alertParts.push(`🟠 *LOW STOCK (${lowStock.length}):*\n` + 
+                lowStock.map(p => `  📦 ${p.name} — ${p.quantity} left`).join('\n'));
+            }
+
+            if (deadStock.length > 0) {
+              alertParts.push(`⚫ *DEAD STOCK (${deadStock.length}):*\n` + 
+                deadStock.map(p => `  🚫 ${p.name} (${p.quantity} units, no sales in ${deadDays}d)`).join('\n'));
+            }
+
+            if (alertParts.length > 0) {
+              const storeName = intervalSettings.storeName || 'Your Shop';
+              const fullMessage = `📊 *${storeName} — Daily Inventory Alert*\n` +
+                `📅 ${new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}\n\n` +
+                alertParts.join('\n\n') +
+                `\n\n_💡 This alert will stop once you update your inventory._\n_Powered by iVA Smart Billing_`;
+
+              await sendMessage(ownerPhone, fullMessage);
+              console.log(`[Alerts] 📲 Daily inventory alert sent to ${ownerPhone}`);
+            } else {
+              console.log('[Alerts] ✅ No inventory issues found. No alert needed.');
+            }
+
+            // Mark today as alerted (whether sent or not — no issues = no repeat check)
+            intervalSettings._lastInventoryAlertDate = todayDate;
+            fs.writeFileSync(configPath, JSON.stringify(intervalSettings, null, 2));
+          } catch (alertErr) {
+            console.error('[Alerts] ❌ Failed to send inventory alert:', alertErr.message);
+          }
+        }
       }
 
     } catch (e) { console.error("[SaaS Worker Error]", e.message); }
@@ -1601,11 +1961,34 @@ ipcMain.handle("get-registration-status", async () => {
       try { settings = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { }
     }
 
-    // Direct check in app_settings.json for persistence in production
     const shopIdValue = settings.shopId || process.env.SHOP_ID;
 
     if (!shopIdValue) {
       return { isRegistered: false, shopId: "" };
+    }
+
+    // CRITICAL: Verify shop still exists in Supabase (may have been deleted by admin)
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('shops').select('id').eq('id', shopIdValue).single();
+        // CRITICAL: Only treat confirmed "not found" as deletion, NOT network errors
+        const isNotFound = error && (error.code === 'PGRST116' || error.message?.includes('not found') || error.details?.includes('0 rows'));
+        if (isNotFound) {
+          console.log(`[Registration] Shop ${shopIdValue} CONFIRMED deleted by admin. Clearing local data.`);
+          delete settings.shopId;
+          fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+          process.env.SHOP_ID = '';
+          return { isRegistered: false, shopId: "" };
+        }
+        if (error) {
+          // Network issue — preserve local state, don't wipe
+          console.warn(`[Registration] Network error checking shop. Preserving local state.`);
+        }
+      } catch (e) {
+        // Network error - fall through to local check
+        console.warn('[Registration] Could not verify shop online:', e.message);
+      }
     }
 
     return { isRegistered: true, shopId: shopIdValue };
@@ -1728,7 +2111,7 @@ ipcMain.handle("register-shop", async (event, data) => {
         shop_email: shopEmail || email,
         master_key: settings.masterKey || "owner123",
         is_active: false,
-        is_paid: false, // Default to Free/Unpaid for admin review
+        is_paid: true, // Initial 30-day subscription is pre-paid
         ever_activated: false,
         activation_requested: true,
         hardware_id: systemHwid,
@@ -1745,15 +2128,33 @@ ipcMain.handle("register-shop", async (event, data) => {
     // Save carefully to local process
     process.env.SHOP_ID = newShopId;
 
-    // Save to app_settings.json (Source of Truth)
-    settings.shopId = newShopId;
-    settings.storeName = shopName;
-    settings.ownerName = ownerName;
-    settings.ownerEmail = email; 
-    settings.shopEmail = shopEmail || email;
-    settings.ownerMobile = mobileNumber;
-    settings.hardwareId = systemHwid;
-    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+    // \ud83e\uddf9 CLEAN SLATE: Wipe all local data for a fresh start
+    try {
+      db.prepare('DELETE FROM products').run();
+      db.prepare('DELETE FROM invoices').run();
+      db.prepare('DELETE FROM invoice_items').run();
+      db.prepare('DELETE FROM categories').run();
+      db.prepare('DELETE FROM customers').run();
+      db.prepare('DELETE FROM held_bills').run();
+      db.prepare('DELETE FROM validity_cache').run();
+      try { db.prepare('DELETE FROM offers').run(); } catch(e) {}
+      try { db.prepare('DELETE FROM shop_supabase_config').run(); } catch(e) {}
+      console.log('[Register] \ud83e\uddf9 Local database wiped for clean start.');
+    } catch (e) { console.warn('[Register] DB wipe partial:', e.message); }
+
+    // Save FRESH settings (completely replace old ones)
+    const freshSettings = {
+      shopId: newShopId,
+      storeName: shopName,
+      ownerName: ownerName,
+      ownerEmail: email,
+      shopEmail: shopEmail || email,
+      ownerMobile: mobileNumber,
+      hardwareId: systemHwid,
+      supabaseUrl: settings.supabaseUrl,
+      supabaseKey: settings.supabaseKey
+    };
+    fs.writeFileSync(configPath, JSON.stringify(freshSettings, null, 2));
 
     // Start realtime listener immediately for this new shop
     setupLicenseRealtime(newShopId);
@@ -1925,42 +2326,54 @@ ipcMain.handle("get-license-status", async () => {
   if (!supabase) return { is_active: true, hwid: machineId, note: "Offline mode or Supabase not connected" };
 
   try {
-    let shopId = process.env.SHOP_ID || "";
-    if (!shopId) {
-      const configPath = path.join(app.getPath("userData"), "app_settings.json");
-      if (fs.existsSync(configPath)) {
-        try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); shopId = s.shopId || ""; } catch {}
-      }
+    // Priority: settings file (latest) > env var (may be stale from .env)
+    let shopId = "";
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      try { const s = JSON.parse(fs.readFileSync(configPath, 'utf-8')); shopId = s.shopId || ""; } catch {}
     }
+    if (!shopId) shopId = process.env.SHOP_ID || "";
+    
+    console.log(`[License] \ud83d\udd0d Checking license for shopId: ${shopId || 'NONE'}`);
     if (!shopId) return { is_active: false, hwid: machineId, note: "Waiting for registration..." };
 
     const { data: shopRecord, error } = await supabase
       .from("shops")
-      .select("is_active")
+      .select("is_active, ever_activated")
       .eq("id", shopId)
       .single();
 
     if (error || !shopRecord) {
-      // Shop DELETED by admin — wipe local registration so owner must re-register
-      console.log(`[License] \ud83d\uddd1\ufe0f Shop ${shopId} deleted from cloud by admin. Clearing local data.`);
-
-      const configPath2 = path.join(app.getPath("userData"), "app_settings.json");
-      let settings2 = {};
-      if (fs.existsSync(configPath2)) {
-        try { settings2 = JSON.parse(fs.readFileSync(configPath2, 'utf-8')); } catch {}
+      // CRITICAL: Distinguish "not found" (PGRST116) from network errors
+      const isNotFound = error && (error.code === 'PGRST116' || error.message?.includes('not found') || error.details?.includes('0 rows'));
+      if (isNotFound) {
+        console.log(`[License] \ud83d\uddd1\ufe0f Shop ${shopId} CONFIRMED deleted by admin.`);
+        const configPath2 = path.join(app.getPath("userData"), "app_settings.json");
+        let settings2 = {};
+        if (fs.existsSync(configPath2)) {
+          try { settings2 = JSON.parse(fs.readFileSync(configPath2, 'utf-8')); } catch {}
+        }
+        if (settings2.shopId && settings2.shopId === shopId) {
+          console.log(`[License] \ud83d\uddd1\ufe0f Clearing local data for deleted shop: ${shopId}`);
+          delete settings2.shopId;
+          fs.writeFileSync(configPath2, JSON.stringify(settings2, null, 2));
+          process.env.SHOP_ID = "";
+        }
+        return { is_active: false, needsRegistration: true, hwid: machineId, note: "Shop was deleted by admin. Please register again." };
       }
-      if (settings2.shopId) {
-        delete settings2.shopId;
-        fs.writeFileSync(configPath2, JSON.stringify(settings2, null, 2));
-      }
-      process.env.SHOP_ID = "";
-
-      return { is_active: false, needsRegistration: true, hwid: machineId, note: "Shop was deleted by admin. Please register again." };
+      // Network error — don't wipe, assume last known state
+      console.warn(`[License] \u26a0\ufe0f Network error checking shop ${shopId}. Preserving local state.`);
+      return { is_active: true, hwid: machineId, note: "Offline mode — could not verify with cloud." };
     }
 
     if (!shopRecord.is_active) {
-      return { is_active: false, hwid: machineId, note: "Pending activation. Admin has not yet activated this shop." };
+      // Distinguish pending (never activated) vs deactivated (was active before)
+      const isPending = !shopRecord.ever_activated;
+      return { is_active: false, isPending, hwid: machineId, note: isPending ? "Pending activation. Admin has not yet activated this shop." : "Account deactivated by admin." };
     }
+
+    // Shop is active — DO NOT auto-set ever_activated here.
+    // ever_activated should ONLY be set by the Admin Panel when they click Activate.
 
     console.log(`[License] ✅ Shop ${shopId} is active!`);
     return { is_active: true, hwid: machineId };
@@ -2168,16 +2581,123 @@ ipcMain.handle("get-validity", async () => {
     const url = settings.supabaseUrl || process.env.SUPABASE_URL || 'https://baawqrqihlhsrghvjlpx.supabase.co';
     const key = settings.supabaseKey || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhYXdxcnFpaGxoc3JnaHZqbHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3Nzk2NzgsImV4cCI6MjA5MTM1NTY3OH0.h1mfhgS8G3IYcZ96L8T3YXkmxtbYJv95rJM39z1Clw0';
     
-    // Force re-init if not matching or missing
-    if (url && key) {
-       supabase = createClient(url, key);
+    // Use initSupabase to avoid recreating client and breaking realtime subscriptions
+    if (!supabase && url && key) {
+      initSupabase(url, key);
     }
+    // If still no client, force create one for this query only
+    if (!supabase && url && key) {
+      supabase = createClient(url, key);
+    }
+
+    console.log(`[Validity] 📋 Checking shopId: ${shopId || 'NONE'}, supabase: ${!!supabase}`);
 
     if (!shopId) return { valid: false, isActive: false, isPending: false, daysLeft: 0 };
 
     return await checkValidity(shopId);
   } catch (e) {
+    console.error('[Validity] ❌ Handler error:', e.message);
     return { valid: true, daysLeft: 0, isActive: false, note: 'Error: ' + e.message };
   }
 });
 
+// ── MONTHLY TAX REPORT ──
+ipcMain.handle("get-tax-report", async (event, { year, month }) => {
+  try {
+    // month is 1-indexed (1=Jan, 12=Dec)
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    // Total invoices for the month
+    const invoices = db.prepare(`
+      SELECT id, bill_no, bill_date, customer_name, total_amount, payment_mode, created_at
+      FROM invoices 
+      WHERE date(created_at, 'localtime') >= ? AND date(created_at, 'localtime') < ?
+      ORDER BY created_at ASC
+    `).all(startDate, endDate);
+
+    // Tax breakdown by GST rate
+    const taxBreakdown = db.prepare(`
+      SELECT 
+        ii.gst_rate,
+        COUNT(*) as item_count,
+        COUNT(DISTINCT ii.invoice_id) as invoice_count,
+        COALESCE(SUM(ii.price * ii.quantity), 0) as taxable_amount,
+        COALESCE(SUM(ii.gst_amount), 0) as total_tax,
+        COALESCE(SUM(ii.price * ii.quantity + ii.gst_amount), 0) as total_with_tax
+      FROM invoice_items ii
+      JOIN invoices inv ON ii.invoice_id = inv.id
+      WHERE date(inv.created_at, 'localtime') >= ? AND date(inv.created_at, 'localtime') < ?
+      GROUP BY ii.gst_rate
+      ORDER BY ii.gst_rate ASC
+    `).all(startDate, endDate);
+
+    // Totals
+    const totals = db.prepare(`
+      SELECT 
+        COUNT(*) as total_invoices,
+        COALESCE(SUM(total_amount), 0) as total_sales,
+        COALESCE(SUM(ii_tax), 0) as total_tax
+      FROM invoices inv
+      LEFT JOIN (
+        SELECT invoice_id, SUM(gst_amount) as ii_tax 
+        FROM invoice_items GROUP BY invoice_id
+      ) tax ON tax.invoice_id = inv.id
+      WHERE date(inv.created_at, 'localtime') >= ? AND date(inv.created_at, 'localtime') < ?
+    `).get(startDate, endDate);
+
+    // Payment mode breakdown
+    const paymentModes = db.prepare(`
+      SELECT payment_mode, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
+      FROM invoices
+      WHERE date(created_at, 'localtime') >= ? AND date(created_at, 'localtime') < ?
+      GROUP BY payment_mode
+    `).all(startDate, endDate);
+
+    // Daily summary
+    const dailySummary = db.prepare(`
+      SELECT 
+        date(created_at, 'localtime') as day,
+        COUNT(*) as bills,
+        COALESCE(SUM(total_amount), 0) as sales
+      FROM invoices
+      WHERE date(created_at, 'localtime') >= ? AND date(created_at, 'localtime') < ?
+      GROUP BY day ORDER BY day ASC
+    `).all(startDate, endDate);
+
+    // Shop details from settings
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    let shopDetails = {};
+    if (fs.existsSync(configPath)) {
+      try { shopDetails = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+    }
+
+    return {
+      success: true,
+      year, month,
+      shop: {
+        name: shopDetails.storeName || '',
+        address: shopDetails.storeAddress || '',
+        phone: shopDetails.storePhone || shopDetails.ownerMobile || '',
+        gstNumber: shopDetails.gstNumber || '',
+        ownerName: shopDetails.ownerName || '',
+        email: shopDetails.ownerEmail || ''
+      },
+      totals: {
+        totalInvoices: totals.total_invoices,
+        totalSales: totals.total_sales,
+        totalTax: totals.total_tax,
+        netSales: totals.total_sales - totals.total_tax
+      },
+      taxBreakdown,
+      paymentModes,
+      dailySummary,
+      invoices: invoices.slice(0, 500) // Limit for performance
+    };
+  } catch (e) {
+    console.error('[TaxReport] Error:', e.message);
+    return { success: false, error: e.message };
+  }
+});

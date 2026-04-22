@@ -69,8 +69,8 @@ export default function LockScreen({ reason, expiry }) {
         fontWeight: 500
       }}>
         {reason === 'Account Deactivated' 
-          ? "This terminal has been remotely deactivated by Innoaivators Admin. Please contact our support team to reactivate your software services."
-          : `Your subscription license expired on ${new Date(expiry).toLocaleDateString()}. To continue using the billing system, please complete your renewal payment.`
+          ? "This terminal has been temporarily restricted by the Administrator. You can only access the software if you complete your pending payments or contact support."
+          : `Your subscription validity has expired. You can only access the billing software if you complete your renewal payment.`
         }
       </p>
 

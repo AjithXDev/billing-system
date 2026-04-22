@@ -72,7 +72,9 @@ function App() {
   const [showPairing, setShowPairing]   = useState(false);
   const [validityWarning, setValidityWarning] = useState(null); // { daysLeft, validityEnd }
   const [warningDismissed, setWarningDismissed] = useState(false);
+  const [showStartupPrompt, setShowStartupPrompt] = useState(false);
   const [lockData, setLockData] = useState(null); // { reason, expiry }
+  const [isPendingActivation, setIsPendingActivation] = useState(false); // newly registered, waiting for admin
 
   const navItems = [
     { id: 'pos',          label: 'Billing Terminal',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg> },
@@ -143,13 +145,35 @@ function App() {
         setShopId('');
       }
 
+      // Detect pending activation (registered but admin hasn't activated yet)
+      if (res.isPending) {
+        setIsPendingActivation(true);
+      }
+
       const validity = await window.api.getValidity?.();
       if (validity) {
+        // Shop deleted by admin — force re-registration
+        if (validity.needsRegistration) {
+          setIsRegistered(false);
+          setShopId('');
+          setIsPendingActivation(false);
+          setLockData(null);
+          return;
+        }
         if (validity.warningPhase && !warningDismissed) {
-          setValidityWarning({ daysLeft: validity.daysLeft, validityEnd: validity.validityEnd });
+          setValidityWarning({ daysLeft: validity.daysLeft, validityEnd: validity.validityEnd, isPaid: validity.isPaid });
+        }
+        
+        // Front startup prompt ONLY when unpaid AND ≤ 7 days left
+        if (!validity.isPaid && validity.daysLeft <= 7 && validity.valid && !validity.isPending && !validity.needsRegistration) {
+          setShowStartupPrompt(true);
+        }
+        // Also check validity-level pending flag
+        if (validity.isPending) {
+          setIsPendingActivation(true);
         }
         // Only lock if NOT pending (pending = newly registered, awaiting admin activation)
-        if (!validity.valid && !validity.isPending) {
+        if (!validity.valid && !validity.isPending && !validity.needsRegistration) {
           setLockData({ 
             reason: !validity.isActive ? 'Account Deactivated' : 'Subscription Expired', 
             expiry: validity.validityEnd,
@@ -174,11 +198,17 @@ function App() {
 
     // ⚡ Realtime Remote Lock/Unlock Listener
     window.api.onAppLock?.((data) => {
+      // If shop was deleted by admin, force reload to show registration
+      if (data.deleted) {
+        window.location.reload();
+        return;
+      }
       setLockData(data);
     });
 
     window.api.onAppUnlock?.(() => {
       setLockData(null);
+      setIsPendingActivation(false); // Admin activated — clear pending state
     });
 
     window.api.onWhatsappQR(qr => {
@@ -235,8 +265,20 @@ function App() {
     );
   }
 
-  // 🔒 GATE 2: Lock Screen (Deactivation or Expiry - ONLY for registered, previously-active shops)
-  // isPending means newly registered but never activated — do NOT lock them, they wait via ShopRegistration pending screen
+  // ⏳ GATE 1.5: Pending Activation (registered but admin hasn't activated yet)
+  // This applies on app restart too — if shop exists but is_active=false and ever_activated=false
+  if (isPendingActivation && isRegistered) {
+    return (
+      <ShopRegistration 
+        onRegistered={(id) => { 
+          window.location.reload();
+        }} 
+        forcePending={true}
+        savedShopId={shopId}
+      />
+    );
+  }
+
   const isDeactivatedLock = lockData && !lockData.isPending;
   const isLicenseLock = license && license.is_active === false && !license.needsRegistration && !license.isPending;
   if (isDeactivatedLock || isLicenseLock) {
@@ -245,9 +287,50 @@ function App() {
     return <LockScreen reason={reason} expiry={expiry} />;
   }
 
+  // 📝 NEW: Startup Payment Request Modal (Blocks UI until dismissed)
+  const renderStartupPrompt = () => {
+    if (!showStartupPrompt) return null;
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(2, 6, 23, 0.95)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(10px)'
+      }}>
+        <div style={{
+          background: 'linear-gradient(180deg, #1e293b, #0f172a)',
+          border: '1px solid #334155', borderRadius: 24, padding: 40,
+          maxWidth: 480, textAlign: 'center', color: 'white',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+        }}>
+          <div style={{ fontSize: 64, marginBottom: 16 }}>💳</div>
+          <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 16, color: '#f59e0b' }}>
+            Payment Required
+          </h2>
+          <p style={{ fontSize: 16, color: '#cbd5e1', lineHeight: 1.6, marginBottom: 24 }}>
+            Your subscription payment is currently pending. Please complete the payment to continue enjoying uninterrupted access.
+            <br/><br/>
+            <span style={{ color: '#ef4444', fontWeight: 700 }}>
+              Once your trial or validity ends, you can only access the software if you pay.
+            </span>
+          </p>
+          <button 
+            onClick={() => setShowStartupPrompt(false)}
+            style={{
+              background: '#3b82f6', color: 'white', border: 'none',
+              padding: '14px 32px', borderRadius: 12, fontSize: 16, fontWeight: 700,
+              cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.5)'
+            }}
+          >
+            I Understand, Continue
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <ErrorBoundary>
       {lockData && <LockScreen reason={lockData.reason} expiry={lockData.expiry} />}
+      {renderStartupPrompt()}
       
       <div className="enterprise-container" style={{ visibility: lockData ? 'hidden' : 'visible' }}>
 
@@ -305,27 +388,37 @@ function App() {
         {/* ── Main Workspace ──────────────────────────────────── */}
         <main className="enterprise-main">
 
-          {/* ── Validity Warning Banner ── */}
+          {/* ── Payment Reminder Banner ── */}
           {validityWarning && (
             <div style={{
-              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-              padding: '10px 20px',
+              background: validityWarning.daysLeft <= 3 
+                ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+                : 'linear-gradient(135deg, #f59e0b, #d97706)',
+              padding: '12px 20px',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               color: 'white', fontSize: 13, fontWeight: 700,
-              animation: 'pulse 2s ease-in-out infinite',
-              borderBottom: '2px solid #b45309'
+              animation: validityWarning.daysLeft <= 3 ? 'pulse 1.5s ease-in-out infinite' : 'pulse 2s ease-in-out infinite',
+              borderBottom: validityWarning.daysLeft <= 3 ? '2px solid #991b1b' : '2px solid #b45309'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 18 }}>⚠️</span>
-                <span>
-                  Your subscription expires in <strong>{validityWarning.daysLeft} day{validityWarning.daysLeft !== 1 ? 's' : ''}</strong>.
-                  Please complete payment to continue using the application.
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                <span style={{ fontSize: 22 }}>{validityWarning.daysLeft <= 3 ? '🚨' : '⚠️'}</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>
+                    {validityWarning.daysLeft <= 1 
+                      ? '⚡ LAST DAY! Subscription expires TODAY'
+                      : `Subscription expires in ${validityWarning.daysLeft} day${validityWarning.daysLeft !== 1 ? 's' : ''}`
+                    }
+                  </div>
+                  <div style={{ fontSize: 11.5, opacity: 0.9, fontWeight: 500 }}>
+                    💳 Please complete your subscription payment to continue using the application. Contact admin to activate.
+                  </div>
+                </div>
               </div>
-              <button onClick={() => setValidityWarning(null)} style={{
+              <button onClick={() => { setValidityWarning(null); setWarningDismissed(true); }} style={{
                 background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
-                padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700
-              }}>Dismiss</button>
+                padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                whiteSpace: 'nowrap'
+              }}>Remind Later</button>
             </div>
           )}
           

@@ -95,4 +95,7 @@ contextBridge.exposeInMainWorld("api", {
   onValidityExpired:   (cb)           => ipcRenderer.on("validity-expired", (_e) => cb()),
   onAppLock:           (cb)           => ipcRenderer.on("app-lock", (_e, data) => cb(data)),
   onAppUnlock:         (cb)           => ipcRenderer.on("app-unlock", (_e) => cb()),
+
+  // 📊 Tax Report
+  getTaxReport:        (params)       => ipcRenderer.invoke("get-tax-report", params),
 });

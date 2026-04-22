@@ -81,6 +81,12 @@ export default function Settings() {
   const [isCloudLocked, setIsCloudLocked] = useState(true);
   const [cloudPwd, setCloudPwd] = useState("");
 
+  // Tax Report
+  const [taxMonth, setTaxMonth] = useState(new Date().getMonth() + 1);
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear());
+  const [taxReport, setTaxReport] = useState(null);
+  const [taxLoading, setTaxLoading] = useState(false);
+
   const handleUnlockCloud = () => {
     if (cloudPwd === (cfg.masterKey || "owner123")) {
       setIsCloudLocked(false);
@@ -138,15 +144,33 @@ export default function Settings() {
     });
 
     window.addEventListener('soft_refresh', loadSettingsData);
-    return () => window.removeEventListener('soft_refresh', loadSettingsData);
+    window.addEventListener('settings_updated', loadSettingsData);
+    
+    // Auto-refresh validity every 60 seconds so it stays in sync
+    const validityInterval = setInterval(() => {
+      window.api?.getValidity?.().then(v => {
+        if (v) setValidity(v);
+      });
+    }, 60000);
+    
+    return () => {
+      window.removeEventListener('soft_refresh', loadSettingsData);
+      window.removeEventListener('settings_updated', loadSettingsData);
+      clearInterval(validityInterval);
+    };
   }, []);
 
   const set = (key, val) => setCfg(prev => ({ ...prev, [key]: val }));
 
   const save = () => {
-    localStorage.setItem("smart_billing_settings", JSON.stringify(cfg));
-    window.api?.saveAppSettings?.(cfg);
-    if (window.api?.setWindowTitle && cfg.storeName) window.api.setWindowTitle(cfg.storeName);
+    // Sync storePhone to ownerMobile so it gets pushed to Supabase
+    const toSave = { ...cfg };
+    if (toSave.storePhone && !toSave.ownerMobile) {
+      toSave.ownerMobile = toSave.storePhone;
+    }
+    localStorage.setItem("smart_billing_settings", JSON.stringify(toSave));
+    window.api?.saveAppSettings?.(toSave);
+    if (window.api?.setWindowTitle && toSave.storeName) window.api.setWindowTitle(toSave.storeName);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
     window.dispatchEvent(new Event('settings_updated'));
@@ -352,37 +376,53 @@ export default function Settings() {
         {validity && (
           <>
             <SectionTitle icon="⏳" title="Subscription Status" />
-            <div style={{ 
-              padding: "20px", borderRadius: 12, marginBottom: 12, marginTop: 8,
-              background: validity.valid 
-                ? (validity.warningPhase ? "linear-gradient(135deg, rgba(245,158,11,0.08), rgba(251,191,36,0.08))" : "linear-gradient(135deg, rgba(16,185,129,0.08), rgba(52,211,153,0.08))")
-                : "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(248,113,113,0.08))",
-              border: `1px solid ${validity.valid ? (validity.warningPhase ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)") : "rgba(239,68,68,0.2)"}`
-            }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ 
-                    fontSize: 14, fontWeight: 800, 
-                    color: validity.valid ? (validity.warningPhase ? "#f59e0b" : "#10b981") : "#ef4444" 
-                  }}>
-                    {validity.valid 
-                      ? (validity.warningPhase ? "⚠️ Subscription Expiring Soon" : "✅ Subscription Active")
-                      : "🔴 Subscription Expired"
-                    }
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
-                    {validity.validityEnd ? `Expires: ${new Date(validity.validityEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ""}
-                    {validity.isOffline ? " (Offline cache)" : ""}
+            {(() => {
+              const isLow = validity.daysLeft <= 7;
+              const isCritical = validity.daysLeft <= 3;
+              const isExpired = validity.daysLeft <= 0 || !validity.valid;
+              const statusColor = isExpired ? "#ef4444" : isCritical ? "#ef4444" : isLow ? "#f59e0b" : "#10b981";
+              const bgGrad = isExpired || isCritical
+                ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(248,113,113,0.08))"
+                : isLow
+                  ? "linear-gradient(135deg, rgba(245,158,11,0.08), rgba(251,191,36,0.08))"
+                  : "linear-gradient(135deg, rgba(16,185,129,0.08), rgba(52,211,153,0.08))";
+              const borderColor = isExpired || isCritical
+                ? "rgba(239,68,68,0.2)"
+                : isLow ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)";
+              const statusText = isExpired
+                ? "🔴 Subscription Expired"
+                : isCritical
+                  ? "🚨 Subscription Critical — Pay Now!"
+                  : isLow
+                    ? "⚠️ Subscription Expiring Soon"
+                    : "✅ Subscription Active";
+              return (
+                <div style={{ padding: "20px", borderRadius: 12, marginBottom: 12, marginTop: 8, background: bgGrad, border: `1px solid ${borderColor}` }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: statusColor }}>
+                        {statusText}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
+                        {validity.validityEnd ? `Expires: ${new Date(validity.validityEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ""}
+                        {validity.isOffline ? " (Offline cache)" : ""}
+                      </div>
+                      {!validity.isPaid && validity.daysLeft > 0 && (
+                        <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 6, fontWeight: 600 }}>
+                          💳 Payment pending — Contact admin to renew subscription
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 32, fontWeight: 900, color: statusColor, lineHeight: 1 }}>
+                        {validity.daysLeft}
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: statusColor, opacity: 0.8 }}>days left</div>
+                    </div>
                   </div>
                 </div>
-                <div style={{ 
-                  fontSize: 28, fontWeight: 900, 
-                  color: validity.valid ? (validity.warningPhase ? "#f59e0b" : "#10b981") : "#ef4444"
-                }}>
-                  {validity.daysLeft} <span style={{ fontSize: 12, fontWeight: 600 }}>days left</span>
-                </div>
-              </div>
-            </div>
+              );
+            })()}
           </>
         )}
 
@@ -501,6 +541,172 @@ export default function Settings() {
         <SettingRow label="Invoice Prefix">
           <input style={{ ...inputStyle, width: 100 }} value={cfg.invoicePrefix} onChange={e => set("invoicePrefix", e.target.value.toUpperCase())} placeholder="INV" maxLength={6} />
         </SettingRow>
+
+        {/* ── TAX REPORT ── */}
+        <SectionTitle icon="📊" title="Monthly Tax Report" />
+        <div style={{ padding: "16px 0" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+            <select 
+              value={taxMonth} 
+              onChange={e => setTaxMonth(parseInt(e.target.value))}
+              style={{ ...inputStyle, width: 140, cursor: "pointer" }}
+            >
+              {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) => (
+                <option key={i} value={i + 1}>{m}</option>
+              ))}
+            </select>
+            <select
+              value={taxYear}
+              onChange={e => setTaxYear(parseInt(e.target.value))}
+              style={{ ...inputStyle, width: 100, cursor: "pointer" }}
+            >
+              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <button
+              onClick={async () => {
+                setTaxLoading(true);
+                try {
+                  const res = await window.api?.getTaxReport?.({ year: taxYear, month: taxMonth });
+                  if (res?.success) setTaxReport(res);
+                  else alert('Failed: ' + (res?.error || 'Unknown error'));
+                } catch(e) { alert('Error: ' + e.message); }
+                setTaxLoading(false);
+              }}
+              style={{ ...actionBtnStyle("#3b82f6", taxLoading), padding: "0 20px", height: 36, fontSize: 12 }}
+              disabled={taxLoading}
+            >
+              {taxLoading ? '⏳ Loading...' : '📊 Generate Report'}
+            </button>
+            {taxReport && (
+              <button
+                onClick={() => {
+                  const r = taxReport;
+                  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                  const mName = monthNames[r.month - 1];
+                  let csv = `MONTHLY TAX REPORT - ${mName} ${r.year}\n`;
+                  csv += `\nShop Name,${r.shop.name}\n`;
+                  csv += `Owner Name,${r.shop.ownerName}\n`;
+                  csv += `Address,"${r.shop.address}"\n`;
+                  csv += `Phone,${r.shop.phone}\n`;
+                  csv += `GST Number,${r.shop.gstNumber}\n`;
+                  csv += `Email,${r.shop.email}\n`;
+                  csv += `\n--- SUMMARY ---\n`;
+                  csv += `Total Invoices,${r.totals.totalInvoices}\n`;
+                  csv += `Total Sales (incl. tax),${r.totals.totalSales.toFixed(2)}\n`;
+                  csv += `Total Tax Collected,${r.totals.totalTax.toFixed(2)}\n`;
+                  csv += `Net Sales (excl. tax),${r.totals.netSales.toFixed(2)}\n`;
+                  csv += `\n--- TAX BREAKDOWN BY GST RATE ---\n`;
+                  csv += `GST Rate,Invoices,Taxable Amount,Tax Collected,Total\n`;
+                  (r.taxBreakdown || []).forEach(t => {
+                    csv += `${t.gst_rate}%,${t.invoice_count},${t.taxable_amount.toFixed(2)},${t.total_tax.toFixed(2)},${t.total_with_tax.toFixed(2)}\n`;
+                  });
+                  csv += `\n--- PAYMENT MODE BREAKDOWN ---\n`;
+                  csv += `Mode,Count,Amount\n`;
+                  (r.paymentModes || []).forEach(p => {
+                    csv += `${p.payment_mode || 'N/A'},${p.count},${p.total.toFixed(2)}\n`;
+                  });
+                  csv += `\n--- DAILY SUMMARY ---\n`;
+                  csv += `Date,Bills,Sales\n`;
+                  (r.dailySummary || []).forEach(d => {
+                    csv += `${d.day},${d.bills},${d.sales.toFixed(2)}\n`;
+                  });
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `Tax_Report_${mName}_${r.year}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                style={{ ...actionBtnStyle("#10b981", false), padding: "0 20px", height: 36, fontSize: 12 }}
+              >
+                📥 Download CSV
+              </button>
+            )}
+          </div>
+
+          {/* Tax Report Results */}
+          {taxReport && (
+            <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--border)" }}>
+              {/* Shop Header */}
+              <div style={{ background: "rgba(99,102,241,0.08)", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-1)" }}>{taxReport.shop.name || 'My Shop'}</div>
+                <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
+                  {taxReport.shop.address && <span>{taxReport.shop.address} • </span>}
+                  {taxReport.shop.phone && <span>📞 {taxReport.shop.phone} • </span>}
+                  {taxReport.shop.gstNumber && <span>GST: {taxReport.shop.gstNumber}</span>}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#6366f1", marginTop: 8 }}>
+                  📊 Tax Report — {['January','February','March','April','May','June','July','August','September','October','November','December'][taxReport.month - 1]} {taxReport.year}
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0, borderBottom: "1px solid var(--border)" }}>
+                {[
+                  { label: "Total Bills", value: taxReport.totals.totalInvoices, color: "#3b82f6" },
+                  { label: "Total Sales", value: `₹${taxReport.totals.totalSales.toFixed(2)}`, color: "#10b981" },
+                  { label: "Tax Collected", value: `₹${taxReport.totals.totalTax.toFixed(2)}`, color: "#f59e0b" },
+                  { label: "Net Sales", value: `₹${taxReport.totals.netSales.toFixed(2)}`, color: "#8b5cf6" }
+                ].map((card, i) => (
+                  <div key={i} style={{ padding: "14px 16px", borderRight: i < 3 ? "1px solid var(--border)" : "none", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{card.label}</div>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: card.color, marginTop: 4 }}>{card.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* GST Breakdown Table */}
+              {taxReport.taxBreakdown?.length > 0 && (
+                <div style={{ borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ padding: "10px 16px", fontSize: 11, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(255,255,255,0.02)" }}>GST Rate Breakdown</div>
+                  <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                        <th style={{ padding: "8px 16px", textAlign: "left", fontWeight: 700, color: "var(--text-3)", fontSize: 10, textTransform: "uppercase" }}>GST Rate</th>
+                        <th style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: "var(--text-3)", fontSize: 10, textTransform: "uppercase" }}>Items</th>
+                        <th style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: "var(--text-3)", fontSize: 10, textTransform: "uppercase" }}>Taxable Amt</th>
+                        <th style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: "var(--text-3)", fontSize: 10, textTransform: "uppercase" }}>CGST</th>
+                        <th style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: "var(--text-3)", fontSize: 10, textTransform: "uppercase" }}>SGST</th>
+                        <th style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: "var(--text-3)", fontSize: 10, textTransform: "uppercase" }}>Total Tax</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taxReport.taxBreakdown.map((t, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                          <td style={{ padding: "8px 16px", fontWeight: 700, color: "var(--text-1)" }}>{t.gst_rate}%</td>
+                          <td style={{ padding: "8px 16px", textAlign: "right", color: "var(--text-2)" }}>{t.item_count}</td>
+                          <td style={{ padding: "8px 16px", textAlign: "right", color: "var(--text-2)" }}>₹{t.taxable_amount.toFixed(2)}</td>
+                          <td style={{ padding: "8px 16px", textAlign: "right", color: "#f59e0b" }}>₹{(t.total_tax / 2).toFixed(2)}</td>
+                          <td style={{ padding: "8px 16px", textAlign: "right", color: "#f59e0b" }}>₹{(t.total_tax / 2).toFixed(2)}</td>
+                          <td style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: "#ef4444" }}>₹{t.total_tax.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Payment Mode Breakdown */}
+              {taxReport.paymentModes?.length > 0 && (
+                <div>
+                  <div style={{ padding: "10px 16px", fontSize: 11, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(255,255,255,0.02)" }}>Payment Modes</div>
+                  <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
+                    {taxReport.paymentModes.map((p, i) => (
+                      <div key={i} style={{ flex: 1, minWidth: 120, padding: "10px 16px", borderRight: "1px solid var(--border)", borderTop: "1px solid var(--border)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", textTransform: "uppercase" }}>{p.payment_mode || 'Cash'}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-1)", marginTop: 2 }}>₹{p.total.toFixed(2)}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-4)" }}>{p.count} bills</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* ── UPI PAYMENT SETTINGS ── */}
         <SectionTitle icon="" title="UPI Payment (QR Code)" />

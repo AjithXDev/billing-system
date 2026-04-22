@@ -190,6 +190,15 @@ const initDB = () => {
           is_read INTEGER DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS validity_cache (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          validity_end TEXT,
+          is_paid INTEGER DEFAULT 0,
+          is_active INTEGER DEFAULT 0,
+          ever_activated INTEGER DEFAULT 0,
+          cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     `);
 
     // Self-Healing Migrations

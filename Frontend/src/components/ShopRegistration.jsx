@@ -8,7 +8,7 @@ import logoUrl from "../assets/logo.png";
  * - 4 fields: Business Name, Owner Name, Email (with OTP), Mobile
  * - Duplicate email blocked, duplicate phone allowed
  */
-export default function ShopRegistration({ onRegistered }) {
+export default function ShopRegistration({ onRegistered, forcePending = false, savedShopId = '' }) {
   const [shopName, setShopName]   = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [mobile, setMobile]       = useState("");
@@ -17,8 +17,8 @@ export default function ShopRegistration({ onRegistered }) {
   const [error, setError]         = useState("");
 
   // Registration success state
-  const [registrationStatus, setRegistrationStatus] = useState(null); // null | 'pending'
-  const [registeredShopId, setRegisteredShopId]     = useState("");
+  const [registrationStatus, setRegistrationStatus] = useState(forcePending ? 'pending' : null); // null | 'pending'
+  const [registeredShopId, setRegisteredShopId]     = useState(savedShopId || "");
   const [registeredSystemId, setRegisteredSystemId] = useState("");
   const [checkingActivation, setCheckingActivation] = useState(false);
   const [checkMsg, setCheckMsg]                     = useState("");
@@ -34,13 +34,37 @@ export default function ShopRegistration({ onRegistered }) {
   const [mobileVerified, setMobileVerified] = useState(true);
   const [mobileError, setMobileError] = useState("");
 
+  // ── On app restart with forcePending, load saved shop details ──
+  useEffect(() => {
+    if (forcePending && savedShopId) {
+      setRegisteredShopId(savedShopId);
+      setRegistrationStatus('pending');
+      // Load hardware ID from settings for display
+      (async () => {
+        try {
+          const settings = await window.api?.getAppSettings?.();
+          if (settings?.hardwareId) setRegisteredSystemId(settings.hardwareId);
+          else setRegisteredSystemId('N/A');
+        } catch { setRegisteredSystemId('N/A'); }
+      })();
+    }
+  }, [forcePending, savedShopId]);
+
   // ── Auto-poll for activation every 10 seconds ──
   useEffect(() => {
     if (registrationStatus !== 'pending') return;
     const interval = setInterval(async () => {
       try {
+        // Check both validity and license status for activation
         const validity = await window.api.getValidity?.();
         if (validity?.isActive) {
+          clearInterval(interval);
+          onRegistered(registeredShopId);
+          return;
+        }
+        // Fallback: direct license check
+        const license = await window.api.getLicenseStatus?.();
+        if (license?.is_active) {
           clearInterval(interval);
           onRegistered(registeredShopId);
         }
@@ -54,15 +78,32 @@ export default function ShopRegistration({ onRegistered }) {
     setCheckingActivation(true);
     setCheckMsg("");
     try {
+      // Check 1: Try getValidity (queries full shop record from Supabase)
+      let isActive = false;
       const validity = await window.api.getValidity?.();
+      console.log("[Activation Check] getValidity result:", validity);
       if (validity?.isActive) {
+        isActive = true;
+      }
+
+      // Check 2: Fallback to getLicenseStatus (direct is_active check)
+      if (!isActive) {
+        const license = await window.api.getLicenseStatus?.();
+        console.log("[Activation Check] getLicenseStatus result:", license);
+        if (license?.is_active) {
+          isActive = true;
+        }
+      }
+
+      if (isActive) {
         setCheckMsg("✅ Activated! Launching...");
         setTimeout(() => onRegistered(registeredShopId), 1000);
       } else {
         setCheckMsg("⏳ Not yet activated. Please contact admin.");
-        setTimeout(() => setCheckMsg(""), 3000);
+        setTimeout(() => setCheckMsg(""), 5000);
       }
     } catch (e) {
+      console.error("[Activation Check] Error:", e);
       setCheckMsg("❌ Network error. Try again.");
       setTimeout(() => setCheckMsg(""), 3000);
     } finally {
@@ -332,15 +373,10 @@ export default function ShopRegistration({ onRegistered }) {
             Your Strategic Partner in Intelligent Automation and Advanced Business Analytics. 
             Built for the modern enterprise, designed for scale.
           </p>
-          <ul className="feature-list">
-            <li><span className="dot"></span> Autonomous Business Intelligence</li>
-            <li><span className="dot"></span> Unified Cloud-to-Edge Ecosystem</li>
-            <li><span className="dot"></span> Next-Gen Intelligent Automation</li>
-            <li><span className="dot"></span> Military-Grade Transaction Security</li>
-          </ul>
-          <div className="panel-footer">
-            © 2026 Innoaivators Systems • Version 4.0 Pro
-          </div>
+        </div>
+
+        <div className="setup-footer">
+          © 2026 Innoaivators Systems • Version 4.0 Pro
         </div>
       </div>
 
@@ -517,7 +553,20 @@ export default function ShopRegistration({ onRegistered }) {
         .feature-list { list-style: none; padding: 0; margin-bottom: 60px; }
         .feature-list li { color: #e2e8f0; font-size: 17px; font-weight: 600; margin-bottom: 18px; display: flex; align-items: center; gap: 12px; }
         .feature-list .dot { width: 8px; height: 8px; background: #6366f1; border-radius: 50%; box-shadow: 0 0 10px #6366f1; }
-        .panel-footer { position: absolute; bottom: 40px; left: 80px; color: #475569; font-size: 13px; font-weight: 700; letter-spacing: 0.05em; }
+        
+        .setup-footer { 
+          position: absolute; 
+          bottom: 32px; 
+          left: 0; 
+          right: 0; 
+          text-align: center; 
+          color: #475569; 
+          font-size: 13px; 
+          font-weight: 700; 
+          letter-spacing: 0.05em; 
+          z-index: 100;
+          pointer-events: none;
+        }
 
         /* FORM PANEL */
         .form-panel { flex: 1; background: #020617; display: flex; align-items: center; justify-content: center; padding: 60px; border-left: 1px solid rgba(255,255,255,0.05); overflow-y: auto; }

@@ -198,6 +198,31 @@ app.get('/api/shops/:id/validity', requireAuth, async (req, res) => {
   }
 });
 
+// ── UPDATE Validity Days ──
+app.post('/api/shops/:id/update-validity', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { days } = req.body;
+    if (typeof days !== 'number' || days < 0) {
+      return res.status(400).json({ error: 'Invalid days value' });
+    }
+    const supabase = getSupabase();
+    const now = new Date();
+    const newEnd = new Date(now.getTime() + days * 86400000);
+    const { error } = await supabase
+      .from('shops')
+      .update({
+        validity_start: now.toISOString(),
+        validity_end: newEnd.toISOString()
+      })
+      .eq('id', id);
+    if (error) throw error;
+    res.json({ success: true, validity_end: newEnd.toISOString(), days });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── DELETE Shop + Owner Account ──
 app.delete('/api/shops/:id', async (req, res) => {
   try {
