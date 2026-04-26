@@ -544,13 +544,17 @@ async function handleAi(){
      var recInv = s.recentInvoices && s.recentInvoices.length > 0 ? s.recentInvoices.map(i => "["+i.created_at+"] Bill "+i.bill_no+" to "+(i.customer_name||'Walk-in')+" for ₹"+i.total_amount).join(' | ') : 'None';
      var mthStr = s.monthlyBreakdown && s.monthlyBreakdown.length > 0 ? s.monthlyBreakdown.slice(-12).map(m => m.month + ": ₹" + m.total).join(' | ') : 'None';
      var yrStr = s.yearlyBreakdown && s.yearlyBreakdown.length > 0 ? s.yearlyBreakdown.map(y => y.year + ": ₹" + y.total).join(' | ') : 'None';
+     
+     var shopDetails = "SHOP NAME: " + (D.shop?.name || 'My Shop') + " | GST NUMBER: " + (D.shop?.gst_number || 'N/A') + " | ADDRESS: " + (D.shop?.address || 'N/A') + " | PHONE: " + (D.shop?.phone || 'N/A');
+     var gstBreakdown = s.taxBreakdown && s.taxBreakdown.length > 0 ? s.taxBreakdown.map(t => t.gst_rate + "% GST: ₹" + t.tax.toFixed(2) + " (" + t.bills + " bills)").join(' | ') : 'None';
 
      var ctx = "SALES TODAY: ₹"+(s.todaySales||0)+" | TODAY PROFIT: ₹"+(s.todayProfit||0)+" | OVERALL SALES: ₹"+(s.overallSales||0)+" | OVERALL PROFIT: ₹"+(s.overallProfit||0);
      var ctx2 = "LOW STOCK ("+(s.lowStockCount||0)+"): "+lowNames+" | DEAD STOCK ("+(s.deadStock?s.deadStock.length:0)+"): "+deadNames+" | TOP PRODUCTS: "+topNames;
      var ctx3 = "BILLS TODAY: "+(s.todayBills||0)+" | TOP CUSTOMERS: "+topCust+" | DAILY SALES (LAST 7 DAYS): "+dailyStr;
      var ctx4 = "MONTHLY SALES: "+mthStr+" | YEARLY SALES: "+yrStr+" | RECENT 150 BILLS (WITH TIME): "+recInv;
+     var ctx5 = shopDetails + " | 30-DAY GST TAX BREAKDOWN: " + gstBreakdown;
      
-     var pr = "You are an AI for a shop owner. Only use this database info:\\n" + ctx + "\\n" + ctx2 + "\\n" + ctx3 + "\\n" + ctx4 + "\\n\\nRules:\\n1. Use Professional Markdown formatting (bullet points, bold text for numbers/names).\\n2. If listing multiple items (like products/customers), DO NOT use comma-separated strings; use clean bulleted lists.\\n3. If today's sales/profit is ₹0, explicitly say ₹0 immediately.\\n4. DO NOT invent numbers or names. Use ONLY the data provided.\\n\\nOwner Question: " + q;
+     var pr = "You are an AI for a shop owner. Only use this database info:\\n" + ctx + "\\n" + ctx2 + "\\n" + ctx3 + "\\n" + ctx4 + "\\n" + ctx5 + "\\n\\nRules:\\n1. Use Professional Markdown formatting (bullet points, bold text for numbers/names).\\n2. If listing multiple items (like products/customers), DO NOT use comma-separated strings; use clean bulleted lists.\\n3. If today's sales/profit is ₹0, explicitly say ₹0 immediately.\\n4. DO NOT invent numbers or names. Use ONLY the data provided.\\n\\nOwner Question: " + q;
      
      var ans = "";
      var usedGroq = false;

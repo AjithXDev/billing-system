@@ -163,6 +163,7 @@ async function syncStatsToSupabase() {
     const customerBehavior = db.prepare("SELECT customer_name, customer_phone, COUNT(*) as visit_count, SUM(total_amount) as total_spent FROM invoices WHERE customer_phone IS NOT NULL AND customer_phone != '' GROUP BY customer_phone ORDER BY total_spent DESC LIMIT 20").all();
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 150").all();
     const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
+    const taxBreakdown = db.prepare("SELECT ii.gst_rate, COUNT(DISTINCT ii.invoice_id) as bills, COALESCE(SUM(ii.gst_amount), 0) as tax FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.gst_rate").all();
 
     // 1. Control Plane Sync (Snapshot)
     try {
@@ -187,7 +188,7 @@ async function syncStatsToSupabase() {
         todayCost, weeklyCost, monthlyCost, topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })), topProducts,
         dailySales: dailySalesData, monthlySalesBreakdown: monthlyBreakdown, yearlyBreakdown, weeklyBreakdown,
         peakHours: peakHoursData, paymentBreakdown: paymentBreakdownData, deadStock: deadStockData, lowStockProducts, 
-        outOfStockProducts, expiredProducts, expiringProducts, recentInvoices, allProductsList, customerBehavior,
+        outOfStockProducts, expiredProducts, expiringProducts, recentInvoices, allProductsList, customerBehavior, taxBreakdown,
         settings: {
           storeName: settings.storeName || '', storeAddress: settings.storeAddress || '', gstNumber: settings.gstNumber || '',
           whatsappNumber: settings.ownerPhone || '', expiryAlertDays: expiryDays, lowStockThreshold: lowThreshold, deadStockThresholdDays: deadDays
