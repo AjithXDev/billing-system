@@ -540,19 +540,22 @@ async function handleAi(){
      var topNames = s.topProducts && s.topProducts.length > 0 ? s.topProducts.slice(0,10).map(p => p.name).join(', ') : 'None';
      
      var topCust = s.customerBehavior && s.customerBehavior.length > 0 ? s.customerBehavior.slice(0,10).map(c => c.customer_name + " (Visits: " + c.visit_count + ", Spent: ₹" + c.total_spent + ")").join(' | ') : 'None';
-     var dailyStr = s.dailySalesData && s.dailySalesData.length > 0 ? s.dailySalesData.slice(-7).map(d => d.day + ": ₹" + d.total + " (" + d.bills + " bills)").join(' | ') : 'None';
+     var dailyStr = s.dailySalesData && s.dailySalesData.length > 0 ? s.dailySalesData.map(d => d.day + ": Sales ₹" + (d.total?d.total.toFixed(2):0) + ", Profit ₹" + (d.profit?d.profit.toFixed(2):0)).join(' | ') : 'None';
      var recInv = s.recentInvoices && s.recentInvoices.length > 0 ? s.recentInvoices.map(i => "["+i.created_at+"] Bill "+i.bill_no+" to "+(i.customer_name||'Walk-in')+" for ₹"+i.total_amount).join(' | ') : 'None';
-     var mthStr = s.monthlyBreakdown && s.monthlyBreakdown.length > 0 ? s.monthlyBreakdown.slice(-12).map(m => m.month + ": ₹" + m.total).join(' | ') : 'None';
+     var mthStr = s.monthlySalesBreakdown && s.monthlySalesBreakdown.length > 0 ? s.monthlySalesBreakdown.slice(-12).map(m => m.month + ": Sales ₹" + (m.total?m.total.toFixed(2):0) + ", Profit ₹" + (m.profit?m.profit.toFixed(2):0)).join(' | ') : 'None';
      var yrStr = s.yearlyBreakdown && s.yearlyBreakdown.length > 0 ? s.yearlyBreakdown.map(y => y.year + ": ₹" + y.total).join(' | ') : 'None';
      
      var shopDetails = "SHOP NAME: " + (D.shop?.name || 'My Shop') + " | GST NUMBER: " + (D.shop?.gst_number || 'N/A') + " | ADDRESS: " + (D.shop?.address || 'N/A') + " | PHONE: " + (D.shop?.phone || 'N/A');
-     var gstBreakdown = s.taxBreakdown && s.taxBreakdown.length > 0 ? s.taxBreakdown.map(t => t.gst_rate + "% GST: ₹" + t.tax.toFixed(2) + " (" + t.bills + " bills)").join(' | ') : 'None';
+     
+     var gstOverall = s.overallTax && s.overallTax.length > 0 ? s.overallTax.map(t => t.gst_rate + "%:₹" + (t.tax?t.tax.toFixed(2):0)).join(', ') : 'None';
+     var gstMonthly = s.monthlyTax && s.monthlyTax.length > 0 ? s.monthlyTax.map(t => "["+t.month+"] "+t.gst_rate+"%:₹"+(t.tax?t.tax.toFixed(2):0)).join(', ') : 'None';
+     var gstDaily = s.dailyTax && s.dailyTax.length > 0 ? s.dailyTax.map(t => "["+t.day+"] "+t.gst_rate+"%:₹"+(t.tax?t.tax.toFixed(2):0)).join(', ') : 'None';
 
      var ctx = "SALES TODAY: ₹"+(s.todaySales||0)+" | TODAY PROFIT: ₹"+(s.todayProfit||0)+" | OVERALL SALES: ₹"+(s.overallSales||0)+" | OVERALL PROFIT: ₹"+(s.overallProfit||0);
      var ctx2 = "LOW STOCK ("+(s.lowStockCount||0)+"): "+lowNames+" | DEAD STOCK ("+(s.deadStock?s.deadStock.length:0)+"): "+deadNames+" | TOP PRODUCTS: "+topNames;
-     var ctx3 = "BILLS TODAY: "+(s.todayBills||0)+" | TOP CUSTOMERS: "+topCust+" | DAILY SALES (LAST 7 DAYS): "+dailyStr;
-     var ctx4 = "MONTHLY SALES: "+mthStr+" | YEARLY SALES: "+yrStr+" | RECENT 150 BILLS (WITH TIME): "+recInv;
-     var ctx5 = shopDetails + " | 30-DAY GST TAX BREAKDOWN: " + gstBreakdown;
+     var ctx3 = "BILLS TODAY: "+(s.todayBills||0)+" | TOP CUSTOMERS: "+topCust+" | DAILY SALES & PROFIT (LAST 365 DAYS): "+dailyStr;
+     var ctx4 = "MONTHLY SALES & PROFIT: "+mthStr+" | RECENT 150 BILLS (WITH TIME): "+recInv;
+     var ctx5 = shopDetails + " | OVERALL GST TAX: " + gstOverall + " | MONTHLY GST TAX: " + gstMonthly + " | DAILY GST TAX (LAST 365 DAYS): " + gstDaily;
      
      var pr = "You are an AI for a shop owner. Only use this database info:\\n" + ctx + "\\n" + ctx2 + "\\n" + ctx3 + "\\n" + ctx4 + "\\n" + ctx5 + "\\n\\nRules:\\n1. Use Professional Markdown formatting (bullet points, bold text for numbers/names).\\n2. If listing multiple items (like products/customers), DO NOT use comma-separated strings; use clean bulleted lists.\\n3. If today's sales/profit is ₹0, explicitly say ₹0 immediately.\\n4. DO NOT invent numbers or names. Use ONLY the data provided.\\n\\nOwner Question: " + q;
      

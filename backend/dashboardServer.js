@@ -149,7 +149,7 @@ async function syncStatsToSupabase() {
     const overallCost = db.prepare("SELECT COALESCE(SUM(p.cost_price*ii.quantity),0) as c FROM invoice_items ii JOIN products p ON ii.product_id=p.id").get().c;
 
     const topProducts = db.prepare("SELECT p.name, SUM(ii.quantity) as sold, SUM(ii.price*ii.quantity) as revenue FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.product_id ORDER BY sold DESC LIMIT 8").all();
-    const dailySalesData = db.prepare("SELECT date(created_at,'localtime') as day, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-7 days') GROUP BY day ORDER BY day ASC").all();
+    const dailySalesData = db.prepare("SELECT date(inv.created_at,'localtime') as day, COUNT(DISTINCT inv.id) as bills, COALESCE(SUM(inv.total_amount),0) as total, COALESCE(SUM(ii.quantity * (ii.price - COALESCE(p.cost_price, ii.price * 0.7))), 0) as profit FROM invoices inv LEFT JOIN invoice_items ii ON inv.id = ii.invoice_id LEFT JOIN products p ON ii.product_id = p.id WHERE inv.created_at>=datetime('now','-365 days') GROUP BY day ORDER BY day ASC").all();
     const monthlyBreakdown = db.prepare("SELECT strftime('%Y-%m', inv.created_at, 'localtime') as month, COUNT(DISTINCT inv.id) as bills, COALESCE(SUM(inv.total_amount), 0) as total, COALESCE(SUM(ii.quantity * (ii.price - COALESCE(p.cost_price, ii.price * 0.7))), 0) as profit FROM invoices inv LEFT JOIN invoice_items ii ON inv.id = ii.invoice_id LEFT JOIN products p ON ii.product_id = p.id WHERE inv.created_at >= datetime('now', '-180 days') GROUP BY month ORDER BY month ASC").all();
     const yearlyBreakdown = db.prepare("SELECT strftime('%Y',created_at,'localtime') as year, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as total FROM invoices GROUP BY year ORDER BY year DESC LIMIT 5").all();
     const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE strftime('%Y-%m',created_at,'localtime')=strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
@@ -163,7 +163,9 @@ async function syncStatsToSupabase() {
     const customerBehavior = db.prepare("SELECT customer_name, customer_phone, COUNT(*) as visit_count, SUM(total_amount) as total_spent FROM invoices WHERE customer_phone IS NOT NULL AND customer_phone != '' GROUP BY customer_phone ORDER BY total_spent DESC LIMIT 20").all();
     const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 150").all();
     const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
-    const taxBreakdown = db.prepare("SELECT ii.gst_rate, COUNT(DISTINCT ii.invoice_id) as bills, COALESCE(SUM(ii.gst_amount), 0) as tax FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-30 days') GROUP BY ii.gst_rate").all();
+    const overallTax = db.prepare("SELECT ii.gst_rate, COALESCE(SUM(ii.gst_amount), 0) as tax FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id GROUP BY ii.gst_rate").all();
+    const monthlyTax = db.prepare("SELECT strftime('%Y-%m', inv.created_at, 'localtime') as month, ii.gst_rate, COALESCE(SUM(ii.gst_amount), 0) as tax FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-180 days') GROUP BY month, ii.gst_rate ORDER BY month DESC").all();
+    const dailyTax = db.prepare("SELECT date(inv.created_at, 'localtime') as day, ii.gst_rate, COALESCE(SUM(ii.gst_amount), 0) as tax FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-365 days') GROUP BY day, ii.gst_rate ORDER BY day DESC").all();
 
     // 1. Control Plane Sync (Snapshot)
     try {
@@ -188,7 +190,8 @@ async function syncStatsToSupabase() {
         todayCost, weeklyCost, monthlyCost, topSelling: topProducts.map(p => ({ ...p, total_sold: p.sold })), topProducts,
         dailySales: dailySalesData, monthlySalesBreakdown: monthlyBreakdown, yearlyBreakdown, weeklyBreakdown,
         peakHours: peakHoursData, paymentBreakdown: paymentBreakdownData, deadStock: deadStockData, lowStockProducts, 
-        outOfStockProducts, expiredProducts, expiringProducts, recentInvoices, allProductsList, customerBehavior, taxBreakdown,
+        outOfStockProducts, expiredProducts, expiringProducts, recentInvoices, allProductsList, customerBehavior,
+        overallTax, monthlyTax, dailyTax,
         settings: {
           storeName: settings.storeName || '', storeAddress: settings.storeAddress || '', gstNumber: settings.gstNumber || '',
           whatsappNumber: settings.ownerPhone || '', expiryAlertDays: expiryDays, lowStockThreshold: lowThreshold, deadStockThresholdDays: deadDays

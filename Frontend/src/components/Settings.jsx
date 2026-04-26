@@ -190,6 +190,8 @@ export default function Settings() {
 
   // Shop Supabase handlers
   const handleSaveShopSupabase = async () => {
+    save(); // Automatically save any unsaved AI keys or other settings before proceeding
+    
     if (!shopUrl || !shopKey) {
       setShopConnMsg("Please enter both URL and Key.");
       setShopConnStatus("error");
