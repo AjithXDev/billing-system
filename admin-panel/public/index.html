@@ -369,8 +369,9 @@
                                                         </td>
                                                         <td className="px-6 py-6 text-center">
                                                             {(() => {
-                                                                if (!s.last_ping_at) return <span className="text-[10px] text-slate-500 font-bold">Never</span>;
-                                                                const diffMins = (new Date() - new Date(s.last_ping_at)) / 60000;
+                                                                const lastPingTime = s.updated_at || s.last_ping_at;
+                                                                if (!lastPingTime) return <span className="text-[10px] text-slate-500 font-bold">Never</span>;
+                                                                const diffMins = (new Date() - new Date(lastPingTime)) / 60000;
                                                                 if (diffMins < 15) return <div className="flex items-center justify-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_#4ade80]"></span><span className="text-[10px] text-green-400 font-bold">Online</span></div>;
                                                                 return <span className="text-[10px] text-slate-500 font-bold">Offline</span>;
                                                             })()}
@@ -591,7 +592,8 @@
                                 <div className="grid grid-cols-3 gap-6">
                                     {shops.map(s => {
                                         const now = new Date();
-                                        const lastPing = s.last_ping_at ? new Date(s.last_ping_at) : null;
+                                        const lastPingTime = s.updated_at || s.last_ping_at;
+                                        const lastPing = lastPingTime ? new Date(lastPingTime) : null;
                                         const diffMins = lastPing ? (now - lastPing) / 60000 : Infinity;
                                         const isOnline = diffMins < 15;
                                         return (

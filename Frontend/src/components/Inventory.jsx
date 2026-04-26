@@ -18,7 +18,7 @@ const Inventory = () => {
     image: "",
     default_discount: "",
     weight: "",
-    brand: ""
+    weight: "",
   });
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isFetchingAPI, setIsFetchingAPI] = useState(false);
@@ -64,7 +64,7 @@ const Inventory = () => {
           expiry_date: form.expiry_date || null,
           image: form.image || null,
           weight: form.weight || null,
-          brand: form.brand || null
+          weight: form.weight || null,
         });
         alert("Product registered in database! 🔥");
         setForm({
@@ -82,7 +82,8 @@ const Inventory = () => {
           image: "",
           default_discount: "",
           weight: "",
-          brand: ""
+          default_discount: "",
+          weight: "",
         });
       } catch (err) {
         alert("❌ Error saving product: " + err.message);
@@ -286,20 +287,37 @@ const Inventory = () => {
             <div style={{ display: 'flex', gap: '20px', marginBottom: '25px', alignItems: 'flex-start' }}>
                <div style={{ width: '120px', height: '120px', borderRadius: '8px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
                  {form.image ? (
-                   <img src={form.image} alt="Product" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                   <>
+                     <img src={form.image} alt="Product" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                     <button 
+                       type="button" 
+                       onClick={() => setForm({ ...form, image: "" })}
+                       style={{ 
+                         position: 'absolute', top: '5px', right: '5px', 
+                         width: '24px', height: '24px', borderRadius: '50%', 
+                         background: '#ef4444', color: 'white', border: 'none', 
+                         fontSize: '12px', fontWeight: 'bold', cursor: 'pointer',
+                         display: 'flex', alignItems: 'center', justifyContent: 'center',
+                         boxShadow: '0 2px 4px rgba(0,0,0,0.2)', zIndex: 10
+                       }}
+                       title="Remove Image"
+                     >
+                       ✕
+                     </button>
+                   </>
                  ) : (
                    <div style={{ textAlign: 'center', color: 'var(--text-4)', fontSize: '12px' }}>
                      📷<br/>No Image
                    </div>
                  )}
-                 <input type="file" accept="image/*" onChange={handleImageChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
+                 {!form.image && <input type="file" accept="image/*" onChange={handleImageChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }} />}
                </div>
                <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px' }}>
                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                     <label className="form-label">Product Name</label>
                     <input className="form-input" name="name" value={form.name} onChange={handleChange} placeholder="e.g. Dairy Milk (20g)" required autoFocus />
                  </div>
-                  <div className="form-group">
+                  <div className="form-group" style={{ gridColumn: 'span 2' }}>
                     <label className="form-label">Category</label>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <select className="form-select" name="category_id" value={form.category_id} onChange={handleChange} style={{ flex: 1, height: '42px' }}>
@@ -322,10 +340,6 @@ const Inventory = () => {
                         }} style={{ padding: '0 16px', borderRadius: '6px', border: 'none', background: '#10b981', color: 'white', fontWeight: 'bold', cursor: 'pointer', height: '36px' }}>Save</button>
                       </div>
                     )}
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Brand</label>
-                    <input className="form-input" name="brand" value={form.brand} onChange={handleChange} placeholder="e.g. Nestlé" />
                   </div>
                 </div>
             </div>

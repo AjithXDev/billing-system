@@ -673,7 +673,7 @@ export default function Settings() {
                 }}
                 style={{ ...actionBtnStyle("#10b981", false), padding: "0 20px", height: 36, fontSize: 12 }}
               >
-                📥 Download CSV
+                📥 Download
               </button>
             )}
           </div>
