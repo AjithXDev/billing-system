@@ -6,7 +6,6 @@ const DEFAULTS = {
   storePhone: "",
   storeAddress: "",
   gstNumber: "",
-  invoicePrefix: "INV",
   lowStockThreshold: 10,
   deadStockThresholdDays: 30,
   expiryAlertDays: 3,
@@ -570,9 +569,6 @@ export default function Settings() {
           <input style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: ".05em" }} value={cfg.gstNumber} onChange={e => set("gstNumber", e.target.value.toUpperCase())} placeholder="22AAAAA0000A1Z5" />
         </SettingRow>
 
-        <SettingRow label="Invoice Prefix">
-          <input style={{ ...inputStyle, width: 100 }} value={cfg.invoicePrefix} onChange={e => set("invoicePrefix", e.target.value.toUpperCase())} placeholder="INV" maxLength={6} />
-        </SettingRow>
 
         {/* ── TAX REPORT ── */}
         <SectionTitle icon="📊" title="Monthly Tax Report" />

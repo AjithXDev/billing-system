@@ -97,7 +97,15 @@ async function setupLicenseRealtime(shopId) {
   if (!supabase || !shopId) return;
   if (licenseSubscription) licenseSubscription.unsubscribe();
 
-  console.log(`[Realtime] \ud83d\udef0\ufe0f Listening for license changes for: ${shopId}`);
+  console.log(`[Realtime] 🛸 Listening for license changes for: ${shopId}`);
+  
+  // 🔥 INITIAL PING: Mark shop as online immediately at startup
+  try {
+    await supabase.from('shops').update({
+       last_ping_at: new Date().toISOString()
+    }).eq('id', shopId);
+  } catch (e) {}
+
   licenseSubscription = supabase
     .channel('license-updates')
     .on('postgres_changes', { 
@@ -1217,6 +1225,31 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
+let isQuitting = false;
+app.on('before-quit', async (e) => {
+  if (isQuitting) return;
+  e.preventDefault();
+  try {
+    const configPath = path.join(app.getPath("userData"), "app_settings.json");
+    if (fs.existsSync(configPath)) {
+      const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const shopId = settings.shopId || process.env.SHOP_ID;
+      if (shopId && supabase) {
+        // Ping offline by setting last_ping_at to a very old date
+        await supabase.from('shops').update({
+          last_ping_at: new Date(0).toISOString()
+        }).eq('id', shopId);
+      }
+    }
+  } catch (err) {}
+  isQuitting = true;
+  app.quit();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
 
 // 🟢 GET CATEGORIES
 ipcMain.handle("get-categories", async () => {

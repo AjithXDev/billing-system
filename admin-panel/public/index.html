@@ -369,10 +369,11 @@
                                                         </td>
                                                         <td className="px-6 py-6 text-center">
                                                             {(() => {
-                                                                const lastPingTime = s.updated_at || s.last_ping_at;
+                                                                const lastPingTime = s.last_ping_at || s.updated_at;
                                                                 if (!lastPingTime) return <span className="text-[10px] text-slate-500 font-bold">Never</span>;
                                                                 const diffMins = (new Date() - new Date(lastPingTime)) / 60000;
-                                                                if (diffMins < 15) return <div className="flex items-center justify-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_#4ade80]"></span><span className="text-[10px] text-green-400 font-bold">Online</span></div>;
+                                                                const isOnline = diffMins < 15 && s.is_active;
+                                                                if (isOnline) return <div className="flex items-center justify-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_#4ade80]"></span><span className="text-[10px] text-green-400 font-bold">Online</span></div>;
                                                                 return <span className="text-[10px] text-slate-500 font-bold">Offline</span>;
                                                             })()}
                                                         </td>
@@ -592,10 +593,10 @@
                                 <div className="grid grid-cols-3 gap-6">
                                     {shops.map(s => {
                                         const now = new Date();
-                                        const lastPingTime = s.updated_at || s.last_ping_at;
+                                        const lastPingTime = s.last_ping_at || s.updated_at;
                                         const lastPing = lastPingTime ? new Date(lastPingTime) : null;
                                         const diffMins = lastPing ? (now - lastPing) / 60000 : Infinity;
-                                        const isOnline = diffMins < 15;
+                                        const isOnline = diffMins < 15 && s.is_active;
                                         return (
                                             <div key={s.id} className={`glass-card p-6 rounded-[32px] border-l-4 ${isOnline ? 'border-green-500/50' : 'border-slate-700/50'}`}>
                                                 <div className="flex justify-between items-start mb-4">

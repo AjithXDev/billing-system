@@ -241,6 +241,9 @@ const ProductList = () => {
     printWindow.document.close();
   };
 
+  const todayStr = new Date().toISOString().split('T')[0];
+  const nextWeekStr = new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
+
   return (
     <div className="admin-scroll-area" style={{ position: 'relative' }}>
       {isRefreshing && (
@@ -425,9 +428,8 @@ const ProductList = () => {
                    .filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.barcode || "").includes(searchQuery) || (p.product_code || "").toLowerCase().includes(searchQuery.toLowerCase()))
                    .slice(0, 100)
                    .map((p, index) => {
-                    const today = new Date().toISOString().split('T')[0];
-                    const expired = p.expiry_date && p.expiry_date < today;
-                    const near = p.expiry_date && !expired && p.expiry_date <= new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
+                    const expired = p.expiry_date && p.expiry_date < todayStr;
+                    const near = p.expiry_date && !expired && p.expiry_date <= nextWeekStr;
                     return (
                    <tr key={p.id}>
                        <td style={{ paddingLeft: '25px', color: '#0284c7', fontWeight: 800 }}>#{index + 1}</td>
