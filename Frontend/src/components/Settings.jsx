@@ -18,6 +18,8 @@ const DEFAULTS = {
   supabaseKey: "",
   billLogo: "",
   upiId: "",
+  geminiKey: "",
+  groqKey: "",
 };
 
 function SettingRow({ label, children, hint }) {
@@ -489,6 +491,34 @@ export default function Settings() {
                   placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
                 />
               </div>
+              <div style={{ marginTop: 8, padding: "12px", background: "rgba(99,102,241,0.05)", borderRadius: 8, border: "1px dashed rgba(99,102,241,0.3)" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "var(--primary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  🤖 AI Chatbot Configuration
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>GEMINI API KEY (Primary)</label>
+                  <input 
+                    style={inputStyle} 
+                    value={cfg.geminiKey || ""} 
+                    onChange={e => set("geminiKey", e.target.value)} 
+                    type="password"
+                    placeholder="AIzaSy..."
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", marginBottom: 4, display: "block" }}>GROQ API KEY (Backup / Llama 3)</label>
+                  <input 
+                    style={inputStyle} 
+                    value={cfg.groqKey || ""} 
+                    onChange={e => set("groqKey", e.target.value)} 
+                    type="password"
+                    placeholder="gsk_..."
+                  />
+                </div>
+                <div style={{ fontSize: 10, color: "var(--text-4)", marginTop: 8 }}>
+                  Note: The AI keys will be saved when you click the main "Save Changes" button at the top.
+                </div>
+              </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: shopConnStatus === 'connected' ? '#16a34a' : (shopConnStatus === 'error' ? '#ef4444' : 'var(--text-4)') }}>
                   {shopConnMsg || (shopConnStatus === 'connected' ? "Connected to Cloud" : "Not Linked")}
@@ -581,44 +611,65 @@ export default function Settings() {
             </button>
             {taxReport && (
               <button
-                onClick={() => {
-                  const r = taxReport;
-                  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                  const mName = monthNames[r.month - 1];
-                  let csv = `MONTHLY TAX REPORT - ${mName} ${r.year}\n`;
-                  csv += `\nShop Name,${r.shop.name}\n`;
-                  csv += `Owner Name,${r.shop.ownerName}\n`;
-                  csv += `Address,"${r.shop.address}"\n`;
-                  csv += `Phone,${r.shop.phone}\n`;
-                  csv += `GST Number,${r.shop.gstNumber}\n`;
-                  csv += `Email,${r.shop.email}\n`;
-                  csv += `\n--- SUMMARY ---\n`;
-                  csv += `Total Invoices,${r.totals.totalInvoices}\n`;
-                  csv += `Total Sales (incl. tax),${r.totals.totalSales.toFixed(2)}\n`;
-                  csv += `Total Tax Collected,${r.totals.totalTax.toFixed(2)}\n`;
-                  csv += `Net Sales (excl. tax),${r.totals.netSales.toFixed(2)}\n`;
-                  csv += `\n--- TAX BREAKDOWN BY GST RATE ---\n`;
-                  csv += `GST Rate,Invoices,Taxable Amount,Tax Collected,Total\n`;
-                  (r.taxBreakdown || []).forEach(t => {
-                    csv += `${t.gst_rate}%,${t.invoice_count},${t.taxable_amount.toFixed(2)},${t.total_tax.toFixed(2)},${t.total_with_tax.toFixed(2)}\n`;
-                  });
-                  csv += `\n--- PAYMENT MODE BREAKDOWN ---\n`;
-                  csv += `Mode,Count,Amount\n`;
-                  (r.paymentModes || []).forEach(p => {
-                    csv += `${p.payment_mode || 'N/A'},${p.count},${p.total.toFixed(2)}\n`;
-                  });
-                  csv += `\n--- DAILY SUMMARY ---\n`;
-                  csv += `Date,Bills,Sales\n`;
-                  (r.dailySummary || []).forEach(d => {
-                    csv += `${d.day},${d.bills},${d.sales.toFixed(2)}\n`;
-                  });
-                  const blob = new Blob([csv], { type: 'text/csv' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `Tax_Report_${mName}_${r.year}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
+                onClick={async () => {
+                  try {
+                    const { jsPDF } = await import('jspdf');
+                    const autoTable = (await import('jspdf-autotable')).default;
+                    const r = taxReport;
+                    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    const mName = monthNames[r.month - 1];
+                    const doc = new jsPDF();
+                    
+                    doc.setFontSize(18);
+                    doc.text(`MONTHLY TAX REPORT - ${mName} ${r.year}`, 14, 22);
+                    
+                    doc.setFontSize(10);
+                    doc.setTextColor(100);
+                    doc.text(`Shop Name: ${r.shop.name}`, 14, 32);
+                    doc.text(`Owner Name: ${r.shop.ownerName}`, 14, 38);
+                    doc.text(`GST Number: ${r.shop.gstNumber}`, 14, 44);
+                    doc.text(`Phone/Email: ${r.shop.phone} / ${r.shop.email}`, 14, 50);
+
+                    doc.setFontSize(14);
+                    doc.setTextColor(0);
+                    doc.text("Summary", 14, 62);
+                    autoTable(doc, {
+                      startY: 65,
+                      head: [['Metric', 'Value']],
+                      body: [
+                        ['Total Invoices', r.totals.totalInvoices],
+                        ['Net Sales (excl. tax)', r.totals.netSales.toFixed(2)],
+                        ['Total Tax Collected', r.totals.totalTax.toFixed(2)],
+                        ['Total Sales (incl. tax)', r.totals.totalSales.toFixed(2)]
+                      ],
+                      theme: 'striped',
+                      headStyles: { fillColor: [59, 130, 246] }
+                    });
+
+                    doc.text("Tax Breakdown by GST Rate", 14, doc.lastAutoTable.finalY + 12);
+                    autoTable(doc, {
+                      startY: doc.lastAutoTable.finalY + 15,
+                      head: [['GST Rate', 'Invoices', 'Taxable Amt', 'Tax Collected', 'Total']],
+                      body: (r.taxBreakdown || []).map(t => [
+                        `${t.gst_rate}%`, t.invoice_count, t.taxable_amount.toFixed(2), t.total_tax.toFixed(2), t.total_with_tax.toFixed(2)
+                      ]),
+                      theme: 'grid',
+                      headStyles: { fillColor: [16, 185, 129] }
+                    });
+
+                    doc.text("Payment Modes", 14, doc.lastAutoTable.finalY + 12);
+                    autoTable(doc, {
+                      startY: doc.lastAutoTable.finalY + 15,
+                      head: [['Mode', 'Count', 'Amount']],
+                      body: (r.paymentModes || []).map(p => [p.payment_mode || 'N/A', p.count, p.total.toFixed(2)]),
+                      theme: 'striped',
+                      headStyles: { fillColor: [245, 158, 11] }
+                    });
+
+                    doc.save(`GST_Report_${mName}_${r.year}.pdf`);
+                  } catch (e) {
+                    alert('Error generating PDF: ' + e.message);
+                  }
                 }}
                 style={{ ...actionBtnStyle("#10b981", false), padding: "0 20px", height: 36, fontSize: 12 }}
               >

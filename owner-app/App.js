@@ -506,17 +506,102 @@ async function toggleBillItems(lid){
 }
 
 async function renderClients(){
-  var invoices = await live('invoices?select=customer_name,total_amount');
-  var stats = {}; invoices.forEach(function(i){ var n = i.customer_name || 'Walk-in'; if(!stats[n]) stats[n] = { visits:0, spent:0 }; stats[n].visits++; stats[n].spent += parseFloat(i.total_amount); });
-  var tops = Object.keys(stats).map(function(k){ return { name:k, visits:stats[k].visits, spent:stats[k].spent }; }).sort(function(a,b){ return b.spent - a.spent; }).slice(0,5);
-  document.getElementById("cl-list").innerHTML = tops.map(function(c,i){ return '<div class="vip-card"><div class="vip-rank">'+(i+1)+'</div><div style="flex:1"><div style="font-weight:800">'+c.name+'</div><div style="font-size:10px;color:var(--text-s)">'+c.visits+' Visits</div></div><div style="color:var(--green);font-weight:800">Rs '+c.spent.toFixed(0)+'</div></div>'; }).join('') || '<p style="color:var(--text-s)">No data</p>';
+  var invoices = await live('invoices?select=customer_name,customer_phone,total_amount');
+  var stats = {}; 
+  invoices.forEach(function(i){ 
+    var p = i.customer_phone || 'Walk-in'; 
+    var n = i.customer_name || 'Walk-in';
+    var k = p; 
+    if(!stats[k]) stats[k] = { name: n, phone: p, visits:0, spent:0 }; 
+    if(stats[k].name === 'Walk-in' && n !== 'Walk-in') stats[k].name = n; 
+    stats[k].visits++; 
+    stats[k].spent += parseFloat(i.total_amount || 0); 
+  });
+  var tops = Object.keys(stats).map(function(k){ return stats[k]; }).sort(function(a,b){ return b.spent - a.spent; }).slice(0,10);
+  document.getElementById("cl-list").innerHTML = tops.map(function(c,i){ return '<div class="vip-card"><div class="vip-rank">'+(i+1)+'</div><div style="flex:1"><div style="font-weight:800">'+c.name+'</div><div style="font-size:10px;color:var(--text-s)">'+(c.phone !== 'Walk-in' ? c.phone : 'No Number')+' &middot; '+c.visits+' Visits</div></div><div style="color:var(--green);font-weight:800">Rs '+c.spent.toFixed(0)+'</div></div>'; }).join('') || '<p style="color:var(--text-s)">No data</p>';
 }
 
-function handleAi(){
+async function handleAi(){
   var inp = document.getElementById("ai-i"); if(!inp || !inp.value.trim()) return;
-  var box = document.getElementById("ai-b"); box.innerHTML += '<div class="ai-msg ai-r">'+inp.value+'</div>';
-  var v = inp.value.toLowerCase(); inp.value = "";
-  setTimeout(function(){ var r; if(v.includes("profit")) r = "Net Profit: Rs "+(s.todayProfit||0); else if(v.includes("sale")) r = "Today Revenue: Rs "+(s.todaySales||0); else if(v.includes("customer")||v.includes("client")) r = "Check the Clients tab for VIP analysis."; else if(v.includes("stock")||v.includes("inventory")) r = "Navigate to Items tab for inventory."; else r = "iVA Elite online. Database synced."; box.innerHTML += '<div class="ai-msg ai-l">'+r+'</div>'; box.scrollTop = box.scrollHeight; }, 800);
+  var q = inp.value.trim();
+  var box = document.getElementById("ai-b");
+  box.innerHTML += '<div class="ai-msg ai-r">'+q+'</div>';
+  inp.value = "";
+  var lId = "id"+Date.now();
+  box.innerHTML += '<div class="ai-msg ai-l" id="'+lId+'">Thinking...</div>';
+  box.scrollTop = box.scrollHeight;
+  
+  try {
+     var gk = D.stats && D.stats.ai_keys && D.stats.ai_keys.gemini ? D.stats.ai_keys.gemini : "";
+     var grk = D.stats && D.stats.ai_keys && D.stats.ai_keys.groq ? D.stats.ai_keys.groq : "";
+     
+     var deadNames = s.deadStock && s.deadStock.length > 0 ? s.deadStock.slice(0,20).map(d => d.name).join(', ') : 'None';
+     var lowNames = s.lowStockProducts && s.lowStockProducts.length > 0 ? s.lowStockProducts.slice(0,20).map(p => p.name).join(', ') : 'None';
+     var topNames = s.topProducts && s.topProducts.length > 0 ? s.topProducts.slice(0,10).map(p => p.name).join(', ') : 'None';
+     
+     var topCust = s.customerBehavior && s.customerBehavior.length > 0 ? s.customerBehavior.slice(0,10).map(c => c.customer_name + " (Visits: " + c.visit_count + ", Spent: ₹" + c.total_spent + ")").join(' | ') : 'None';
+     var dailyStr = s.dailySalesData && s.dailySalesData.length > 0 ? s.dailySalesData.slice(-7).map(d => d.day + ": ₹" + d.total + " (" + d.bills + " bills)").join(' | ') : 'None';
+     var recInv = s.recentInvoices && s.recentInvoices.length > 0 ? s.recentInvoices.map(i => "["+i.created_at+"] Bill "+i.bill_no+" to "+(i.customer_name||'Walk-in')+" for ₹"+i.total_amount).join(' | ') : 'None';
+     var mthStr = s.monthlyBreakdown && s.monthlyBreakdown.length > 0 ? s.monthlyBreakdown.slice(-12).map(m => m.month + ": ₹" + m.total).join(' | ') : 'None';
+     var yrStr = s.yearlyBreakdown && s.yearlyBreakdown.length > 0 ? s.yearlyBreakdown.map(y => y.year + ": ₹" + y.total).join(' | ') : 'None';
+
+     var ctx = "SALES TODAY: ₹"+(s.todaySales||0)+" | TODAY PROFIT: ₹"+(s.todayProfit||0)+" | OVERALL SALES: ₹"+(s.overallSales||0)+" | OVERALL PROFIT: ₹"+(s.overallProfit||0);
+     var ctx2 = "LOW STOCK ("+(s.lowStockCount||0)+"): "+lowNames+" | DEAD STOCK ("+(s.deadStock?s.deadStock.length:0)+"): "+deadNames+" | TOP PRODUCTS: "+topNames;
+     var ctx3 = "BILLS TODAY: "+(s.todayBills||0)+" | TOP CUSTOMERS: "+topCust+" | DAILY SALES (LAST 7 DAYS): "+dailyStr;
+     var ctx4 = "MONTHLY SALES: "+mthStr+" | YEARLY SALES: "+yrStr+" | RECENT 150 BILLS (WITH TIME): "+recInv;
+     
+     var pr = "You are an AI for a shop owner. Only use this database info:\\n" + ctx + "\\n" + ctx2 + "\\n" + ctx3 + "\\n" + ctx4 + "\\n\\nRules:\\n1. Use Professional Markdown formatting (bullet points, bold text for numbers/names).\\n2. If listing multiple items (like products/customers), DO NOT use comma-separated strings; use clean bulleted lists.\\n3. If today's sales/profit is ₹0, explicitly say ₹0 immediately.\\n4. DO NOT invent numbers or names. Use ONLY the data provided.\\n\\nOwner Question: " + q;
+     
+     var ans = "";
+     var usedGroq = false;
+     var errMsgs = [];
+     
+     if (window.ReactNativeWebView) {
+       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'console_log', message: 'Chatbot query: ' + q }));
+       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'console_log', message: 'Using Desktop API Keys -> Gemini: ' + (gk ? 'Yes' : 'No') + ', Groq: ' + (grk ? 'Yes' : 'No') }));
+     }
+
+     if (gk) {
+       try {
+         var res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + gk, {
+           method: "POST", headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ contents: [{ parts: [{ text: pr }] }] })
+         });
+         var js = await res.json();
+         if(js.error) throw new Error(js.error.message || "Gemini Error");
+         ans = js.candidates[0].content.parts[0].text;
+       } catch(ge) { 
+           errMsgs.push("Gemini: " + ge.message);
+           usedGroq = true; 
+       }
+     } else { usedGroq = true; }
+     
+     if (usedGroq && !ans) {
+        if (!grk) {
+            errMsgs.push("Groq: Key missing");
+        } else {
+            try {
+                var gres = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                   method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + grk },
+                   body: JSON.stringify({ model: "llama3-8b-8192", messages: [{role:"user", content:pr}] })
+                });
+                var gjs = await gres.json();
+                if(gjs.error) throw new Error(gjs.error.message || "Groq Error");
+                if(gjs.choices) ans = gjs.choices[0].message.content;
+            } catch(gre) {
+                errMsgs.push("Groq: " + gre.message);
+            }
+        }
+     }
+     
+     if(!ans) ans = "⚠️ API Error: " + errMsgs.join(" | ");
+     
+     ans = ans.replace(/\\*\\*(.*?)\\*\\*/g, '<b>$1</b>').replace(/\\n/g, '<br>');
+     document.getElementById(lId).innerHTML = ans;
+  } catch(err) {
+     document.getElementById(lId).innerHTML = "⚠️ " + err.message;
+  }
+  box.scrollTop = box.scrollHeight;
 }
 
 function openSb(){document.getElementById('sb').classList.add('open');document.getElementById('overlay').classList.add('on');}
@@ -529,7 +614,7 @@ function render(){
   var it = '<div id="pg-items" class="pg">'+hdrWithTog("Inventory")+'<div class="cont">' + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px">' + '<div class="card inv-filter-card" id="fc-all" data-filter="all" style="margin:0;padding:12px;border-bottom:3px solid var(--indigo);cursor:pointer"><div class="lbl">Products</div><div style="font-size:18px;font-weight:900;color:var(--indigo)" id="all-count">...</div></div>' + '<div class="card inv-filter-card" id="fc-low" data-filter="low" style="margin:0;padding:12px;border-bottom:3px solid var(--red);cursor:pointer"><div class="lbl">Low Stock</div><div style="font-size:18px;font-weight:900;color:var(--red)" id="low-count">...</div></div>' + '<div class="card inv-filter-card" id="fc-expiry" data-filter="expiry" style="margin:0;padding:12px;border-bottom:3px solid #f59e0b;cursor:pointer"><div class="lbl">Near Expiry</div><div style="font-size:18px;font-weight:900;color:#f59e0b" id="exp-count">...</div></div>' + '<div class="card inv-filter-card" id="fc-dead" data-filter="dead" style="margin:0;padding:12px;border-bottom:3px solid var(--orange);cursor:pointer"><div class="lbl">Dead Stock</div><div style="font-size:18px;font-weight:900;color:var(--orange)" id="dead-count">...</div></div>' + '</div>' + '<div class="lbl" style="margin:5px 0 10px" id="it-title">All Products</div><div id="it-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
   var bl = '<div id="pg-bills" class="pg">'+hdrWithTog("Invoices")+'<div class="cont"><div id="bl-list"><div style="text-align:center;padding:40px;color:var(--text-s)">Loading...</div></div></div></div>';
   var cl = '<div id="pg-cust" class="pg">'+hdrWithTog("Clients")+'<div class="cont"><div class="card"><div class="lbl">Top Spenders</div><div id="cl-list"><div style="color:var(--text-s)">Loading...</div></div></div></div></div>';
-  var ai = '<div id="pg-ai" class="pg">'+hdrWithTog("AI Consultant")+'<div class="cont"><div class="card" style="background:var(--card-h)"><div class="ai-box" id="ai-b"><div class="ai-msg ai-l">iVA Elite online. All systems live.</div></div><div class="ai-in"><input id="ai-i" placeholder="Ask about sales, profit..."><button class="ai-btn" onclick="handleAi()">SEND</button></div></div></div></div>';
+  var ai = '<div id="pg-ai" class="pg">'+hdrWithTog("AI Consultant")+'<div class="cont"><div style="font-size:10px;color:var(--text-4);margin-bottom:10px;text-align:center">Shop ID: '+(D.shop?.id || 'Unknown')+' | Keys: G:'+(D.stats?.ai_keys?.gemini ? 'OK' : 'X')+' GR:'+(D.stats?.ai_keys?.groq ? 'OK' : 'X')+'</div><div class="card" style="background:var(--card-h)"><div class="ai-box" id="ai-b"><div class="ai-msg ai-l">iVA Elite online. All systems live.</div></div><div class="ai-in"><input id="ai-i" placeholder="Ask about sales, profit..."><button class="ai-btn" onclick="handleAi()">SEND</button></div></div></div></div>';
   var pf = '<div id="pg-prof" class="pg">'+hdrWithTog("Profile")+'<div class="cont"><div style="text-align:center;padding:40px 0"><div style="font-size:48px;margin-bottom:15px">&#x1F3E2;</div><h2 style="font-weight:900">'+(D.shop?.name||D.shop?.store_name||D.shop?.owner_name||'My Shop')+'</h2><div style="color:var(--indigo);font-weight:800;font-size:12px;margin-top:5px">'+D.shop?.id+'</div></div><div class="card"><div class="lbl">Owner</div><div style="font-weight:700">'+(D.shop?.owner_name||'-')+'</div><div class="lbl" style="margin-top:20px">GST Number</div><div style="font-weight:900;color:var(--green)">'+(D.shop?.gst_number||'Not Set')+'</div><div class="lbl" style="margin-top:20px">Email</div><div style="font-weight:700">'+(D.shop?.shop_email||D.shop?.owner_email||'-')+'</div></div><button onclick="safeLogout()" style="width:100%;padding:20px;background:#1a1a24;color:var(--red);border-radius:24px;border:1px solid #301010;font-weight:900;cursor:pointer;margin-top:30px;font-family:Lexend">LOGOUT</button></div></div>';
   document.getElementById('app').innerHTML = ov + it + bl + cl + ai + pf;
   document.querySelectorAll('.pg').forEach(function(p){ p.classList.remove('on'); }); document.querySelectorAll('.sb_i').forEach(function(s){ s.classList.remove('on'); });
@@ -563,6 +648,18 @@ render();
         {RNWebView ? (
           <RNWebView source={{ html }} style={{ flex: 1, backgroundColor: '#020205' }}
             onMessage={(e) => {
+              try {
+                const data = JSON.parse(e.nativeEvent.data);
+                if (data.type === 'console_log') {
+                  console.log("-----------------------------------------");
+                  console.log("[Mobile Chatbot] " + data.message);
+                  console.log("-----------------------------------------");
+                  return;
+                }
+              } catch(err) {
+                // Not JSON, ignore
+              }
+
               if (e.nativeEvent.data === 'logout') {
                 Alert.alert('Logout', 'End this session?', [
                   { text: 'Cancel' },

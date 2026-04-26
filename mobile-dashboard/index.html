@@ -348,34 +348,88 @@
     .top-sold { font-size: 11px; color: var(--text-3); }
     .top-revenue { font-size: 13px; font-weight: 700; color: var(--green); }
 
-    /* ── AI Chat Section ── */
-    .chat-container { margin-top: 16px; }
-    .chat-messages {
-      max-height: 300px; overflow-y: auto;
-      margin-bottom: 12px;
-    }
-    .chat-bubble {
-      padding: 12px 16px;
+    /* ── AI Chat Section ────────────────────── */
+    .chat-container { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .chat-header-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px;
+      background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1));
+      border: 1px solid rgba(99,102,241,0.25);
       border-radius: 14px;
-      margin-bottom: 8px;
-      font-size: 13px; line-height: 1.5;
-      max-width: 85%;
     }
-    .chat-bubble.user {
-      background: var(--accent); color: white;
-      margin-left: auto;
-      border-bottom-right-radius: 4px;
+    .chat-ai-avatar {
+      width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      display: flex; align-items: center; justify-content: center; font-size: 18px;
+      box-shadow: 0 4px 12px rgba(99,102,241,0.35);
+    }
+    .chat-ai-info { flex: 1; }
+    .chat-ai-name { font-size: 13px; font-weight: 700; color: var(--text-1); }
+    .chat-ai-status { font-size: 11px; color: #22c55e; display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+    .chat-ai-dot { width: 5px; height: 5px; background: #22c55e; border-radius: 50%; animation: aiPulse 2s ease infinite; }
+    @keyframes aiPulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    .chat-gemini-badge {
+      font-size: 10px; padding: 3px 8px; border-radius: 20px;
+      background: rgba(99,102,241,0.2); color: #a5b4fc;
+      border: 1px solid rgba(99,102,241,0.3); font-weight: 600;
+    }
+    .chat-messages {
+      max-height: 340px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 10px;
+      padding: 4px 2px;
+      scrollbar-width: thin; scrollbar-color: rgba(99,102,241,0.3) transparent;
+    }
+    .chat-msg-row { display: flex; gap: 8px; align-items: flex-end; }
+    .chat-msg-row.user { flex-direction: row-reverse; }
+    .chat-msg-icon {
+      width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 12px;
+    }
+    .chat-msg-icon.bot { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+    .chat-msg-icon.user { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
+    .chat-bubble {
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 13px; line-height: 1.6;
+      max-width: 82%;
+      white-space: pre-wrap; word-break: break-word;
     }
     .chat-bubble.bot {
       background: var(--bg-card-2);
-      border: 1px solid var(--border);
+      border: 1px solid rgba(99,102,241,0.2);
+      color: var(--text-1);
       border-bottom-left-radius: 4px;
     }
+    .chat-bubble.user {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    /* Typing animation */
+    .chat-typing { display: flex; align-items: center; gap: 5px; padding: 10px 14px; }
+    .chat-typing-dot {
+      width: 7px; height: 7px; background: #6366f1; border-radius: 50%;
+      animation: typingBounce 1.4s ease infinite both;
+    }
+    .chat-typing-dot:nth-child(2) { animation-delay: 0.16s; }
+    .chat-typing-dot:nth-child(3) { animation-delay: 0.32s; }
+    @keyframes typingBounce { 0%,80%,100% { transform:scale(0); } 40% { transform:scale(1); } }
+    /* Quick prompts */
+    .chat-quick-prompts { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
+    .chat-quick-prompts::-webkit-scrollbar { display: none; }
+    .chat-chip {
+      white-space: nowrap; font-size: 11.5px;
+      padding: 5px 12px; border-radius: 20px; flex-shrink: 0;
+      background: rgba(99,102,241,0.1);
+      border: 1px solid rgba(99,102,241,0.25);
+      color: #a5b4fc; cursor: pointer;
+    }
+    .chat-chip:active { background: rgba(99,102,241,0.3); }
     .chat-input-row { display: flex; gap: 8px; }
     .chat-input {
       flex: 1; height: 46px;
       background: var(--bg-card);
-      border: 1px solid var(--border);
+      border: 1px solid rgba(99,102,241,0.25);
       border-radius: 12px;
       padding: 0 16px;
       color: var(--text-1);
@@ -383,18 +437,19 @@
       outline: none;
       font-family: var(--font);
     }
-    .chat-input:focus { border-color: var(--accent); }
+    .chat-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
     .chat-send {
       width: 46px; height: 46px;
-      border-radius: 12px;
-      border: none;
-      background: var(--accent);
-      color: white;
-      cursor: pointer;
+      border-radius: 12px; border: none;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+      transition: transform 0.15s;
     }
-    .chat-send:active { opacity: 0.8; }
+    .chat-send:active { transform: scale(0.94); }
+    .chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* ── Offline Banner ── */
     .offline-banner {
@@ -746,14 +801,44 @@
     </div>
 
     <!-- AI Chat -->
-    <div class="section-title">💬 Ask Your Business AI</div>
+    <div class="section-title">🤖 AI Business Assistant</div>
     <div class="chat-container">
-      <div id="chat-messages" class="chat-messages">
-        <div class="chat-bubble bot">Hi! I can answer questions about your sales, stock, top products, expiry status, and customer insights. What would you like to know?</div>
+
+      <!-- AI Header -->
+      <div class="chat-header-row">
+        <div class="chat-ai-avatar">🤖</div>
+        <div class="chat-ai-info">
+          <div class="chat-ai-name">Business Intelligence AI</div>
+          <div class="chat-ai-status">
+            <div class="chat-ai-dot"></div>
+            Live data from your shop database
+          </div>
+        </div>
+        <div class="chat-gemini-badge">Gemini</div>
       </div>
+
+      <!-- Quick Prompt Chips -->
+      <div class="chat-quick-prompts" id="chat-chips">
+        <button class="chat-chip" onclick="setAndSend('Today sales?')">📊 Today Sales</button>
+        <button class="chat-chip" onclick="setAndSend('Overall profit?')">💰 Profit</button>
+        <button class="chat-chip" onclick="setAndSend('Low stock items?')">📦 Low Stock</button>
+        <button class="chat-chip" onclick="setAndSend('Expired products?')">⚠️ Expiry</button>
+        <button class="chat-chip" onclick="setAndSend('Top selling products?')">🏆 Top Products</button>
+        <button class="chat-chip" onclick="setAndSend('Best customer?')">👤 Customers</button>
+      </div>
+
+      <!-- Messages -->
+      <div id="chat-messages" class="chat-messages">
+        <div class="chat-msg-row bot">
+          <div class="chat-msg-icon bot">🤖</div>
+          <div class="chat-bubble bot">Hi! I'm your AI powered by Google Gemini ✨\nAsk me anything about your sales, profit, stock alerts, expiry status, or customers!</div>
+        </div>
+      </div>
+
+      <!-- Input -->
       <div class="chat-input-row">
-        <input id="chat-input" class="chat-input" placeholder="Ask anything..." />
-        <button class="chat-send" onclick="askAI()">
+        <input id="chat-input" class="chat-input" placeholder="Ask in Tamil or English..." />
+        <button class="chat-send" id="chat-send-btn" onclick="askAI()">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
       </div>
@@ -1426,43 +1511,94 @@ function renderAnalytics(data) {
 }
 
 /* ══════════════════════════════════════════════════════
-   AI CHATBOT
+   AI CHATBOT — Gemini RAG
 ══════════════════════════════════════════════════════ */
+let aiLoading = false;
+
+function setAndSend(text) {
+  document.getElementById('chat-input').value = text;
+  askAI();
+}
+
 async function askAI() {
-  const input = document.getElementById("chat-input");
+  if (aiLoading) return;
+
+  const input    = document.getElementById("chat-input");
   const question = input.value.trim();
   if (!question) return;
 
   const messages = document.getElementById("chat-messages");
-  
-  // Add user bubble
-  messages.innerHTML += `<div class="chat-bubble user">${esc(question)}</div>`;
+  const sendBtn  = document.getElementById("chat-send-btn");
+
+  // User bubble
+  messages.innerHTML += `
+    <div class="chat-msg-row user">
+      <div class="chat-msg-icon user">&#x1F464;</div>
+      <div class="chat-bubble user">${esc(question)}</div>
+    </div>`;
   input.value = "";
   messages.scrollTop = messages.scrollHeight;
 
-  // In cloud mode, use local AI from statsData
-  if (dataMode === 'cloud') {
-    const answer = localAI(question);
-    messages.innerHTML += `<div class="chat-bubble bot">${esc(answer)}</div>`;
-    messages.scrollTop = messages.scrollHeight;
-    return;
-  }
+  // Typing indicator
+  const typingId = 'typing-' + Date.now();
+  messages.innerHTML += `
+    <div class="chat-msg-row bot" id="${typingId}">
+      <div class="chat-msg-icon bot">&#x1F916;</div>
+      <div class="chat-bubble bot chat-typing">
+        <div class="chat-typing-dot"></div>
+        <div class="chat-typing-dot"></div>
+        <div class="chat-typing-dot"></div>
+      </div>
+    </div>`;
+  messages.scrollTop = messages.scrollHeight;
+
+  aiLoading = true;
+  if (sendBtn) sendBtn.disabled = true;
 
   try {
-    const res = await fetch(`${localAPI}/api/ai/ask`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question })
-    });
-    const data = await res.json();
-    messages.innerHTML += `<div class="chat-bubble bot">${esc(data.answer)}</div>`;
+    let answer = null;
+
+    // LOCAL mode: call Gemini via backend RAG API
+    if (dataMode === 'local' && localAPI) {
+      try {
+        const res = await fetch(`${localAPI}/api/ai/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question }),
+          signal: AbortSignal.timeout(30000)
+        });
+        const data = await res.json();
+        answer = data.answer;
+      } catch (fetchErr) {
+        console.warn('[AI] Local API failed, using client-side fallback');
+      }
+    }
+
+    // CLOUD mode or fallback: use client-side AI from cached statsData
+    if (!answer) answer = localAI(question);
+
+    const typingEl = document.getElementById(typingId);
+    if (typingEl) typingEl.remove();
+
+    messages.innerHTML += `
+      <div class="chat-msg-row bot">
+        <div class="chat-msg-icon bot">&#x1F916;</div>
+        <div class="chat-bubble bot">${esc(answer)}</div>
+      </div>`;
+
   } catch (e) {
-    // Fallback to local AI
-    const answer = localAI(question);
-    messages.innerHTML += `<div class="chat-bubble bot">${esc(answer)}</div>`;
+    const typingEl = document.getElementById(typingId);
+    if (typingEl) typingEl.remove();
+    messages.innerHTML += `
+      <div class="chat-msg-row bot">
+        <div class="chat-msg-icon bot">&#x1F916;</div>
+        <div class="chat-bubble bot">&#x26A0;&#xFE0F; Could not reach AI. Check connection and try again.</div>
+      </div>`;
+  } finally {
+    aiLoading = false;
+    if (sendBtn) sendBtn.disabled = false;
+    messages.scrollTop = messages.scrollHeight;
   }
-  
-  messages.scrollTop = messages.scrollHeight;
 }
 
 // Client-side AI using cached statsData (works in cloud mode)

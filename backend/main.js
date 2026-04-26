@@ -5,7 +5,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut } = require("
 const { execSync } = require("child_process");
 const db = require("./db");
 const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
-const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL } = require("./dashboardServer");
+const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL, syncStatsToSupabase } = require("./dashboardServer");
 const { v4: uuidv4 } = require("uuid");
 const { createClient } = require('@supabase/supabase-js');
 const nodemailer = require('nodemailer');
@@ -1205,7 +1205,7 @@ function createWindow() {
 
             // Mark today as alerted (whether sent or not — no issues = no repeat check)
             intervalSettings._lastInventoryAlertDate = todayDate;
-            fs.writeFileSync(configPath, JSON.stringify(intervalSettings, null, 2));
+            fs.writeFileSync(appSettingsPath, JSON.stringify(intervalSettings, null, 2));
           } catch (alertErr) {
             console.error('[Alerts] ❌ Failed to send inventory alert:', alertErr.message);
           }
@@ -1341,6 +1341,14 @@ ipcMain.handle("save-app-settings", (event, settings) => {
   try {
     const configPath = path.join(app.getPath("userData"), "app_settings.json");
     fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
+    
+    // 🔥 Force an immediate cloud sync so mobile app gets the updated API keys immediately!
+    if (settings.shopId || process.env.SHOP_ID) {
+      console.log(`[ShopSync] 🤖 Syncing API Keys (Gemini/Groq)...`);
+      // Don't await it to avoid blocking UI
+      syncStatsToSupabase();
+    }
+    
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };

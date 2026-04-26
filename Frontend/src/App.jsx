@@ -70,7 +70,7 @@ function App() {
   const [isRegistered, setIsRegistered] = useState(true);
   const [shopId, setShopId]             = useState('');
   const [showPairing, setShowPairing]   = useState(false);
-  const [validityWarning, setValidityWarning] = useState(null); // { daysLeft, validityEnd }
+  const [validityWarning, setValidityWarning]   = useState(null); // { daysLeft, validityEnd }
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [showStartupPrompt, setShowStartupPrompt] = useState(false);
   const [lockData, setLockData] = useState(null); // { reason, expiry }

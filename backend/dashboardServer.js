@@ -11,6 +11,7 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const db = require("./db");
+const aiService = require('./aiService');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 let supabase = null;
 if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
@@ -160,17 +161,13 @@ async function syncStatsToSupabase() {
     const expiredProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
     const expiringProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date>=? AND expiry_date<=? ORDER BY expiry_date ASC LIMIT 30").all(today, inExp);
     const customerBehavior = db.prepare("SELECT customer_name, customer_phone, COUNT(*) as visit_count, SUM(total_amount) as total_spent FROM invoices WHERE customer_phone IS NOT NULL AND customer_phone != '' GROUP BY customer_phone ORDER BY total_spent DESC LIMIT 20").all();
-    const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 50").all();
+    const recentInvoices = db.prepare("SELECT id, bill_no, bill_date, customer_name, customer_phone, payment_mode, total_amount, created_at FROM invoices ORDER BY created_at DESC LIMIT 150").all();
     const allProductsList = db.prepare("SELECT name, quantity, price, unit FROM products ORDER BY name ASC LIMIT 1000").all();
 
     // 1. Control Plane Sync (Snapshot)
     try {
       // LOAD SETTINGS FOR SYNC
-      const configPath = path.join(os.homedir(), "AppData", "Roaming", "innoaivators-billing", "app_settings.json");
-      let settings = {};
-      if (fs.existsSync(configPath)) {
-        try { settings = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch(e) {}
-      }
+      let settings = getSettings();
 
       // FIRST: Ensure shop exists (prevents FK error in shop_stats)
       const shopSyncConfig = db.prepare("SELECT * FROM shop_supabase_config WHERE is_connected = 1 ORDER BY id DESC LIMIT 1").get();
@@ -194,6 +191,10 @@ async function syncStatsToSupabase() {
         settings: {
           storeName: settings.storeName || '', storeAddress: settings.storeAddress || '', gstNumber: settings.gstNumber || '',
           whatsappNumber: settings.ownerPhone || '', expiryAlertDays: expiryDays, lowStockThreshold: lowThreshold, deadStockThresholdDays: deadDays
+        },
+        ai_keys: {
+          gemini: process.env.GEMINI_API_KEY || settings.geminiKey || '',
+          groq: process.env.GROQ_API_KEY || settings.groqKey || ''
         }
       };
       const { error: statsErr } = await supabase.from("shop_stats").upsert({ shop_id: shopId, stats_json: statsJson, updated_at: new Date().toISOString() });
@@ -1038,37 +1039,20 @@ function startDashboardServer(mainWindow) {
   });
 
   /* ══════════════════════════════════════════════════════
-     API: AI CHATBOT (Business Insights)
+     API: AI CHATBOT (Gemini RAG — Live Data)
   ══════════════════════════════════════════════════════ */
-  expressApp.post("/api/ai/ask", (req, res) => {
+  expressApp.post("/api/ai/ask", async (req, res) => {
     try {
       const { question } = req.body;
-      const q = question.toLowerCase();
-      let answer = "I'm sorry, I don't have that data yet.";
-
-      if (q.includes("sale") || q.includes("revenue")) {
-        const today = db.prepare(`SELECT SUM(total_amount) as t FROM invoices WHERE date(created_at)=date('now')`).get().t || 0;
-        answer = `Your total sales for today is ₹${today}.`;
-      } else if (q.includes("product") || q.includes("most sold")) {
-        const top = db.prepare(`
-          SELECT p.name, SUM(ii.quantity) as q FROM invoice_items ii JOIN products p ON ii.product_id=p.id GROUP BY p.id ORDER BY q DESC LIMIT 1
-        `).get();
-        answer = top ? `Your top selling product is ${top.name} with ${top.q} units sold.` : "No sales data found.";
-      } else if (q.includes("stock") || q.includes("low")) {
-        const low = db.prepare(`SELECT COUNT(*) as c FROM products WHERE quantity <= 5`).get().c;
-        answer = `You have ${low} products running low on stock. Check the inventory alerts!`;
-      } else if (q.includes("expiry") || q.includes("expired")) {
-        const exp = db.prepare(`SELECT COUNT(*) as c FROM products WHERE expiry_date < date('now')`).get().c;
-        answer = `${exp} products have already expired. Please remove them from the shelves.`;
-      } else if (q.includes("customer") || q.includes("buyer")) {
-        const top = db.prepare(`SELECT customer_name, SUM(total_amount) as t FROM invoices WHERE customer_name != '' GROUP BY customer_phone ORDER BY t DESC LIMIT 1`).get();
-        answer = top ? `Your most valuable customer is ${top.customer_name} with a lifetime spend of ₹${top.t}.` : "No customer data available.";
-      } else {
-        answer = "I can tell you about sales, top products, stock alerts, or your best customers!";
+      if (!question || question.trim().length === 0) {
+        return res.status(400).json({ error: 'Question is required' });
       }
-
+      const answer = await aiService.askAI(question.trim());
       res.json({ answer });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) {
+      console.error('[AI API] Error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   /* ══════════════════════════════════════════════════════

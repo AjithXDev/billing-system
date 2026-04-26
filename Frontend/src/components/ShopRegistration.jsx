@@ -484,7 +484,7 @@ export default function ShopRegistration({ onRegistered, forcePending = false, s
               <input
                 type="tel"
                 value={mobile}
-                onChange={(e) => { setMobile(e.target.value.replace(/[^0-9+]/g, "")); }}
+                onChange={(e) => { setMobile(e.target.value.replace(/[^0-9+\s-]/g, "")); }}
                 placeholder="+91 XXXX XXXX XX"
                 maxLength={15}
               />
