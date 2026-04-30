@@ -115,62 +115,104 @@ const POS = ({ showQR }) => {
   const [scanStatus, setScanStatus] = useState("Waiting for scanner...");
   const [detectedBarcode, setDetectedBarcode] = useState("");
   
+  // ── LOOSE PRODUCT WEIGHT MODAL ──
+  const [showLooseModal, setShowLooseModal] = useState(false);
+  const [looseProduct, setLooseProduct] = useState(null);
+  const [looseWeight, setLooseWeight] = useState("");
+  const [looseWeightUnit, setLooseWeightUnit] = useState("Kg");
+  const [looseTargetIndex, setLooseTargetIndex] = useState(null); // for tally mode
+  const [photoSearch, setPhotoSearch] = useState(""); // search for image billing
+  
   const inputRefs = useRef({}); 
   const tallyInputRef = useRef(null);
 
-  // 🟢 Keyboard Shortcuts
+  // 🟢 Keyboard Shortcuts — registered ONCE, reads from refs
+  const billingModeRef = useRef(billingMode);
+  const currentRowRef = useRef(currentRow);
+  const showInvoiceRef2 = useRef(showInvoice);
+  const showHeldBillsRef2 = useRef(showHeldBills);
+  const showQRRef2 = useRef(showQR);
+
+  useEffect(() => { billingModeRef.current = billingMode; }, [billingMode]);
+  useEffect(() => { currentRowRef.current = currentRow; }, [currentRow]);
+  useEffect(() => { showInvoiceRef2.current = showInvoice; }, [showInvoice]);
+  useEffect(() => { showHeldBillsRef2.current = showHeldBills; }, [showHeldBills]);
+  useEffect(() => { showQRRef2.current = showQR; }, [showQR]);
+
   useEffect(() => {
     const handleGlobalKeys = (e) => {
-      // Don't hijack keys if we are in a modal or typing in a non-billing input
-      if (showInvoice || showHeldBills || showQR) return;
-      if (e.target.tagName === 'INPUT' && !e.target.classList.contains('pos-input')) return;
+      if (showInvoiceRef2.current || showHeldBillsRef2.current || showQRRef2.current) return;
+      // Never hijack when typing in any field
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
 
       // F2 or Ctrl+F to focus search in Tally mode
-      if ((e.key === 'F2' || (e.ctrlKey && e.key === 'f')) && billingMode === 'tally') {
+      if ((e.key === 'F2' || (e.ctrlKey && e.key === 'f')) && billingModeRef.current === 'tally') {
         e.preventDefault();
-        inputRefs.current[`${currentRow}_name`]?.focus();
+        inputRefs.current[`${currentRowRef.current}_name`]?.focus();
       }
     };
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [billingMode, currentRow]);
+  }, []); // ← Registered ONCE
 
   const [scanFlash, setScanFlash] = useState(false);
   
   // 🟢 Global Barcode Scanner Listener
+  // Uses refs for ALL mutable state so this listener is ONLY registered ONCE.
+  // This permanently fixes the typing issue caused by stale listener accumulation.
   const barcodeBuffer = useRef("");
   const barcodeTimeout = useRef(null);
   const lastScanTime = useRef(0);
 
+  // Mutable refs that the listener reads — updated every render, NO re-registration needed
+  const allProductsRef = useRef(allProducts);
+  const showInvoiceRef = useRef(showInvoice);
+  const showHeldBillsRef = useRef(showHeldBills);
+  const showQRRef = useRef(showQR);
+  const isScannerOpenRef = useRef(isScannerOpen);
+  const addProductToCartRef = useRef(null);
+  const triggerScanFeedbackRef = useRef(null); // assigned after fn defined
+
+  useEffect(() => { allProductsRef.current = allProducts; }, [allProducts]);
+  useEffect(() => { showInvoiceRef.current = showInvoice; }, [showInvoice]);
+  useEffect(() => { showHeldBillsRef.current = showHeldBills; }, [showHeldBills]);
+  useEffect(() => { showQRRef.current = showQR; }, [showQR]);
+  useEffect(() => { isScannerOpenRef.current = isScannerOpen; }, [isScannerOpen]);
+
   useEffect(() => {
     const handleBarcodeScan = (e) => {
       // Don't listen when modals are open
-      if (showInvoice || showHeldBills || showQR || isScannerOpen) return;
+      if (showInvoiceRef.current || showHeldBillsRef.current || showQRRef.current || isScannerOpenRef.current) return;
 
-      // CRITICAL FIX: Don't intercept keystrokes when user is typing in any input field
+      // CRITICAL: Never intercept when user is typing in ANY input-like element
       const activeEl = document.activeElement;
-      const isTypingInField = activeEl && (
-        activeEl.tagName === 'INPUT' || 
-        activeEl.tagName === 'TEXTAREA' || 
-        activeEl.tagName === 'SELECT' ||
-        activeEl.isContentEditable
-      );
-      if (isTypingInField) return;
+      if (activeEl) {
+        const tag = activeEl.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          activeEl.isContentEditable ||
+          activeEl.getAttribute('role') === 'textbox' ||
+          activeEl.getAttribute('contenteditable') === 'true'
+        ) return;
+      }
 
       if (e.key === "Enter") {
         const now = Date.now();
         const scanned = barcodeBuffer.current.trim();
         barcodeBuffer.current = "";
+        if (barcodeTimeout.current) { clearTimeout(barcodeTimeout.current); barcodeTimeout.current = null; }
         
-        // Prevent double trigger (scanner + search input Enter)
         if (scanned.length > 3 && (now - lastScanTime.current) > 500) {
           e.preventDefault();
           lastScanTime.current = now;
           
-          const matchedProduct = allProducts.find(p => p.barcode === scanned || p.product_code === scanned);
-          if (matchedProduct) {
-            addProductToCart(matchedProduct);
-            triggerScanFeedback();
+          const matched = allProductsRef.current.find(p => p.barcode === scanned || p.product_code === scanned);
+          if (matched) {
+            addProductToCartRef.current(matched);
+            if (triggerScanFeedbackRef.current) triggerScanFeedbackRef.current();
           } else {
             console.warn("Barcode not found:", scanned);
           }
@@ -178,18 +220,19 @@ const POS = ({ showQR }) => {
         return;
       }
 
-      if (e.key.length === 1) {
+      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
         barcodeBuffer.current += e.key;
         if (barcodeTimeout.current) clearTimeout(barcodeTimeout.current);
         barcodeTimeout.current = setTimeout(() => {
-          barcodeBuffer.current = ""; // Reset if too slow (human typing)
-        }, 100); 
+          barcodeBuffer.current = "";
+        }, 300);
       }
     };
-    
+
+    // Register ONCE, never re-register
     window.addEventListener("keydown", handleBarcodeScan, true);
     return () => window.removeEventListener("keydown", handleBarcodeScan, true);
-  }, [allProducts, showInvoice, showHeldBills, showQR, billItems, settings, isScannerOpen]);
+  }, []); // ← Empty deps: registered once for the lifetime of this component
 
   // Visual/Audio Feedback
   const triggerScanFeedback = () => {
@@ -210,6 +253,8 @@ const POS = ({ showQR }) => {
       osc.stop(audioCtx.currentTime + 0.1);
     } catch(e) {}
   };
+  // Keep ref in sync so the once-registered listener can always call the latest version
+  triggerScanFeedbackRef.current = triggerScanFeedback;
 
   // 📷 Camera Scanner Effect
   const scannerRef = useRef(null);
@@ -411,8 +456,18 @@ const POS = ({ showQR }) => {
       return;
     }
 
+    // ⚖️ LOOSE PRODUCT: Show weight modal instead of adding directly
+    if (product.product_type === 'loose') {
+      setLooseProduct(product);
+      setLooseWeight("");
+      setLooseWeightUnit(product.unit || 'Kg');
+      setLooseTargetIndex(null);
+      setShowLooseModal(true);
+      return;
+    }
+
     const priceType = product.price_type || 'exclusive';
-    const catGst = Number(product.gst_rate || product.category_gst || 0);
+    const catGst = settings.gstNumber ? Number(product.gst_rate || product.category_gst || 0) : 0;
     const price = Number(product.price || 0);
 
     const existingIdx = billItems.findIndex(i => i.id === product.id);
@@ -463,6 +518,118 @@ const POS = ({ showQR }) => {
       const currentValid = billItems.filter(i => i.id);
       setBillItems([...currentValid, newRow]);
     }
+  };
+  // Keep ref in sync so the once-registered barcode listener can call the latest version
+  addProductToCartRef.current = addProductToCart;
+
+  /* ── Convert weight between units ── */
+  const convertUnit = (value, fromUnit, toUnit) => {
+    const v = parseFloat(value) || 0;
+    if (fromUnit === toUnit) return v;
+    // Gram → Kg
+    if (fromUnit === 'Gram' && toUnit === 'Kg') return v / 1000;
+    // Kg → Gram
+    if (fromUnit === 'Kg' && toUnit === 'Gram') return v * 1000;
+    // ml → Liter
+    if (fromUnit === 'ml' && toUnit === 'Liter') return v / 1000;
+    // Liter → ml
+    if (fromUnit === 'Liter' && toUnit === 'ml') return v * 1000;
+    return v;
+  };
+
+  /* ── Confirm adding loose product after weight entry ── */
+  const confirmLooseAdd = () => {
+    if (!looseProduct || !looseWeight || parseFloat(looseWeight) <= 0) {
+      alert("Please enter a valid weight/quantity.");
+      return;
+    }
+
+    const product = looseProduct;
+    const sellingUnit = product.unit || 'Kg'; // unit product is sold in (e.g. Gram)
+    const stockUnit = product.stock_unit || sellingUnit; // unit stock is tracked in (e.g. Kg)
+    const registeredWeight = parseFloat(product.weight) || 1; // e.g. 500 (grams)
+    const registeredPrice = Number(product.price || 0); // e.g. ₹50 (for 500 grams)
+    
+    const enteredWeight = parseFloat(looseWeight); // e.g. 250
+    const enteredUnit = looseWeightUnit; // e.g. Gram
+
+    // Convert entered weight to selling unit for proportional calc
+    const enteredInSellingUnit = convertUnit(enteredWeight, enteredUnit, sellingUnit);
+    
+    // Proportional price: (enteredWeight / registeredWeight) * registeredPrice
+    const priceRatio = enteredInSellingUnit / registeredWeight;
+    const calculatedPrice = registeredPrice * priceRatio;
+
+    // Convert entered weight to stock unit for stock deduction
+    const qtyInStockUnit = convertUnit(enteredWeight, enteredUnit, stockUnit);
+    
+    if (qtyInStockUnit <= 0) {
+      alert("Invalid weight entered.");
+      return;
+    }
+
+    const availableStock = Number(product.quantity || 0); // in stock_unit
+    const existingLooseQty = billItems.filter(i => i.id === product.id).reduce((sum, i) => sum + Number(i.qty || 0), 0);
+    if (existingLooseQty + qtyInStockUnit > availableStock) {
+      alert(`⚠️ Not enough stock!\n"${product.name}" has only ${(availableStock - existingLooseQty).toFixed(3)} ${stockUnit} remaining.`);
+      return;
+    }
+
+    const priceType = product.price_type || 'exclusive';
+    const catGst = settings.gstNumber ? Number(product.gst_rate || product.category_gst || 0) : 0;
+    const dp = Number(product.default_discount) || 0;
+
+    let gross_taxable;
+    if (priceType === 'inclusive') {
+      gross_taxable = calculatedPrice / (1 + catGst / 100);
+    } else {
+      gross_taxable = calculatedPrice;
+    }
+
+    const discAmt = (gross_taxable * dp) / 100;
+    const net_taxable = gross_taxable - discAmt;
+    const gstAmt = (net_taxable * catGst) / 100;
+
+    // Display label: "Basmati Rice (250 Gram)"
+    const displayWeight = `${looseWeight} ${enteredUnit}`;
+
+    const newRow = {
+      tempId: Date.now() + Math.random(),
+      id: product.id,
+      name: `${product.name} (${displayWeight})`,
+      price: registeredPrice,
+      price_type: priceType,
+      qty: qtyInStockUnit,
+      total: gross_taxable,
+      gstRate: catGst,
+      gstAmt,
+      cgstRate: catGst / 2,
+      sgstRate: catGst / 2,
+      cgstAmt: gstAmt / 2,
+      sgstAmt: gstAmt / 2,
+      expiry_date: product.expiry_date || null,
+      image: product.image || null,
+      maxStock: availableStock,
+      discountPercent: dp,
+      discountAmt: discAmt,
+      isLoose: true,
+      looseBaseUnit: stockUnit
+    };
+
+    // For tally mode with a target index, replace that row
+    if (looseTargetIndex !== null) {
+      const updated = [...billItems];
+      updated[looseTargetIndex] = newRow;
+      setBillItems(updated);
+    } else {
+      // Photo mode: always add as new entry (each weight entry is separate)
+      const currentValid = billItems.filter(i => i.id);
+      setBillItems([...currentValid, newRow]);
+    }
+
+    setShowLooseModal(false);
+    setLooseProduct(null);
+    setLooseWeight("");
   };
 
   /* ── Resume held bill ── */
@@ -554,8 +721,19 @@ const POS = ({ showQR }) => {
       return;
     }
 
+    // ⚖️ LOOSE PRODUCT: Show weight modal
+    if (product.product_type === 'loose') {
+      setLooseProduct(product);
+      setLooseWeight("");
+      setLooseWeightUnit(product.unit || 'Kg');
+      setLooseTargetIndex(index);
+      setShowLooseModal(true);
+      setSuggestions([]);
+      return;
+    }
+
     const updated = [...billItems];
-    const catGst = Number(product.gst_rate || product.category_gst || 0);
+    const catGst = settings.gstNumber ? Number(product.gst_rate || product.category_gst || 0) : 0;
     const price = Number(product.price || 0);
     const quantity = 1;
     const priceType = product.price_type || 'exclusive';
@@ -609,8 +787,10 @@ const POS = ({ showQR }) => {
     }, 10);
   };
 
-  // In "Image Billing" mode, limit the max products rendered at once to prevent severe UI freezes
-  const filteredProducts = allProducts.slice(0, 100);
+  // In "Image Billing" mode, filter by search query and limit products
+  const filteredProducts = photoSearch.trim()
+    ? allProducts.filter(p => p.name.toLowerCase().includes(photoSearch.toLowerCase()) || (p.product_code || '').toLowerCase().includes(photoSearch.toLowerCase()) || (p.barcode || '').includes(photoSearch)).slice(0, 100)
+    : allProducts.slice(0, 100);
 
   const handleKeyDown = (e, index, field) => {
     if (field === "name") {
@@ -656,7 +836,7 @@ const POS = ({ showQR }) => {
     if (newQty < 0) newQty = 0;
 
     const priceType = item.price_type || 'exclusive';
-    const rate = Number(item.gstRate || 0);
+    const rate = settings.gstNumber ? Number(item.gstRate || 0) : 0;
     const price = Number(item.price || 0);
 
     const dp = item.discountPercent || 0;
@@ -701,7 +881,7 @@ const POS = ({ showQR }) => {
     const gross_taxable = Number(item.total || 0);
     const discAmt = (gross_taxable * dp) / 100;
     const net_taxable = gross_taxable - discAmt;
-    const rate = Number(item.gstRate || 0);
+    const rate = settings.gstNumber ? Number(item.gstRate || 0) : 0;
     const gstAmt = (net_taxable * rate) / 100;
 
     updated[idx] = { 
@@ -924,6 +1104,110 @@ const POS = ({ showQR }) => {
         />
       )}
 
+      {/* ── LOOSE PRODUCT WEIGHT ENTRY MODAL ── */}
+      {showLooseModal && looseProduct && (() => {
+        const regWeight = parseFloat(looseProduct.weight) || 1;
+        const regUnit = looseProduct.unit || 'Kg';
+        const regPrice = Number(looseProduct.price || 0);
+        const stkUnit = looseProduct.stock_unit || regUnit;
+        const enteredW = parseFloat(looseWeight) || 0;
+        const enteredInSelling = convertUnit(enteredW, looseWeightUnit, regUnit);
+        const livePrice = enteredW > 0 ? (enteredInSelling / regWeight) * regPrice : 0;
+        return (
+        <div className="modal-overlay" onClick={() => setShowLooseModal(false)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: '16px', width: '420px', padding: '0', overflow: 'hidden', boxShadow: '0 25px 60px rgba(0,0,0,0.3)', animation: 'slideUp 0.25s ease-out' }}>
+            <style>{`@keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+            
+            {/* Header */}
+            <div style={{ background: '#6366f1', padding: '22px 28px', color: 'white' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>⚖️</div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '17px' }}>{looseProduct.name}</div>
+                  <div style={{ fontSize: '12px', opacity: 0.9 }}>{regWeight} {regUnit} = ₹{regPrice} · Stock: {looseProduct.quantity} {stkUnit}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '24px 28px' }}>
+              <div style={{ fontWeight: 700, fontSize: '12px', color: '#475569', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Enter Weight</div>
+              
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
+                <input
+                  type="number"
+                  step="0.01"
+                  autoFocus
+                  value={looseWeight}
+                  onChange={e => setLooseWeight(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') confirmLooseAdd(); }}
+                  placeholder="e.g. 250"
+                  style={{ flex: 1, padding: '12px 16px', fontSize: '20px', fontWeight: 800, border: '2px solid #e2e8f0', borderRadius: '10px', outline: 'none', textAlign: 'center', transition: 'border-color 0.2s' }}
+                  onFocus={e => e.target.style.borderColor = '#6366f1'}
+                  onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                />
+              </div>
+
+              {/* Unit Selector */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                {(regUnit === 'Kg' || regUnit === 'Gram' ? ['Kg', 'Gram'] : ['Liter', 'ml']).map(u => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setLooseWeightUnit(u)}
+                    style={{
+                      flex: 1, padding: '9px', borderRadius: '8px',
+                      border: looseWeightUnit === u ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                      background: looseWeightUnit === u ? '#6366f1' : '#fff',
+                      color: looseWeightUnit === u ? '#fff' : '#475569',
+                      fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >{u}</button>
+                ))}
+              </div>
+
+              {/* Live Price Preview */}
+              {enteredW > 0 && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px', marginBottom: '16px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 700, marginBottom: '4px', textTransform: 'uppercase' }}>Estimated Price</div>
+                  <div style={{ fontSize: '26px', fontWeight: 900, color: '#15803d' }}>
+                    ₹{livePrice.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
+                    {looseWeight} {looseWeightUnit} of {regWeight} {regUnit} = ₹{regPrice}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Weight Buttons */}
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                {(regUnit === 'Kg' || regUnit === 'Gram' 
+                  ? [{ v: '100', u: 'Gram' }, { v: '250', u: 'Gram' }, { v: '500', u: 'Gram' }, { v: '1', u: 'Kg' }, { v: '2', u: 'Kg' }, { v: '5', u: 'Kg' }]
+                  : [{ v: '100', u: 'ml' }, { v: '250', u: 'ml' }, { v: '500', u: 'ml' }, { v: '1', u: 'Liter' }, { v: '2', u: 'Liter' }]
+                ).map(q => (
+                  <button
+                    key={q.v + q.u}
+                    type="button"
+                    onClick={() => { setLooseWeight(q.v); setLooseWeightUnit(q.u); }}
+                    style={{ padding: '5px 10px', borderRadius: '16px', border: '1px solid #e2e8f0', background: '#f8fafc', color: '#475569', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                  >{q.v} {q.u}</button>
+                ))}
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => setShowLooseModal(false)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 700, fontSize: '14px', cursor: 'pointer' }}>Cancel</button>
+                <button onClick={confirmLooseAdd} style={{ flex: 2, padding: '12px', borderRadius: '10px', border: 'none', background: '#6366f1', color: '#fff', fontWeight: 800, fontSize: '14px', cursor: 'pointer' }}>
+                  ✓ Add to Bill
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* ── CAMERA SCANNER MODAL ── */}
       {isScannerOpen && (
         <div className="modal-overlay" onClick={() => setIsScannerOpen(false)}>
@@ -1014,7 +1298,7 @@ const POS = ({ showQR }) => {
                           <td style={{ padding: "10px 0", fontWeight: "500" }}>
                             {item.name} {item.isFree && <span style={{ color: "white", backgroundColor: "#10b981", fontSize: "0.7rem", padding: "2px 6px", borderRadius: "4px", marginLeft: "6px" }}>FREE</span>} <br />
                             <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-                              {item.isFree ? `Offer: ${item.offerName}` : `₹${item.price} (${item.price_type}) + ${item.gstRate}% GST`}
+                              {item.isFree ? `Offer: ${item.offerName}` : `₹${item.price} ${settings.gstNumber ? `(${item.price_type}) + ${item.gstRate}% GST` : ''}`}
                             </span>
                           </td>
                           <td style={{ padding: "10px 0", textAlign: "center" }}>{item.qty}</td>
@@ -1030,9 +1314,8 @@ const POS = ({ showQR }) => {
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "20px", borderTop: "2px solid #e2e8f0", paddingTop: "15px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.85rem" }}>
-                      Subtotal: ₹{subtotal.toFixed(2)}<br/>
-                      CGST (Total): ₹{totalCGST.toFixed(2)}<br/>
-                      SGST (Total): ₹{totalSGST.toFixed(2)}
+                      Subtotal: ₹{subtotal.toFixed(2)}
+                      {settings.gstNumber && <><br/>CGST (Total): ₹{totalCGST.toFixed(2)}<br/>SGST (Total): ₹{totalSGST.toFixed(2)}</>}
                       {totalDiscount > 0 && <><br/><span style={{ color: '#10b981' }}>Discount: -₹{totalDiscount.toFixed(2)}</span></>}
                     </div>
                     <div style={{ textAlign: "right", fontSize: "1.4rem", fontWeight: "800", color: "var(--primary)" }}>
@@ -1146,7 +1429,7 @@ const POS = ({ showQR }) => {
                   </div>
                 </div>
                 <div style={{ textAlign: "right", marginTop: settings.billLogo ? 85 : 0 }}>
-                  <h2 style={{ margin: "0 0 10px 0", color: "#333", letterSpacing: "2px" }}>TAX INVOICE</h2>
+                  <h2 style={{ margin: "0 0 10px 0", color: "#333", letterSpacing: "2px" }}>{settings.gstNumber ? "TAX INVOICE" : "INVOICE"}</h2>
                   <div><strong>Bill No:</strong> #{lastInvoiceId}</div>
                   <div><strong>Date:</strong> {new Date().toLocaleDateString()}</div>
                   <div><strong>Time:</strong> {new Date().toLocaleTimeString()}</div>
@@ -1177,14 +1460,16 @@ const POS = ({ showQR }) => {
                     <tr key={idx} style={{ borderBottom: "1px solid #ccc" }}>
                       <td style={{ padding: "12px", borderRight: "1px solid #333" }}>
                         {item.name}
-                        <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>
-                          {item.isFree ? `Offer: ${item.offerName}` : (
-                            <>
-                              CGST {item.cgstRate || 0}% (₹{(item.cgstAmt || 0).toFixed(2)}) + 
-                              SGST {item.sgstRate || 0}% (₹{(item.sgstAmt || 0).toFixed(2)})
-                            </>
-                          )}
-                        </div>
+                        {settings.gstNumber && (
+                          <div style={{ fontSize: "0.8rem", color: "#666", marginTop: "4px" }}>
+                            {item.isFree ? `Offer: ${item.offerName}` : (
+                              <>
+                                CGST {item.cgstRate || 0}% (₹{(item.cgstAmt || 0).toFixed(2)}) + 
+                                SGST {item.sgstRate || 0}% (₹{(item.sgstAmt || 0).toFixed(2)})
+                              </>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "12px", textAlign: "center", borderRight: "1px solid #333" }}>{item.qty}</td>
                       <td style={{ padding: "12px", textAlign: "right", borderRight: "1px solid #333" }}>₹{item.price.toFixed(2)}</td>
@@ -1199,7 +1484,7 @@ const POS = ({ showQR }) => {
               </table>
 
               {/* GST Tax Summary Table */}
-              {taxTotal > 0 && (
+              {taxTotal > 0 && settings.gstNumber && (
                 <div style={{ marginBottom: "20px" }}>
                   <div style={{ fontSize: "0.85rem", fontWeight: "bold", marginBottom: "8px", textTransform: "uppercase", borderBottom: "1px solid #333", display: "inline-block" }}>Tax Summary</div>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", border: "1px solid #eee" }}>
@@ -1242,15 +1527,23 @@ const POS = ({ showQR }) => {
 
 
                 <div style={{ width: "250px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
-                    <span>Total Taxable:</span><span>₹{subtotal.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
-                    <span>Total CGST:</span><span>₹{totalCGST.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
-                    <span>Total SGST:</span><span>₹{totalSGST.toFixed(2)}</span>
-                  </div>
+                  {settings.gstNumber ? (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
+                        <span>Total Taxable:</span><span>₹{subtotal.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
+                        <span>Total CGST:</span><span>₹{totalCGST.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
+                        <span>Total SGST:</span><span>₹{totalSGST.toFixed(2)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem" }}>
+                      <span>Subtotal:</span><span>₹{subtotal.toFixed(2)}</span>
+                    </div>
+                  )}
                   {totalDiscount > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #eee", fontSize: "0.9rem", color: "#10b981" }}>
                       <span>Discount:</span><span>-₹{totalDiscount.toFixed(2)}</span>
@@ -1291,7 +1584,20 @@ const POS = ({ showQR }) => {
               <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{billingMode === 'photo' ? '🖼️ Image Billing' : '⌨️ Tally Billing'}</h2>
               <div style={{ fontSize: 12, color: "var(--text-4)" }}>Terminal Active · Full Screen Mode</div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: 'center' }}>
+              {billingMode === 'photo' && (
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, color: '#94a3b8' }} />
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    value={photoSearch}
+                    onChange={e => setPhotoSearch(e.target.value)}
+                    style={{ padding: '6px 12px 6px 30px', fontSize: 12, border: '1px solid #e2e8f0', borderRadius: 8, width: 180, outline: 'none', background: '#fff' }}
+                  />
+                  {photoSearch && <button onClick={() => setPhotoSearch('')} style={{ position: 'absolute', right: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#94a3b8', padding: 2 }}>✕</button>}
+                </div>
+              )}
               <button 
                 onClick={() => setIsScannerOpen(true)} 
                 className="btn-primary" 
@@ -1347,16 +1653,24 @@ const POS = ({ showQR }) => {
                         LOW STOCK
                       </div>
                     )}
+                    {p.product_type === 'loose' && (
+                      <div style={{ position: "absolute", bottom: 8, left: 8, background: "#f59e0b", color: "white", fontSize: "9px", fontWeight: "800", padding: "3px 8px", borderRadius: "10px", display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        ⚖️ LOOSE
+                      </div>
+                    )}
                   </div>
                   <div style={{ padding: "15px", display: "flex", flexDirection: "column", flex: 1, justifyContent: "space-between" }}>
                     <div>
                       <div style={{ fontWeight: "600", fontSize: "14px", color: "var(--text-1)", marginBottom: "4px", lineHeight: "1.3" }}>{p.name}</div>
                       <div style={{ fontSize: "11px", color: isOutOfStock ? '#ef4444' : isLowStock ? '#f59e0b' : 'var(--text-3)', fontWeight: isOutOfStock || isLowStock ? 600 : 400, marginBottom: "10px" }}>
-                        Stock: {p.quantity} {p.unit}
+                        Stock: {p.quantity} {p.product_type === 'loose' ? (p.stock_unit || p.unit) : p.unit}
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <div style={{ fontWeight: "700", color: "var(--primary)", fontSize: "15px" }}>₹{p.price}</div>
+                      <div>
+                        <div style={{ fontWeight: "700", color: "var(--primary)", fontSize: "15px" }}>₹{p.price}</div>
+                        {p.product_type === 'loose' && p.weight && <div style={{ fontSize: '9px', color: '#6366f1', fontWeight: 700 }}>{p.weight} {p.unit}</div>}
+                      </div>
                       <button 
                         onClick={() => addProductToCart(p)}
                         disabled={isDisabled}
@@ -1381,14 +1695,14 @@ const POS = ({ showQR }) => {
               
 
               {/* Tally Table Header */}
-              <div className="pos-table-header">
+              <div className="pos-table-header" style={{ gridTemplateColumns: settings.gstNumber ? "50px 1fr 100px 112px 72px 72px 90px 110px" : "50px 1fr 100px 112px 72px 110px" }}>
                 <div>S.NO</div>
                 <div>DESCRIPTION</div>
                 <div>RATE (₹)</div>
                 <div>QTY</div>
                 <div>DISC %</div>
-                <div>GST %</div>
-                <div>GST (₹)</div>
+                {settings.gstNumber && <div>GST %</div>}
+                {settings.gstNumber && <div>GST (₹)</div>}
                 <div>AMOUNT (₹)</div>
               </div>
 
@@ -1398,7 +1712,10 @@ const POS = ({ showQR }) => {
                   <div 
                     key={item.tempId || idx} 
                     className="pos-row" 
-                    style={{ background: currentRow === idx ? "rgba(37, 99, 235, 0.05)" : "transparent" }}
+                    style={{ 
+                      background: currentRow === idx ? "rgba(37, 99, 235, 0.05)" : "transparent",
+                      gridTemplateColumns: settings.gstNumber ? "50px 1fr 100px 112px 72px 72px 90px 110px" : "50px 1fr 100px 112px 72px 110px"
+                    }}
                   >
                     <div className="pos-cell" style={{ color: "var(--text-4)", fontSize: 11 }}>{idx + 1}</div>
                     
@@ -1425,7 +1742,7 @@ const POS = ({ showQR }) => {
                               className={`tally-suggestion-item ${sIdx === selectedSugIndex ? 'selected' : ''}`}
                               onClick={() => selectProduct(s, idx)}
                             >
-                              <span>{s.name} <small style={{ marginLeft: 8, opacity: 0.6 }}>({s.product_code || 'N/A'})</small></span>
+                              <span>{s.name}{s.product_type === 'loose' ? ' (Loose)' : ''} <small style={{ marginLeft: 8, opacity: 0.6 }}>({s.product_code || 'N/A'})</small></span>
                               <span>₹{s.price} | Stock: {s.quantity}</span>
                             </div>
                           ))}
@@ -1482,15 +1799,18 @@ const POS = ({ showQR }) => {
                       )}
                     </div>
 
-                    <div className="pos-cell" style={{ color: "var(--text-4)" }}>{item.id ? `${item.gstRate}%` : "0"}</div>
-                    <div className="pos-cell" style={{ color: "var(--text-3)" }}>{item.gstAmt ? item.gstAmt.toFixed(2) : "0.00"}</div>
+                    {settings.gstNumber && <div className="pos-cell" style={{ color: "var(--text-4)" }}>{item.id ? `${item.gstRate}%` : "0"}</div>}
+                    {settings.gstNumber && <div className="pos-cell" style={{ color: "var(--text-3)" }}>{item.gstAmt ? item.gstAmt.toFixed(2) : "0.00"}</div>}
                     <div className="pos-cell" style={{ fontWeight: 800, color: "var(--text-1)" }}>{item.total ? (item.total + item.gstAmt - (item.discountAmt || 0)).toFixed(2) : "0.00"}</div>
                   </div>
                 ))}
 
                 {/* Free Items List (Tally Mode) */}
                 {freeItems.map((item, idx) => (
-                  <div key={item.tempId} className="pos-row" style={{ background: "rgba(16, 185, 129, 0.05)" }}>
+                  <div key={item.tempId} className="pos-row" style={{ 
+                    background: "rgba(16, 185, 129, 0.05)",
+                    gridTemplateColumns: settings.gstNumber ? "50px 1fr 100px 112px 72px 72px 90px 110px" : "50px 1fr 100px 112px 72px 110px"
+                  }}>
                     <div className="pos-cell" style={{ color: "#10b981", fontSize: 11, fontWeight: "bold" }}>F{idx + 1}</div>
                     <div className="pos-cell" style={{ textAlign: "left" }}>
                       <span style={{ fontWeight: 700, color: "var(--text-1)" }}>{item.name}</span>
@@ -1500,8 +1820,8 @@ const POS = ({ showQR }) => {
                     <div className="pos-cell" style={{ color: "var(--text-3)" }}>₹0.00</div>
                     <div className="pos-cell" style={{ fontWeight: 700 }}>{item.qty}</div>
                     <div className="pos-cell" style={{ color: "var(--text-4)" }}>—</div>
-                    <div className="pos-cell" style={{ color: "var(--text-4)" }}>0%</div>
-                    <div className="pos-cell" style={{ color: "var(--text-4)" }}>0.00</div>
+                    {settings.gstNumber && <div className="pos-cell" style={{ color: "var(--text-4)" }}>0%</div>}
+                    {settings.gstNumber && <div className="pos-cell" style={{ color: "var(--text-4)" }}>0.00</div>}
                     <div className="pos-cell" style={{ fontWeight: 800, color: "#10b981" }}>0.00</div>
                   </div>
                 ))}
@@ -1522,15 +1842,19 @@ const POS = ({ showQR }) => {
                     <span className="footer-val">{qtyTotal}</span>
                  </div>
 
-                 <div className="pos-footer-col">
-                    <span className="footer-label">Taxable Amt</span>
-                    <span className="footer-val">₹{subtotal.toFixed(2)}</span>
-                 </div>
+                 {settings.gstNumber && (
+                   <div className="pos-footer-col">
+                      <span className="footer-label">Taxable Amt</span>
+                      <span className="footer-val">₹{subtotal.toFixed(2)}</span>
+                   </div>
+                 )}
 
-                 <div className="pos-footer-col">
-                    <span className="footer-label">Total GST</span>
-                    <span className="footer-val">₹{taxTotal.toFixed(2)}</span>
-                 </div>
+                 {settings.gstNumber && (
+                   <div className="pos-footer-col">
+                      <span className="footer-label">Total GST</span>
+                      <span className="footer-val">₹{taxTotal.toFixed(2)}</span>
+                   </div>
+                 )}
 
                  <div className="pos-footer-col">
                     <span className="footer-label">Discount</span>

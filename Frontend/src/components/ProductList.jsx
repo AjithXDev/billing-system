@@ -67,7 +67,9 @@ const ProductList = () => {
         product_code: editingProduct.product_code || null,
         price_type: editingProduct.price_type || 'exclusive',
         default_discount: Number(editingProduct.default_discount) || 0,
-        weight: editingProduct.weight || null
+        weight: editingProduct.weight || null,
+        product_type: editingProduct.product_type || 'packaged',
+        stock_unit: editingProduct.product_type === 'loose' ? (editingProduct.stock_unit || 'Kg') : null
       });
       setEditModalOpen(false);
       load();
@@ -263,7 +265,9 @@ const ProductList = () => {
         </div>
       )}
 
-      {isEditModalOpen && editingProduct && (
+      {isEditModalOpen && editingProduct && (() => {
+        const isLoose = editingProduct.product_type === 'loose';
+        return (
         <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
           <div className="invoice-modal" onClick={e => e.stopPropagation()}>
             <h2 style={{ marginBottom: '20px', color: '#0f172a' }}>Edit Product</h2>
@@ -274,81 +278,154 @@ const ProductList = () => {
                   <input className="form-input" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label className="form-label">Weight/Size</label>
-                  <input className="form-input" value={editingProduct.weight || ""} onChange={e => setEditingProduct({...editingProduct, weight: e.target.value})} placeholder="e.g. 50g" />
+                  <label className="form-label">Product Type</label>
+                  <select className="form-select" value={editingProduct.product_type || 'packaged'} onChange={e => setEditingProduct({...editingProduct, product_type: e.target.value})} style={{ height: '42px' }}>
+                    <option value="packaged">📦 Packaged</option>
+                    <option value="loose">⚖️ Loose</option>
+                  </select>
                 </div>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div className="form-group">
-                <label className="form-label">Selling Price</label>
-                <input type="number" className="form-input" value={editingProduct.price} onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Cost Price</label>
-                <input type="number" className="form-input" value={editingProduct.cost_price} onChange={e => setEditingProduct({...editingProduct, cost_price: parseFloat(e.target.value)})} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Stock Quantity</label>
-                <input type="number" className="form-input" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value)})} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Unit</label>
-                <select className="form-select" value={editingProduct.unit} onChange={e => setEditingProduct({...editingProduct, unit: e.target.value})}>
-                  <option value="PCS">PCS</option>
-                  <option value="KG">KG</option>
-                  <option value="LTR">LTR</option>
-                  <option value="BOX">BOX</option>
-                  <option value="PKT">PKT</option>
-                </select>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div className="form-group">
-                <label className="form-label">Short Code / ID</label>
-                <input className="form-input" value={editingProduct.product_code || ""} onChange={e => setEditingProduct({...editingProduct, product_code: e.target.value})} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">GST Rate (%)</label>
-                <select className="form-select" value={editingProduct.gst_rate || 0} onChange={e => setEditingProduct({...editingProduct, gst_rate: parseFloat(e.target.value)})}>
-                  <option value="0">0%</option>
-                  <option value="5">5%</option>
-                  <option value="12">12%</option>
-                  <option value="18">18%</option>
-                  <option value="28">28%</option>
-                </select>
-              </div>
-            </div>
-            <div className="form-group" style={{ marginTop: '10px' }}>
-              <label className="form-label">Barcode</label>
-              <input className="form-input" value={editingProduct.barcode || ""} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
-            </div>
-            <div className="form-group" style={{ marginTop: '10px' }}>
-              <label className="form-label">Default Discount (%)</label>
-              <input type="number" step="0.5" className="form-input" value={editingProduct.default_discount || ""} onChange={e => setEditingProduct({...editingProduct, default_discount: parseFloat(e.target.value)})} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Category</label>
-              <select className="form-select" value={editingProduct.category_id || ""} onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div className="form-group">
-                <label className="form-label">Price Type</label>
-                <select className="form-select" value={editingProduct.price_type || "exclusive"} onChange={e => setEditingProduct({...editingProduct, price_type: e.target.value})}>
-                  <option value="exclusive">Exclusive (+ GST)</option>
-                  <option value="inclusive">Inclusive (GST Included)</option>
-                </select>
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Expiry Date 🗓️</label>
-              <input type="date" className="form-input" value={editingProduct.expiry_date || ""}
-                onChange={e => setEditingProduct({...editingProduct, expiry_date: e.target.value || null})}
-                style={{ colorScheme: 'light' }}
-              />
-            </div>
+
+            {isLoose ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Weight</label>
+                    <input className="form-input" value={editingProduct.weight || ""} onChange={e => setEditingProduct({...editingProduct, weight: e.target.value})} placeholder="e.g. 500" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Selling Unit</label>
+                    <select className="form-select" value={editingProduct.unit} onChange={e => setEditingProduct({...editingProduct, unit: e.target.value})}>
+                      <option value="Kg">Kilogram</option>
+                      <option value="Gram">Gram</option>
+                      <option value="Liter">Liter</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Selling Price (₹)</label>
+                  <input type="number" className="form-input" value={editingProduct.price} onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Stock Quantity</label>
+                    <input type="number" step="0.01" className="form-input" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseFloat(e.target.value)})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Stock Unit</label>
+                    <select className="form-select" value={editingProduct.stock_unit || 'Kg'} onChange={e => setEditingProduct({...editingProduct, stock_unit: e.target.value})}>
+                      <option value="Kg">Kilogram</option>
+                      <option value="Gram">Gram</option>
+                      <option value="Liter">Liter</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Short Code / ID</label>
+                    <input className="form-input" value={editingProduct.product_code || ""} onChange={e => setEditingProduct({...editingProduct, product_code: e.target.value})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Default Discount (%)</label>
+                    <input type="number" step="0.5" className="form-input" value={editingProduct.default_discount || ""} onChange={e => setEditingProduct({...editingProduct, default_discount: parseFloat(e.target.value)})} />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <select className="form-select" value={editingProduct.category_id || ""} onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                {settings?.gstNumber && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div className="form-group">
+                      <label className="form-label">GST Rate (%)</label>
+                      <select className="form-select" value={editingProduct.gst_rate || 0} onChange={e => setEditingProduct({...editingProduct, gst_rate: parseFloat(e.target.value)})}>
+                        <option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Price Type</label>
+                      <select className="form-select" value={editingProduct.price_type || "exclusive"} onChange={e => setEditingProduct({...editingProduct, price_type: e.target.value})}>
+                        <option value="exclusive">Exclusive (+ GST)</option>
+                        <option value="inclusive">Inclusive (GST Included)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Selling Price</label>
+                    <input type="number" className="form-input" value={editingProduct.price} onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Cost Price</label>
+                    <input type="number" className="form-input" value={editingProduct.cost_price} onChange={e => setEditingProduct({...editingProduct, cost_price: parseFloat(e.target.value)})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Stock Quantity</label>
+                    <input type="number" className="form-input" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value)})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Unit</label>
+                    <select className="form-select" value={editingProduct.unit} onChange={e => setEditingProduct({...editingProduct, unit: e.target.value})}>
+                      <option value="PCS">PCS</option><option value="Pcs">Pcs</option><option value="KG">KG</option><option value="Kg">Kg</option>
+                      <option value="LTR">LTR</option><option value="BOX">BOX</option><option value="Box">Box</option>
+                      <option value="PKT">PKT</option><option value="Strip">Strip</option><option value="Bottle">Bottle</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Short Code / ID</label>
+                    <input className="form-input" value={editingProduct.product_code || ""} onChange={e => setEditingProduct({...editingProduct, product_code: e.target.value})} />
+                  </div>
+                  {settings?.gstNumber && (
+                    <div className="form-group">
+                      <label className="form-label">GST Rate (%)</label>
+                      <select className="form-select" value={editingProduct.gst_rate || 0} onChange={e => setEditingProduct({...editingProduct, gst_rate: parseFloat(e.target.value)})}>
+                        <option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="form-group" style={{ marginTop: '10px' }}>
+                  <label className="form-label">Barcode</label>
+                  <input className="form-input" value={editingProduct.barcode || ""} onChange={e => setEditingProduct({...editingProduct, barcode: e.target.value})} />
+                </div>
+                <div className="form-group" style={{ marginTop: '10px' }}>
+                  <label className="form-label">Default Discount (%)</label>
+                  <input type="number" step="0.5" className="form-input" value={editingProduct.default_discount || ""} onChange={e => setEditingProduct({...editingProduct, default_discount: parseFloat(e.target.value)})} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <select className="form-select" value={editingProduct.category_id || ""} onChange={e => setEditingProduct({...editingProduct, category_id: parseInt(e.target.value)})}>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                {settings?.gstNumber && (
+                  <div className="form-group">
+                    <label className="form-label">Price Type</label>
+                    <select className="form-select" value={editingProduct.price_type || "exclusive"} onChange={e => setEditingProduct({...editingProduct, price_type: e.target.value})}>
+                      <option value="exclusive">Exclusive (+ GST)</option>
+                      <option value="inclusive">Inclusive (GST Included)</option>
+                    </select>
+                  </div>
+                )}
+                <div className="form-group">
+                  <label className="form-label">Expiry Date 🗓️</label>
+                  <input type="date" className="form-input" value={editingProduct.expiry_date || ""}
+                    onChange={e => setEditingProduct({...editingProduct, expiry_date: e.target.value || null})}
+                    style={{ colorScheme: 'light' }}
+                  />
+                </div>
+              </>
+            )}
+
             <div className="form-group">
               <label className="form-label">Product Image (Optional)</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -356,26 +433,11 @@ const ProductList = () => {
                   <img src={editingProduct.image} alt="Preview" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }} />
                 )}
                 <div style={{ flex: 1, position: 'relative' }}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          setEditingProduct({ ...editingProduct, image: reader.result });
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                    style={{
-                      width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)', cursor: 'pointer', fontSize: 13
-                    }}
+                  <input type="file" accept="image/*" onChange={(e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { setEditingProduct({ ...editingProduct, image: reader.result }); }; reader.readAsDataURL(file); }}}
+                    style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)', cursor: 'pointer', fontSize: 13 }}
                   />
                   {editingProduct.image && (
-                    <button
-                      onClick={() => setEditingProduct({ ...editingProduct, image: null })}
+                    <button onClick={() => setEditingProduct({ ...editingProduct, image: null })}
                       style={{ marginTop: 8, padding: '4px 10px', fontSize: 11, background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: 4, cursor: 'pointer' }}
                     >Remove Image</button>
                   )}
@@ -388,7 +450,8 @@ const ProductList = () => {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <div className="admin-card" style={{ maxWidth: '100%' }}>
          <div className="admin-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -442,7 +505,9 @@ const ProductList = () => {
                             )}
                             <div>
                                {p.name}
-                               {p.weight && <span style={{ color: '#64748b', fontWeight: 500 }}> ({p.weight})</span>}
+                               {p.product_type === 'loose' && <span style={{ color: '#6366f1', fontWeight: 700 }}> (Loose)</span>}
+                               {p.product_type === 'loose' && p.weight && <span style={{ color: '#64748b', fontWeight: 500, fontSize: 12 }}> — {p.weight} {p.unit}</span>}
+                               {p.product_type !== 'loose' && p.weight && <span style={{ color: '#64748b', fontWeight: 500 }}> ({p.weight})</span>}
                                {expired && <span style={{ fontSize: 10, background: '#ef444420', color: '#ef4444', borderRadius: 4, padding: '1px 5px', marginLeft: 6 }}>EXPIRED</span>}
                             </div>
                           </div>

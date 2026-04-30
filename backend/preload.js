@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld("api", {
   // WhatsApp — automatic sending
   sendWhatsapp:        (phone, text)  => ipcRenderer.invoke("send-whatsapp", phone, text),
   getWhatsappStatus:   ()             => ipcRenderer.invoke("whatsapp-status"),
+  requestWhatsappQR:   ()             => ipcRenderer.invoke("request-whatsapp-qr"),
+  resetWhatsApp:       ()             => ipcRenderer.invoke("reset-whatsapp"),
 
   // Listen for QR code or status events pushed from main process
   onWhatsappQR:        (cb)           => ipcRenderer.on("whatsapp-qr",     (_e, qr)     => cb(qr)),

@@ -92,6 +92,7 @@ const initDB = () => {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category_id INTEGER,
+            category_name TEXT,
             price DECIMAL(12,2) NOT NULL,
             cost_price DECIMAL(12,2) DEFAULT 0,
             quantity DECIMAL(12,2) DEFAULT 0,
@@ -101,6 +102,7 @@ const initDB = () => {
             price_type TEXT DEFAULT 'exclusive',
             default_discount DECIMAL(5,2) DEFAULT 0,
             weight TEXT,
+            product_type TEXT DEFAULT 'packaged',
             brand TEXT,
             gst_rate DECIMAL(5,2) DEFAULT 0,
             expiry_date TEXT,
@@ -116,6 +118,7 @@ const initDB = () => {
             phone TEXT UNIQUE,
             address TEXT,
             points INTEGER DEFAULT 0,
+            is_synced INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -214,7 +217,11 @@ const initDB = () => {
     migrate('products', 'price_type', "TEXT DEFAULT 'exclusive'");
     migrate('products', 'default_discount', 'DECIMAL(5,2) DEFAULT 0');
     migrate('products', 'weight', 'TEXT');
+    migrate('products', 'product_type', "TEXT DEFAULT 'packaged'");
+    migrate('products', 'stock_unit', 'TEXT');
     migrate('products', 'brand', 'TEXT');
+    migrate('products', 'category_name', 'TEXT');
+    migrate('customers', 'is_synced', 'INTEGER DEFAULT 0');
     migrate('invoice_items', 'discount_percent', 'DECIMAL(5,2) DEFAULT 0');
     migrate('invoice_items', 'discount_amount', 'DECIMAL(12,2) DEFAULT 0');
     // 🔄 held_bills — upgrade old schema to new one

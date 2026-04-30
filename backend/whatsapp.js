@@ -35,17 +35,34 @@ let currentQR = null;
 
 // ─── Initialise ──────────────────────────────────────────────
 function initWhatsApp(mainWindow) {
+  // Clean up any previous client
+  if (client) {
+    try { client.destroy(); } catch(e) {}
+    client = null;
+  }
+  isReady = false;
+  currentQR = null;
+
+  const chromePath = getChromePath();
+  if (!chromePath) {
+    console.error("[WhatsApp] ❌ No Chrome/Edge found! Cannot initialize.");
+    return;
+  }
+
   client = new Client({
     authStrategy: new LocalAuth({
       dataPath: path.join(app.getPath("userData"), "whatsapp-session"),
     }),
     puppeteer: {
       headless: true,
-      executablePath: getChromePath(),
+      executablePath: chromePath,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--disable-gpu",
       ],
     },
   });
@@ -68,6 +85,21 @@ function initWhatsApp(mainWindow) {
     console.log("[WhatsApp] Authenticated ✅");
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("whatsapp-status", "authenticated");
+    }
+  });
+
+  // ── Authentication failure — clear session and retry ────────
+  client.on("auth_failure", (msg) => {
+    console.error("[WhatsApp] Auth failure:", msg);
+    isReady = false;
+    currentQR = null;
+    // Clear corrupted session so next restart gets a fresh QR
+    const sessionPath = path.join(app.getPath("userData"), "whatsapp-session");
+    if (fs.existsSync(sessionPath)) {
+      try { fs.rmSync(sessionPath, { recursive: true, force: true }); } catch(e) {}
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("whatsapp-status", "disconnected");
     }
   });
 
@@ -97,6 +129,9 @@ function initWhatsApp(mainWindow) {
 
   client.initialize().catch((err) => {
     console.error("[WhatsApp] Init error:", err.message);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("whatsapp-status", "disconnected");
+    }
   });
 }
 
@@ -137,4 +172,33 @@ function getStatus() {
   return { ready: isReady, qr: currentQR };
 }
 
-module.exports = { initWhatsApp, sendMessage, getStatus };
+// ─── Public: reset ───────────────────────────────────────────
+async function resetWhatsApp(mainWindow) {
+  console.log("[WhatsApp] Resetting session...");
+  if (client) {
+    try {
+      await client.destroy();
+    } catch (e) {
+      console.warn("[WhatsApp] Error destroying client:", e.message);
+    }
+  }
+  
+  client = null;
+  isReady = false;
+  currentQR = null;
+  
+  const sessionPath = path.join(app.getPath("userData"), "whatsapp-session");
+  if (fs.existsSync(sessionPath)) {
+    try {
+      fs.rmSync(sessionPath, { recursive: true, force: true });
+      console.log("[WhatsApp] Session folder deleted.");
+    } catch (e) {
+      console.warn("[WhatsApp] Error deleting session folder:", e.message);
+    }
+  }
+  
+  initWhatsApp(mainWindow);
+  return { success: true };
+}
+
+module.exports = { initWhatsApp, sendMessage, getStatus, resetWhatsApp };

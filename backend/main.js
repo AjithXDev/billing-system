@@ -4,7 +4,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut } = require("electron");
 const { execSync } = require("child_process");
 const db = require("./db");
-const { initWhatsApp, sendMessage, getStatus } = require("./whatsapp");
+const { initWhatsApp, sendMessage, getStatus, resetWhatsApp } = require("./whatsapp");
 const { startDashboardServer, stopDashboardServer, getDashboardURL, getTunnelURL, syncStatsToSupabase } = require("./dashboardServer");
 const { v4: uuidv4 } = require("uuid");
 const { createClient } = require('@supabase/supabase-js');
@@ -290,17 +290,53 @@ function syncToLocalPath() {
 async function syncToShopSupabase() {
   if (!shopSupabase) return;
   try {
-    // 1. Sync Products
+    // 1. Sync Products — with smart column auto-detection
     const products = db.prepare('SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.is_synced = 0').all();
     for (const p of products) {
-      const { id, is_synced, flag_low_stock, flag_out_of_stock, flag_expiry, flag_dead_stock, ...data } = p;
-      const { error } = await shopSupabase.from('products').upsert({
-        ...data,
-        local_id: id,
+      let row = {
+        local_id: p.id,
+        name: p.name,
+        category_id: p.category_id,
+        category_name: p.category_name,
+        gst_rate: p.gst_rate || 0,
+        product_code: p.product_code,
+        price_type: p.price_type || 'exclusive',
+        price: p.price,
+        cost_price: p.cost_price || 0,
+        quantity: p.quantity,
+        unit: p.unit,
+        barcode: p.barcode,
+        expiry_date: p.expiry_date,
+        default_discount: p.default_discount || 0,
+        weight: p.weight,
+        brand: p.brand,
+        product_type: p.product_type || 'packaged',
+        stock_unit: p.stock_unit,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'local_id' });
-      if (!error) db.prepare('UPDATE products SET is_synced = 1 WHERE id = ?').run(id);
-      else console.error('[ShopSync] Product error:', error.message);
+      };
+
+      // Smart retry: if a column doesn't exist in Supabase, auto-strip it and retry
+      let success = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { error } = await shopSupabase.from('products').upsert(row, { onConflict: 'local_id' });
+        if (!error) {
+          success = true;
+          break;
+        }
+        // Detect missing column from error message and remove it
+        const errMsg = error.message || '';
+        const colMatch = errMsg.match(/column\s+"?([a-z_]+)"?\s/i) 
+                      || errMsg.match(/"([a-z_]+)"\s.*not\s.*found/i)
+                      || errMsg.match(/Could not find.*'([a-z_]+)'/i);
+        if (colMatch && colMatch[1] && row.hasOwnProperty(colMatch[1])) {
+          console.warn(`[ShopSync] Column "${colMatch[1]}" missing in Supabase, removing and retrying...`);
+          delete row[colMatch[1]];
+        } else {
+          console.error('[ShopSync] Product sync error for:', p.name, '-', errMsg);
+          break;
+        }
+      }
+      if (success) db.prepare('UPDATE products SET is_synced = 1 WHERE id = ?').run(p.id);
     }
 
     // 2. Sync Invoices
@@ -350,7 +386,7 @@ async function syncToShopSupabase() {
     }
 
     // Update last synced time
-    db.prepare('UPDATE shop_supabase_config SET last_synced = datetime("now") WHERE id = (SELECT MAX(id) FROM shop_supabase_config)').run();
+    db.prepare("UPDATE shop_supabase_config SET last_synced = datetime('now') WHERE id = (SELECT MAX(id) FROM shop_supabase_config)").run();
     console.log('[ShopSync] ✅ Data synced to shop Supabase');
   } catch (e) {
     console.error('[ShopSync] Error:', e.message);
@@ -361,7 +397,23 @@ async function syncToShopSupabase() {
 async function restoreFromShopSupabase() {
   if (!shopSupabase) throw new Error('Shop Supabase not connected');
   try {
-    // 1. Restore Products
+    // 🛡️ Safeguard: Ensure missing column exists and disable FK checks during restore
+    try { db.exec("ALTER TABLE products ADD COLUMN category_name TEXT;"); } catch(e) {}
+    try { db.exec("ALTER TABLE customers ADD COLUMN is_synced INTEGER DEFAULT 0;"); } catch(e) {}
+    db.exec("PRAGMA foreign_keys = OFF;");
+
+    // 1. Restore Categories (MUST BE FIRST for Foreign Keys)
+    const { data: categories } = await shopSupabase.from('categories').select('*');
+    if (categories && categories.length > 0) {
+      for (const cat of categories) {
+        try {
+          db.prepare('INSERT OR REPLACE INTO categories (id, name, gst) VALUES (?, ?, ?)').run(cat.id, cat.name, cat.gst);
+        } catch (e) { }
+      }
+      console.log(`[Restore] ✅ ${categories.length} categories restored`);
+    }
+
+    // 2. Restore Products
     const { data: products } = await shopSupabase.from('products').select('*');
     if (products && products.length > 0) {
       const insertProduct = db.prepare(`
@@ -383,7 +435,7 @@ async function restoreFromShopSupabase() {
       console.log(`[Restore] ✅ ${products.length} products restored`);
     }
 
-    // 2. Restore Customers
+    // 3. Restore Customers
     const { data: customers } = await shopSupabase.from('customers').select('*');
     if (customers && customers.length > 0) {
       const insertCustomer = db.prepare('INSERT OR REPLACE INTO customers (id, name, phone, address, is_synced) VALUES (?, ?, ?, ?, 1)');
@@ -396,7 +448,7 @@ async function restoreFromShopSupabase() {
       console.log(`[Restore] ✅ ${customers.length} customers restored`);
     }
 
-    // 3. Restore Invoices
+    // 4. Restore Invoices
     const { data: invoices } = await shopSupabase.from('invoices').select('*');
     if (invoices && invoices.length > 0) {
       const insertInvoice = db.prepare(`
@@ -417,7 +469,7 @@ async function restoreFromShopSupabase() {
       console.log(`[Restore] ✅ ${invoices.length} invoices restored`);
     }
 
-    // 4. Restore Invoice Items
+    // 5. Restore Invoice Items
     const { data: items } = await shopSupabase.from('invoice_items').select('*');
     if (items && items.length > 0) {
       const insertItem = db.prepare(`
@@ -437,16 +489,6 @@ async function restoreFromShopSupabase() {
       console.log(`[Restore] ✅ ${items.length} invoice items restored`);
     }
 
-    // 5. Restore Categories
-    const { data: categories } = await shopSupabase.from('categories').select('*');
-    if (categories && categories.length > 0) {
-      for (const cat of categories) {
-        try {
-          db.prepare('INSERT OR REPLACE INTO categories (id, name, gst) VALUES (?, ?, ?)').run(cat.id, cat.name, cat.gst);
-        } catch (e) { }
-      }
-    }
-
     // 6. Restore Offers
     const { data: offers } = await shopSupabase.from('offers').select('*');
     if (offers && offers.length > 0) {
@@ -457,6 +499,7 @@ async function restoreFromShopSupabase() {
           );
         } catch (e) { }
       }
+      console.log(`[Restore] ✅ ${offers.length} offers restored`);
     }
 
     // 7. Restore Held Bills
@@ -469,6 +512,7 @@ async function restoreFromShopSupabase() {
           );
         } catch (e) { }
       }
+      console.log(`[Restore] ✅ ${held.length} held bills restored`);
     }
 
     // 8. Restore Settings
@@ -506,6 +550,9 @@ async function restoreFromShopSupabase() {
   } catch (e) {
     console.error('[Restore] Error:', e.message);
     throw e;
+  } finally {
+    // 🛡️ Re-enable Foreign Key checks
+    db.exec("PRAGMA foreign_keys = ON;");
   }
 }
 
@@ -765,27 +812,8 @@ async function pushStatsSnapshot(shopId) {
 
 // ── SYNC ENGINE: DATA VAULT (SHOP DB) ──
 async function syncToShopCloud() {
-  if (!shopSupabase) return;
-  try {
-    // Sync Groups: Employees, Products, Customers, Invoices
-    const products = db.prepare("SELECT * FROM products WHERE is_synced = 0").all();
-    for (const p of products) {
-      const { id, is_synced, ...data } = p;
-      const { error } = await shopSupabase.from('products').upsert({ ...data, local_id: id }, { onConflict: 'local_id' });
-      if (!error) db.prepare("UPDATE products SET is_synced = 1 WHERE id = ?").run(id);
-    }
-
-    const invoices = db.prepare("SELECT * FROM invoices WHERE is_synced = 0").all();
-    for (const inv of invoices) {
-      const { id, is_synced, ...data } = inv;
-      const { error } = await shopSupabase.from('invoices').upsert({ ...data, local_id: id }, { onConflict: 'local_id' });
-      if (!error) {
-        db.prepare("UPDATE invoices SET is_synced = 1 WHERE id = ?").run(id);
-        const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ?").all(id);
-        await shopSupabase.from('invoice_items').upsert(items.map(i => ({ ...i, local_id: i.id })));
-      }
-    }
-  } catch (e) { }
+  // Delegate to the robust syncToShopSupabase which has smart column detection
+  return syncToShopSupabase();
 }
 
 async function registerShop(shopId) {
@@ -886,7 +914,7 @@ async function generateStatsJSON() {
   const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM((ii.price - COALESCE(p.cost_price, 0)) * ii.quantity),0) as profit FROM invoice_items ii JOIN products p ON ii.product_id=p.id JOIN invoices inv ON ii.invoice_id=inv.id WHERE strftime('%Y-%m',inv.created_at,'localtime') = strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
   const peakHours = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
   const paymentBreakdown = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
-  const deadStock = db.prepare(`SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadThresholdDays} days'))`).all();
+  const deadStock = db.prepare(`SELECT name, quantity FROM products WHERE quantity>0 AND created_at <= datetime('now','-${deadThresholdDays} days') AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadThresholdDays} days'))`).all();
   
   const recentInvoices = db.prepare("SELECT bill_no, bill_date, customer_name, total_amount FROM invoices ORDER BY created_at DESC LIMIT 50").all();
 
@@ -1171,8 +1199,9 @@ function createWindow() {
             ).all(todayStr, nearExpiryDate);
 
             // 4. Dead Stock (in inventory but not sold in last N days)
+            // ONLY flag products that were registered MORE than N days ago
             const deadStock = db.prepare(
-              `SELECT name, quantity FROM products WHERE quantity > 0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadDays} days')) LIMIT 10`
+              `SELECT name, quantity FROM products WHERE quantity > 0 AND created_at <= datetime('now','-${deadDays} days') AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-${deadDays} days')) LIMIT 10`
             ).all();
 
             // Build message only if there are issues
@@ -1213,7 +1242,7 @@ function createWindow() {
 
             // Mark today as alerted (whether sent or not — no issues = no repeat check)
             intervalSettings._lastInventoryAlertDate = todayDate;
-            fs.writeFileSync(appSettingsPath, JSON.stringify(intervalSettings, null, 2));
+            fs.writeFileSync(configPath, JSON.stringify(intervalSettings, null, 2));
           } catch (alertErr) {
             console.error('[Alerts] ❌ Failed to send inventory alert:', alertErr.message);
           }
@@ -1280,13 +1309,15 @@ ipcMain.handle("add-product", async (event, product) => {
     image,
     default_discount,
     weight,
-    brand
+    brand,
+    product_type,
+    stock_unit
   } = product;
 
   db.prepare(`
     INSERT INTO products 
-    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand, product_type, stock_unit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     category_id || null,
@@ -1302,19 +1333,28 @@ ipcMain.handle("add-product", async (event, product) => {
     image || null,
     default_discount || 0,
     weight || null,
-    brand || null
+    brand || null,
+    product_type || 'packaged',
+    stock_unit || null
   );
+  // Trigger immediate background sync so new product appears in Supabase + Local DB right away
+  setImmediate(async () => {
+    try {
+      if (shopSupabase) await syncToShopSupabase();
+      syncToLocalPath();
+    } catch(e) { console.error('[Sync] Background sync after add-product failed:', e.message); }
+  });
 
   return { message: "Product added" };
 });
 
 // 🟢 EDIT PRODUCT (with expiry_date and weight)
 ipcMain.handle("edit-product", async (event, product) => {
-  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand } = product;
+  const { id, name, category_id, gst_rate, product_code, price_type, price, cost_price, quantity, unit, barcode, expiry_date, image, default_discount, weight, brand, product_type, stock_unit } = product;
 
   db.prepare(`
     UPDATE products 
-    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?, weight=?, brand=?, is_synced=0
+    SET name=?, category_id=?, gst_rate=?, product_code=?, price_type=?, price=?, cost_price=?, quantity=?, unit=?, barcode=?, expiry_date=?, image=?, default_discount=?, weight=?, brand=?, product_type=?, stock_unit=?, is_synced=0
     WHERE id=?
   `).run(
     name, 
@@ -1332,14 +1372,42 @@ ipcMain.handle("edit-product", async (event, product) => {
     default_discount || 0, 
     weight || null, 
     brand || null, 
+    product_type || 'packaged',
+    stock_unit || null,
     id
   );
+  // Trigger immediate background sync
+  setImmediate(async () => {
+    try {
+      if (shopSupabase) await syncToShopSupabase();
+      syncToLocalPath();
+    } catch(e) { console.error('[Sync] Background sync after edit-product failed:', e.message); }
+  });
+
   return { message: "Product updated" };
 });
 
 // 🟢 DELETE PRODUCT
 ipcMain.handle("delete-product", async (event, id) => {
-  db.prepare("DELETE FROM products WHERE id=?").run(id);
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.prepare("DELETE FROM products WHERE id=?").run(id);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+
+  // Trigger immediate background sync
+  setImmediate(async () => {
+    try {
+      // 🔄 Explicitly delete from Supabase too!
+      if (shopSupabase) {
+        await shopSupabase.from('products').delete().eq('local_id', id);
+        console.log('[ShopSync] 🗑️ Deleted product from Supabase:', id);
+      }
+      syncToLocalPath();
+    } catch(e) { console.error('[Sync] Background sync after delete-product failed:', e.message); }
+  });
+
   return { message: "Product deleted" };
 });
 
@@ -1348,9 +1416,20 @@ ipcMain.handle("send-whatsapp", async (event, phone, message) => {
   return sendMessage(phone, message);
 });
 
-// 🟢 GET WHATSAPP STATUS
 ipcMain.handle("whatsapp-status", async () => {
   return getStatus();
+});
+
+ipcMain.handle("request-whatsapp-qr", async (event) => {
+  const status = getStatus();
+  if (status.qr && mainWindow) {
+    mainWindow.webContents.send("whatsapp-qr", status.qr);
+  }
+  return status;
+});
+
+ipcMain.handle("reset-whatsapp", async (event) => {
+  return resetWhatsApp(mainWindow);
 });
 
 // 🟢 GET LOCAL IP FOR EXPO QR CODE
@@ -1644,6 +1723,14 @@ ipcMain.handle("create-invoice", async (event, data) => {
     }
   } catch (e) { }
 
+  // 🔥 Also sync to shop's own Supabase + local DB backup
+  setImmediate(async () => {
+    try {
+      if (shopSupabase) await syncToShopSupabase();
+      syncToLocalPath();
+    } catch(e) { console.error('[Sync] Background sync after invoice failed:', e.message); }
+  });
+
   return responseData;
 });
 
@@ -1659,8 +1746,8 @@ ipcMain.handle("get-invoices", async () => {
 
   // Attach a comma-separated product list string for each invoice
   const getItems = db.prepare(`
-    SELECT p.name FROM invoice_items ii
-    JOIN products p ON ii.product_id = p.id
+    SELECT COALESCE(p.name, 'Deleted Product') as name FROM invoice_items ii
+    LEFT JOIN products p ON ii.product_id = p.id
     WHERE ii.invoice_id = ?
   `);
 
@@ -1676,9 +1763,9 @@ ipcMain.handle("get-invoices", async () => {
 // Get full details (line items) for a single invoice
 ipcMain.handle("get-invoice-details", async (event, invoiceId) => {
   return db.prepare(`
-    SELECT ii.*, p.name 
+    SELECT ii.*, COALESCE(p.name, 'Deleted Product') as name 
     FROM invoice_items ii
-    JOIN products p ON ii.product_id = p.id
+    LEFT JOIN products p ON ii.product_id = p.id
     WHERE ii.invoice_id = ?
   `).all(invoiceId);
 });
@@ -2468,6 +2555,23 @@ ipcMain.handle("save-shop-supabase", async (event, { url, key }) => {
     // Insert new config
     db.prepare('INSERT INTO shop_supabase_config (supabase_url, supabase_key, is_connected) VALUES (?, ?, 1)').run(url, key);
     initShopSupabase(url, key);
+
+    // 🔄 CRITICAL: Reset ALL sync flags so everything gets pushed to the NEW Supabase
+    db.prepare('UPDATE products SET is_synced = 0').run();
+    db.prepare('UPDATE invoices SET is_synced = 0').run();
+    db.prepare('UPDATE customers SET is_synced = 0').run();
+    try { db.prepare('UPDATE held_bills SET is_synced = 0').run(); } catch(e) {}
+    try { db.prepare('UPDATE offers SET is_synced = 0').run(); } catch(e) {}
+    try { db.prepare('UPDATE notifications SET is_synced = 0').run(); } catch(e) {}
+    console.log('[ShopDB] 🔄 All sync flags reset for new Supabase connection');
+
+    // 🚀 Trigger immediate full sync to the new Supabase
+    setImmediate(async () => {
+      try {
+        await syncToShopSupabase();
+        console.log('[ShopDB] ✅ Initial sync to new Supabase complete!');
+      } catch(e) { console.error('[ShopDB] Initial sync error:', e.message); }
+    });
 
     // Also save to admin Supabase for reference
     if (supabase) {

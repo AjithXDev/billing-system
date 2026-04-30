@@ -137,7 +137,10 @@ export default function BulkUpdate() {
                 }}>
                   {/* Product Details */}
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, color: 'var(--text-1)', fontSize: 14 }}>{p.name}</div>
+                    <div style={{ fontWeight: 600, color: 'var(--text-1)', fontSize: 14 }}>
+                      {p.name}
+                      {p.product_type === 'loose' && <span style={{ color: '#6366f1', fontWeight: 700, fontSize: 12, marginLeft: 6 }}>(Loose)</span>}
+                    </div>
                     <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>Price: ₹{p.price}</div>
                   </div>
                   

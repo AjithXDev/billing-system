@@ -69,7 +69,7 @@
     "nodemailer": "^8.0.5",
     "qrcode-terminal": "^0.12.0",
     "uuid": "^13.0.0",
-    "whatsapp-web.js": "^1.34.6"
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",

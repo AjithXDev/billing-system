@@ -492,6 +492,44 @@ export default function Settings() {
                   placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
                 />
               </div>
+
+              {/* ── CLOUD SYNC & RESTORE (Locked) ── */}
+              <div style={{ marginTop: 12, padding: "16px", background: "rgba(16,185,129,0.05)", borderRadius: 8, border: "1px dashed rgba(16,185,129,0.3)" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#10b981", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  🔄 Data Synchronization
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 12, lineHeight: 1.6 }}>
+                  Manage your data backup to the cloud. You can manually push your local data to the cloud or restore old data from the cloud to this terminal.
+                </div>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                  <button 
+                    onClick={handleSyncShop}
+                    style={{ ...actionBtnStyle("var(--primary)", syncStatus === "syncing"), padding: "0 16px", height: 32, fontSize: 11 }}
+                    disabled={syncStatus === "syncing"}
+                  >
+                    {syncStatus === "syncing" ? "⏳ Syncing..." : "⬆️ Push Data to Cloud"}
+                  </button>
+                  <button 
+                    onClick={handleRestoreFromCloud}
+                    style={{ ...actionBtnStyle("#ef4444", syncStatus === "syncing"), padding: "0 16px", height: 32, fontSize: 11 }}
+                    disabled={syncStatus === "syncing"}
+                  >
+                    {syncStatus === "syncing" ? "⏳ Restoring..." : "⬇️ Restore from Cloud"}
+                  </button>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 600 }}>
+                  <span style={{ color: "var(--text-4)" }}>Status:</span>
+                  <span style={{ color: syncStatus === "error" ? "#ef4444" : (syncStatus === "done" ? "#10b981" : "var(--primary)") }}>
+                    {syncMsg || "Idle"}
+                  </span>
+                </div>
+                {lastSynced && (
+                  <div style={{ fontSize: 10, color: "var(--text-4)", marginTop: 8 }}>
+                    Last Synced: {lastSynced}
+                  </div>
+                )}
+              </div>
+
               <div style={{ marginTop: 8, padding: "12px", background: "rgba(99,102,241,0.05)", borderRadius: 8, border: "1px dashed rgba(99,102,241,0.3)" }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: "var(--primary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
                   🤖 AI Chatbot Configuration
@@ -541,19 +579,19 @@ export default function Settings() {
         <SectionTitle icon="" title="Store Information" />
 
         <SettingRow label="Store Name">
-          <input style={inputStyle} value={cfg.storeName} onChange={e => set("storeName", e.target.value)} placeholder="My Supermarket" />
+          <input style={inputStyle} value={cfg.storeName} onChange={e => set("storeName", e.target.value)} />
         </SettingRow>
 
         <SettingRow label="Tagline (Optional)">
-          <input style={inputStyle} value={cfg.tagline} onChange={e => set("tagline", e.target.value)} placeholder="Quality products, Best prices!" />
+          <input style={inputStyle} value={cfg.tagline} onChange={e => set("tagline", e.target.value)} />
         </SettingRow>
 
         <SettingRow label="Store Phone / Mobile">
-          <input style={inputStyle} value={cfg.storePhone} onChange={e => set("storePhone", e.target.value)} placeholder="98765 43210" />
+          <input style={inputStyle} value={cfg.storePhone} onChange={e => set("storePhone", e.target.value)} />
         </SettingRow>
 
         <SettingRow label="Store Address">
-          <textarea style={{ ...inputStyle, height: 60, padding: "8px 12px", resize: "none" }} value={cfg.storeAddress} onChange={e => set("storeAddress", e.target.value)} placeholder="No.123, Main Street..." />
+          <textarea style={{ ...inputStyle, height: 60, padding: "8px 12px", resize: "none" }} value={cfg.storeAddress} onChange={e => set("storeAddress", e.target.value)} />
         </SettingRow>
 
         <SettingRow label="System Shop ID" hint="Unique identifier for this terminal. Used for mobile app pairing.">
@@ -566,13 +604,15 @@ export default function Settings() {
         <SectionTitle icon="" title="Billing Details" />
 
         <SettingRow label="GST Number">
-          <input style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: ".05em" }} value={cfg.gstNumber} onChange={e => set("gstNumber", e.target.value.toUpperCase())} placeholder="22AAAAA0000A1Z5" />
+          <input style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: ".05em" }} value={cfg.gstNumber} onChange={e => set("gstNumber", e.target.value.toUpperCase())} />
         </SettingRow>
 
 
         {/* ── TAX REPORT ── */}
-        <SectionTitle icon="📊" title="Monthly Tax Report" />
-        <div style={{ padding: "16px 0" }}>
+        {!!cfg.gstNumber && (
+          <>
+            <SectionTitle icon="📊" title="Monthly Tax Report" />
+            <div style={{ padding: "16px 0" }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
             <select 
               value={taxMonth} 
@@ -756,6 +796,8 @@ export default function Settings() {
             </div>
           )}
         </div>
+        </>
+        )}
 
         {/* ── UPI PAYMENT SETTINGS ── */}
         <SectionTitle icon="" title="UPI Payment (QR Code)" />
@@ -846,7 +888,7 @@ export default function Settings() {
         <SectionTitle icon="" title="Automation & Notifications" />
 
         <SettingRow label="Owner WhatsApp Number" hint="For automated stock/expiry alerts via WhatsApp">
-          <input style={inputStyle} value={cfg.ownerPhone} onChange={e => set("ownerPhone", e.target.value)} placeholder="919876543210 (with country code)" />
+          <input style={inputStyle} value={cfg.ownerPhone} onChange={e => set("ownerPhone", e.target.value)} />
         </SettingRow>
 
         <SettingRow label="WhatsApp Alerts" hint="Send automated alerts for low stock, out of stock, and expiry">

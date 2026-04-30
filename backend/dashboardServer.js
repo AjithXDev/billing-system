@@ -155,7 +155,7 @@ async function syncStatsToSupabase() {
     const weeklyBreakdown = db.prepare("SELECT strftime('%W',created_at,'localtime') as week, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE strftime('%Y-%m',created_at,'localtime')=strftime('%Y-%m','now','localtime') GROUP BY week ORDER BY week ASC").all();
     const peakHoursData = db.prepare("SELECT strftime('%H',created_at,'localtime') as hour, COUNT(*) as bills, COALESCE(SUM(total_amount),0) as revenue FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY hour ORDER BY bills DESC LIMIT 24").all();
     const paymentBreakdownData = db.prepare("SELECT payment_mode, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total FROM invoices WHERE created_at>=datetime('now','-30 days') GROUP BY payment_mode ORDER BY cnt DESC").all();
-    const deadStockData = db.prepare("SELECT name, quantity FROM products WHERE quantity>0 AND id NOT IN (SELECT DISTINCT product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-" + deadDays + " days'))").all();
+    const deadStockData = db.prepare("SELECT p.id as local_id, p.name, p.quantity FROM products p WHERE p.quantity>0 AND p.created_at <= datetime('now','-" + deadDays + " days') AND p.id NOT IN (SELECT DISTINCT ii.product_id FROM invoice_items ii JOIN invoices inv ON ii.invoice_id=inv.id WHERE inv.created_at>=datetime('now','-" + deadDays + " days'))").all();
     const lowStockProducts = db.prepare("SELECT name, quantity, unit FROM products WHERE quantity>0 AND quantity<=? ORDER BY quantity ASC LIMIT 30").all(lowThreshold);
     const outOfStockProducts = db.prepare("SELECT name, unit FROM products WHERE quantity<=0 LIMIT 30").all();
     const expiredProducts = db.prepare("SELECT name, expiry_date, quantity FROM products WHERE expiry_date IS NOT NULL AND expiry_date<? ORDER BY expiry_date ASC LIMIT 30").all(today);
@@ -240,12 +240,45 @@ async function syncStatsToSupabase() {
         const products = db.prepare("SELECT * FROM products").all();
         if (products.length > 0) {
           for (let i = 0; i < products.length; i += 50) {
-            const chunk = products.slice(i, i + 50).map(p => {
-               const { id, is_synced, ...rest } = p;
-               return { ...rest, local_id: id, updated_at: new Date().toISOString() };
-            });
-            const { error: prodErr } = await shopSupabase.from('products').upsert(chunk, { onConflict: 'local_id' });
-            if (prodErr) console.error("[ShopSync] 🛒 Product Error:", prodErr.message);
+            let chunk = products.slice(i, i + 50).map(p => ({
+                local_id: p.id,
+                name: p.name,
+                category_id: p.category_id,
+                category_name: p.category_name,
+                gst_rate: p.gst_rate || 0,
+                product_code: p.product_code,
+                price_type: p.price_type || 'exclusive',
+                price: p.price,
+                cost_price: p.cost_price || 0,
+                quantity: p.quantity,
+                unit: p.unit,
+                barcode: p.barcode,
+                expiry_date: p.expiry_date,
+                default_discount: p.default_discount || 0,
+                weight: p.weight,
+                brand: p.brand,
+                product_type: p.product_type || 'packaged',
+                stock_unit: p.stock_unit,
+                updated_at: new Date().toISOString()
+            }));
+            // Smart retry: auto-strip missing columns
+            let success = false;
+            for (let attempt = 0; attempt < 5; attempt++) {
+              const { error: prodErr } = await shopSupabase.from('products').upsert(chunk, { onConflict: 'local_id' });
+              if (!prodErr) { success = true; break; }
+              const errMsg = prodErr.message || '';
+              const colMatch = errMsg.match(/column\s+"?([a-z_]+)"?\s/i)
+                            || errMsg.match(/"([a-z_]+)"\s.*not\s.*found/i)
+                            || errMsg.match(/Could not find.*'([a-z_]+)'/i);
+              if (colMatch && colMatch[1]) {
+                const badCol = colMatch[1];
+                console.warn(`[ShopSync] Column "${badCol}" missing, removing and retrying...`);
+                chunk = chunk.map(row => { const { [badCol]: _, ...rest } = row; return rest; });
+              } else {
+                console.error("[ShopSync] 🛒 Product Error:", errMsg);
+                break;
+              }
+            }
           }
         }
 
@@ -650,13 +683,15 @@ function startDashboardServer(mainWindow) {
         GROUP BY payment_mode ORDER BY cnt DESC
       `).all();
 
-      // Dead Stock (No sales in 60 days)
+      // Dead Stock
+      const deadDays = settings.deadStockThresholdDays || 30;
       const deadStock = db.prepare(`
-        SELECT name, quantity FROM products
-        WHERE quantity > 0 AND id NOT IN (
-          SELECT DISTINCT product_id FROM invoice_items ii
+        SELECT p.id as local_id, p.name, p.quantity FROM products p
+        WHERE p.quantity > 0 AND p.created_at <= datetime('now', '-${deadDays} days')
+        AND p.id NOT IN (
+          SELECT DISTINCT ii.product_id FROM invoice_items ii
           JOIN invoices inv ON ii.invoice_id = inv.id
-          WHERE inv.created_at >= datetime('now', '-60 days')
+          WHERE inv.created_at >= datetime('now', '-${deadDays} days')
         )
       `).all();
 
@@ -771,6 +806,7 @@ function startDashboardServer(mainWindow) {
         SELECT p.*,c.name as category_name
         FROM products p LEFT JOIN categories c ON p.category_id=c.id
         WHERE p.quantity>0
+        AND p.created_at <= datetime('now','-30 days')
         AND p.id NOT IN (
           SELECT DISTINCT ii.product_id FROM invoice_items ii
           INNER JOIN invoices inv ON ii.invoice_id=inv.id
@@ -836,7 +872,8 @@ function startDashboardServer(mainWindow) {
       // 5. Dead Stock: Products with quantity > 0 but no sales in last 60 days
       const deadStock = db.prepare(`
         SELECT name, quantity, unit, price FROM products
-        WHERE quantity > 0 AND id NOT IN (
+        WHERE quantity > 0 AND created_at <= datetime('now', '-60 days')
+        AND id NOT IN (
           SELECT DISTINCT product_id FROM invoice_items ii
           JOIN invoices inv ON ii.invoice_id = inv.id
           WHERE inv.created_at >= datetime('now', '-60 days')
